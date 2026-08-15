@@ -26,6 +26,7 @@
     uniqueFilters,
     type AppRoute,
   } from "./lib/routes";
+  import { treeAncestorIds } from "./lib/tree";
 
   type ViewState = {
     app: "mqtt-telemetry";
@@ -48,6 +49,7 @@
   let selectedTopicId = $state("");
   let selectedMessageId = $state<number | null>(null);
   let selectedField = $state<JsonPath>([]);
+  let fieldByTopic = new Map<string, string>();
   let topicExpanded = $state(new Set<string>());
   let jsonExpanded = $state(new Set<string>(["$"]));
   let status = $state("Idle");
@@ -88,21 +90,29 @@
   );
 
   $effect(() => {
-    const message = currentMessage;
-    if (message?.payload.kind !== "json") {
+    const topic = selectedTopic;
+    if (!topic) {
       selectedField = [];
       return;
     }
-    const resolved = resolveJsonPointer(
-      message.payload.value,
-      route.fieldPointer,
-    );
+    const pointer =
+      route.selectedTopic === topic
+        ? route.fieldPointer
+        : (fieldByTopic.get(topic) ?? "");
+    fieldByTopic.set(topic, pointer);
+    let resolved: JsonPath | undefined;
+    for (let index = currentHistory.length - 1; index >= 0; index -= 1) {
+      const payload = currentHistory[index].payload;
+      if (payload.kind !== "json") continue;
+      resolved = resolveJsonPointer(payload.value, pointer);
+      if (resolved) break;
+    }
     if (resolved) {
       if (jsonPointer(resolved) !== jsonPointer(selectedField))
         selectedField = resolved;
-    } else if (route.fieldPointer) {
+      revealJson(jsonPointer(resolved) || "$");
+    } else {
       selectedField = [];
-      replaceRoute({ ...route, fieldPointer: "" }, selectedMessageId);
     }
   });
 
@@ -163,6 +173,7 @@
     selectedTopicId = "";
     selectedMessageId = null;
     selectedField = [];
+    fieldByTopic = new Map();
     topicExpanded = new Set();
     jsonExpanded = new Set(["$"]);
     viewToken = crypto.randomUUID();
@@ -298,8 +309,26 @@
   function selectTopic(id: string) {
     const topic = store.topic(id);
     if (topic === undefined) return;
+    const pointer =
+      fieldByTopic.get(topic) ??
+      fieldByTopic.get(selectedTopic) ??
+      route.fieldPointer;
+    const unchanged =
+      id === selectedTopicId &&
+      selectedMessageId === null &&
+      route.selectedTopic === topic &&
+      route.fieldPointer === pointer;
+    fieldByTopic.set(topic, pointer);
     selectLoadedTopic(id, true);
-    writeRoute({ ...route, selectedTopic: topic, fieldPointer: "" }, null);
+    if (!unchanged)
+      writeRoute(
+        { ...route, selectedTopic: topic, fieldPointer: pointer },
+        null,
+      );
+  }
+
+  function openTopic(id: string) {
+    if (topicSnapshot.nodes.get(id)?.children.length) toggleTopic(id, true);
   }
 
   function toggleTopic(id: string, open: boolean) {
@@ -312,11 +341,20 @@
   function selectJson(id: string) {
     const path = jsonSnapshot?.paths.get(id);
     if (!path) return;
+    const pointer = jsonPointer(path);
     selectedField = path;
-    writeRoute(
-      { ...route, fieldPointer: jsonPointer(path) },
-      selectedMessageId,
-    );
+    fieldByTopic.set(selectedTopic, pointer);
+    revealJson(id);
+    if (route.fieldPointer !== pointer)
+      writeRoute({ ...route, fieldPointer: pointer }, selectedMessageId);
+  }
+
+  function revealJson(id: string) {
+    const ancestors = jsonSnapshot
+      ? treeAncestorIds(id, jsonSnapshot.nodes)
+      : [];
+    if (ancestors.some((ancestor) => !jsonExpanded.has(ancestor)))
+      jsonExpanded = new Set([...jsonExpanded, ...ancestors]);
   }
 
   function toggleJson(id: string, open: boolean) {
@@ -414,6 +452,7 @@
             label="MQTT topics"
             onselect={selectTopic}
             ontoggle={toggleTopic}
+            onactivate={openTopic}
           />
         {:else}
           <p class="empty">Waiting for messages…</p>

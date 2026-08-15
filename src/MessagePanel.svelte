@@ -58,16 +58,24 @@
 
 <style>
   .message-panel {
-    min-height: 8rem;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
   }
 
   .message-tree {
-    max-height: 16rem;
+    min-height: 0;
     overflow: auto;
   }
 
   pre {
-    max-height: 16rem;
+    min-height: 0;
     overflow: auto;
+  }
+
+  @media (max-width: 800px) {
+    .message-panel {
+      min-height: 12rem;
+    }
   }
 </style>

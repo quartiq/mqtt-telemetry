@@ -79,6 +79,10 @@ describe("topic history", () => {
     const a = store.nodeId("a") as string;
     expect(store.history(a)).toHaveLength(1);
     expect(snapshot.nodes.get(a)?.children).toHaveLength(1);
+    expect(snapshot.nodes.get(a)?.value).toBe("2 msgs");
+    expect(snapshot.nodes.get(store.nodeId("a/b") as string)?.value).toBe(
+      "1 msg",
+    );
     expect(snapshot.roots.map((id) => snapshot.nodes.get(id)?.label)).toEqual([
       "(empty)",
       "a",

@@ -11,6 +11,7 @@
     expanded: Set<string>;
     onselect: (id: string) => void;
     ontoggle: (id: string, open: boolean) => void;
+    onactivate?: (id: string) => void;
     move: (id: string, direction: TreeDirection) => void;
     depth?: number;
     index?: number;
@@ -24,6 +25,7 @@
     expanded,
     onselect,
     ontoggle,
+    onactivate,
     move,
     depth = 0,
     index = 1,
@@ -36,6 +38,16 @@
   function toggle(event: MouseEvent) {
     event.stopPropagation();
     ontoggle(node.id, !open);
+  }
+
+  function select(event: MouseEvent) {
+    event.currentTarget instanceof HTMLElement && event.currentTarget.focus();
+    onselect(node.id);
+  }
+
+  function activate() {
+    onselect(node.id);
+    onactivate?.(node.id);
   }
 
   function keydown(event: KeyboardEvent) {
@@ -53,7 +65,10 @@
     if (direction) {
       event.preventDefault();
       move(node.id, direction);
-    } else if ((event.key === "Enter" || event.key === " ") && internal) {
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      activate();
+    } else if (event.key === " " && internal) {
       event.preventDefault();
       ontoggle(node.id, !open);
     }
@@ -72,8 +87,11 @@
     role="treeitem"
     style:padding-left={`${depth}rem`}
     tabindex={active ? 0 : -1}
-    title={node.title ?? node.label}
-    onclick={() => onselect(node.id)}
+    title={onactivate
+      ? `${node.title ?? node.label}\nDouble-click or Enter to open`
+      : (node.title ?? node.label)}
+    onclick={select}
+    ondblclick={activate}
     onkeydown={keydown}
   >
     {#if internal}
@@ -105,6 +123,7 @@
             {expanded}
             {onselect}
             {ontoggle}
+            {onactivate}
             {move}
             depth={depth + 1}
             index={childIndex + 1}

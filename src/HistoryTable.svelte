@@ -17,6 +17,7 @@
 
   let { messages, selectedId, field, onselect, onlatest }: Props = $props();
   let newestFirst = $derived([...messages].reverse());
+  let activeId = $derived(selectedId ?? newestFirst[0]?.id);
 
   function timestamp(value: number): string {
     return new Date(value).toLocaleTimeString(undefined, {
@@ -26,6 +27,40 @@
       hour12: false,
       fractionalSecondDigits: 3,
     });
+  }
+
+  function selectRow(event: MouseEvent, id: number) {
+    event.currentTarget instanceof HTMLElement && event.currentTarget.focus();
+    onselect(id);
+  }
+
+  function move(id: number, key: string) {
+    const index = newestFirst.findIndex((message) => message.id === id);
+    const nextIndex =
+      key === "Home"
+        ? 0
+        : key === "End"
+          ? newestFirst.length - 1
+          : index + (key === "ArrowDown" ? 1 : -1);
+    const next =
+      newestFirst[Math.max(0, Math.min(newestFirst.length - 1, nextIndex))];
+    if (!next || next.id === id) return;
+    onselect(next.id);
+    requestAnimationFrame(() =>
+      document
+        .querySelector<HTMLElement>(`[data-history-id="${next.id}"]`)
+        ?.focus(),
+    );
+  }
+
+  function keydown(event: KeyboardEvent, id: number) {
+    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      move(id, event.key);
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onselect(id);
+    }
   }
 </script>
 
@@ -47,16 +82,12 @@
         <tbody>
           {#each newestFirst as message (message.id)}
             <tr
-              aria-selected={selectedId === message.id}
-              class:selected={selectedId === message.id}
-              tabindex="0"
-              onclick={() => onselect(message.id)}
-              onkeydown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  onselect(message.id);
-                }
-              }}
+              aria-selected={activeId === message.id}
+              class:selected={activeId === message.id}
+              data-history-id={message.id}
+              tabindex={activeId === message.id ? 0 : -1}
+              onclick={(event) => selectRow(event, message.id)}
+              onkeydown={(event) => keydown(event, message.id)}
             >
               <td
                 >{message.retained
@@ -79,7 +110,9 @@
 
 <style>
   .history-panel {
-    min-height: 10rem;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
   }
 
   header button {
@@ -92,7 +125,7 @@
   }
 
   .table-scroll {
-    max-height: 18rem;
+    min-height: 0;
     overflow: auto;
   }
 
@@ -140,5 +173,11 @@
   tbody tr.selected {
     background: var(--selected);
     box-shadow: inset 2px 0 0 var(--selected-mark);
+  }
+
+  @media (max-width: 800px) {
+    .history-panel {
+      min-height: 14rem;
+    }
   }
 </style>

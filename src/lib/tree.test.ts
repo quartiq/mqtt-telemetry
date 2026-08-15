@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TreeNodeView } from "./tree";
-import { moveTreeSelection, visibleTreeIds } from "./tree";
+import { moveTreeSelection, treeAncestorIds, visibleTreeIds } from "./tree";
 
 const nodes = new Map<string, TreeNodeView>([
   ["a", { id: "a", label: "a", children: ["a/1", "a/2"] }],
@@ -26,5 +26,10 @@ describe("tree navigation", () => {
     expect(moveTreeSelection("a/2", "parent", visible, nodes)).toBe("a");
     expect(moveTreeSelection("a/2", "next", visible, nodes)).toBe("b");
     expect(moveTreeSelection("a", "last", visible, nodes)).toBe("b");
+  });
+
+  it("finds every ancestor needed to reveal a routed node", () => {
+    expect(treeAncestorIds("a/1", nodes)).toEqual(["a"]);
+    expect(treeAncestorIds("a", nodes)).toEqual([]);
   });
 });

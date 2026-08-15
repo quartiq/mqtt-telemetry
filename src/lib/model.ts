@@ -82,11 +82,6 @@ export function formatPayload(payload: Payload): string {
   }
 }
 
-export function previewPayload(payload: Payload, limit = 80): string {
-  const value = formatPayload(payload).replaceAll(/\s+/g, " ");
-  return value.length > limit ? `${value.slice(0, limit - 1)}…` : value;
-}
-
 export function getJsonPath(
   root: JsonValue,
   path: JsonPath,
@@ -280,20 +275,14 @@ export class TelemetryStore {
   }
 
   snapshot(): TopicSnapshot {
-    const stats = new Map<string, { topics: number; messages: number }>();
-    const count = (id: string): { topics: number; messages: number } => {
+    const stats = new Map<string, number>();
+    const count = (id: string): number => {
       const cached = stats.get(id);
-      if (cached) return cached;
+      if (cached !== undefined) return cached;
       const node = this.nodes.get(id) as TopicNode;
       const total = [...node.children].reduce(
-        (sum, child) => {
-          const below = count(child);
-          return {
-            topics: sum.topics + below.topics,
-            messages: sum.messages + below.messages,
-          };
-        },
-        { topics: node.history.length ? 1 : 0, messages: node.history.length },
+        (sum, child) => sum + count(child),
+        node.history.length,
       );
       stats.set(id, total);
       return total;
@@ -306,16 +295,13 @@ export class TelemetryStore {
           this.nodes.get(right)?.label ?? "",
         ),
       );
-      const latest = node.history.at(-1);
-      const totals = count(node.id);
+      const messages = count(node.id);
       views.set(node.id, {
         id: node.id,
         label: node.label,
         ...(node.parent ? { parent: node.parent } : {}),
         children,
-        value: latest
-          ? previewPayload(latest.payload)
-          : `${totals.topics} topics, ${totals.messages} messages`,
+        value: `${messages.toLocaleString()} ${messages === 1 ? "msg" : "msgs"}`,
         title: node.topic,
       });
     }

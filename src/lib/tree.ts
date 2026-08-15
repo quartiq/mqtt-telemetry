@@ -17,6 +17,19 @@ export type TreeDirection =
   | "pageNext"
   | "pagePrevious";
 
+export function treeAncestorIds(
+  id: string,
+  nodes: Map<string, TreeNodeView>,
+): string[] {
+  const ancestors: string[] = [];
+  let parent = nodes.get(id)?.parent;
+  while (parent) {
+    ancestors.push(parent);
+    parent = nodes.get(parent)?.parent;
+  }
+  return ancestors;
+}
+
 export function visibleTreeIds(
   roots: string[],
   nodes: Map<string, TreeNodeView>,

@@ -15,11 +15,11 @@ The connection form accepts one MQTT subscription filter per line and defaults t
 
 ## Browsing
 
-The topic tree is populated as messages arrive. Select a topic to see its newest message and history. Select a JSON field in the message tree to show that field in every history row and plot its finite numeric values. Retained replays are visible in history but excluded from the plot because their original publication time is unknown.
+The topic tree is populated as messages arrive. A click selects a topic; double-click or **Enter** opens a branch. Use the caret or **Space** to fold a branch and the arrow, **Home**, **End**, **Page Up**, and **Page Down** keys to move through a tree. Select a JSON field in the message tree to show that field in every history row and plot its finite numeric values. The last field is remembered for each topic, and a field carried to a new topic remains selected when that topic has the same JSON path. Retained replays are visible in history but excluded from the plot because their original publication time is unknown.
 
-The newest message is followed automatically. Selecting a history row freezes that message for inspection; **Latest** resumes following incoming messages.
+The newest message is followed automatically. Selecting a history row freezes that message for inspection; **Up**, **Down**, **Home**, and **End** move through history without adding every row to the Tab order. **Latest** resumes following incoming messages.
 
-Browser Back and Forward traverse connection, topic, historical-message, and field choices. Broker, subscriptions, selected topic, and selected field are encoded in the URL. Historical-message selection remains page-session state because message history is not persisted across reloads.
+Browser Back and Forward traverse connection, topic, historical-message, and field choices. Broker, subscriptions, selected topic, and selected field are encoded in the URL. Opening such a URL reveals the selected field in the JSON tree. Historical-message selection remains page-session state because message history is not persisted across reloads.
 
 ## URL parameters
 

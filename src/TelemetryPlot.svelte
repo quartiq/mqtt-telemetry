@@ -103,14 +103,16 @@
 
 <style>
   .plot-panel {
-    min-height: 12rem;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
   }
 
   svg {
     color: var(--muted);
     display: block;
-    height: auto;
-    max-height: 18rem;
+    height: 100%;
+    min-height: 0;
     width: 100%;
   }
 
@@ -147,5 +149,11 @@
 
   .y-label {
     text-anchor: end;
+  }
+
+  @media (max-width: 800px) {
+    .plot-panel {
+      min-height: 12rem;
+    }
   }
 </style>
