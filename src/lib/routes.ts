@@ -1,0 +1,74 @@
+export const DEFAULT_HISTORY_LIMIT = 1000;
+export const DEFAULT_FILTER = "#";
+
+export type AppRoute = {
+  broker: string;
+  filters: string[];
+  historyLimit: number;
+  selectedTopic: string;
+  fieldPointer: string;
+};
+
+export function uniqueFilters(filters: Iterable<string>): string[] {
+  const unique = [...new Set([...filters].filter((filter) => filter !== ""))];
+  return unique.length ? unique : [DEFAULT_FILTER];
+}
+
+export function parseHistoryLimit(value: string | null): number {
+  if (!value || !/^[1-9]\d*$/.test(value)) return DEFAULT_HISTORY_LIMIT;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : DEFAULT_HISTORY_LIMIT;
+}
+
+export function readRoute(search: string): AppRoute {
+  const params = new URLSearchParams(search);
+  const fieldPointer = params.get("field") ?? "";
+  return {
+    broker: params.get("broker")?.trim() ?? "",
+    filters: uniqueFilters(params.getAll("topic")),
+    historyLimit: parseHistoryLimit(params.get("history")),
+    selectedTopic: params.get("selected") ?? "",
+    fieldPointer:
+      !fieldPointer || fieldPointer.startsWith("/") ? fieldPointer : "",
+  };
+}
+
+export function routeSearch(route: AppRoute): string {
+  const params = new URLSearchParams();
+  if (route.broker) params.set("broker", route.broker);
+  for (const filter of uniqueFilters(route.filters))
+    params.append("topic", filter);
+  if (route.historyLimit !== DEFAULT_HISTORY_LIMIT) {
+    params.set("history", String(route.historyLimit));
+  }
+  if (route.selectedTopic) params.set("selected", route.selectedTopic);
+  if (route.fieldPointer) params.set("field", route.fieldPointer);
+  return `?${params.toString()}`;
+}
+
+export function isWebSocketBroker(
+  value: string,
+  pageProtocol = globalThis.location?.protocol ?? "http:",
+): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return "Enter a complete ws:// or wss:// broker URL.";
+  }
+  if (url.protocol !== "ws:" && url.protocol !== "wss:") {
+    return "Browsers can connect to MQTT only over ws:// or wss:// WebSockets.";
+  }
+  if (pageProtocol === "https:" && url.protocol === "ws:") {
+    return "An HTTPS page cannot connect to a ws:// broker. Use wss:// or open the app over HTTP.";
+  }
+  return undefined;
+}
+
+export function connectionKey(route: AppRoute): string {
+  return JSON.stringify([
+    route.broker,
+    uniqueFilters(route.filters),
+    route.historyLimit,
+  ]);
+}

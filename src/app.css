@@ -1,0 +1,232 @@
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light dark;
+  font: menu;
+}
+
+body {
+  --bg: Canvas;
+  --panel: color-mix(in srgb, CanvasText 2%, Canvas);
+  --fg: CanvasText;
+  --muted: color-mix(in srgb, CanvasText 62%, Canvas);
+  --border: color-mix(in srgb, CanvasText 20%, Canvas);
+  --hover: color-mix(in srgb, CanvasText 5%, Canvas);
+  --selected: color-mix(in srgb, Highlight 10%, transparent);
+  --selected-mark: Highlight;
+  --focus: Highlight;
+  --plot: color-mix(in srgb, #2da44e 85%, CanvasText);
+  --error: color-mix(in srgb, red 78%, CanvasText);
+  --space: 0.6rem;
+  --space-tight: 0.3rem;
+  --line: 1.6rem;
+  --caret: 1rem;
+  --radius: 0.25rem;
+  --text: 1rem;
+  --text-small: 0.88rem;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: var(--text);
+  margin: 0;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  min-height: var(--line);
+}
+
+input,
+textarea {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: inherit;
+  min-width: 0;
+  padding: var(--space-tight);
+  width: 100%;
+}
+
+textarea {
+  font-family:
+    ui-monospace, "SFMono-Regular", "Cascadia Mono", "Liberation Mono",
+    monospace;
+  resize: vertical;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1,
+h2 {
+  font-size: var(--text);
+  font-weight: 600;
+}
+
+pre {
+  border-left: 2px solid var(--border);
+  font-family:
+    ui-monospace, "SFMono-Regular", "Cascadia Mono", "Liberation Mono",
+    monospace;
+  font-size: var(--text-small);
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding-left: var(--space);
+  white-space: pre-wrap;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+  padding: var(--space);
+}
+
+.panel > header {
+  align-items: baseline;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: var(--space);
+  margin-bottom: var(--space-tight);
+  min-height: var(--line);
+  min-width: 0;
+}
+
+.meta,
+.breadcrumb {
+  color: var(--muted);
+  font-size: var(--text-small);
+}
+
+.empty {
+  color: var(--muted);
+  padding-block: var(--space);
+}
+
+.browser {
+  display: grid;
+  gap: var(--space);
+  grid-template-columns: minmax(15rem, 30%) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100dvh;
+  padding: max(var(--space), env(safe-area-inset-top))
+    max(var(--space), env(safe-area-inset-right))
+    max(var(--space), env(safe-area-inset-bottom))
+    max(var(--space), env(safe-area-inset-left));
+}
+
+.app-header {
+  align-items: center;
+  display: grid;
+  gap: var(--space-tight) var(--space);
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.app-header h1,
+.breadcrumb span,
+.topics .meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity {
+  min-width: 0;
+}
+
+.breadcrumb {
+  display: flex;
+  gap: var(--space-tight);
+  min-width: 0;
+}
+
+.connection-state {
+  align-items: baseline;
+  display: flex;
+  gap: var(--space);
+}
+
+.problem,
+.header-error {
+  color: var(--error);
+}
+
+.header-error {
+  font-size: var(--text-small);
+  font-weight: 500;
+  grid-column: 1 / -1;
+}
+
+.topics {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.topics .meta {
+  margin-left: auto;
+}
+
+.topic-tree {
+  min-height: 0;
+  overflow: auto;
+}
+
+.count {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.details {
+  display: grid;
+  gap: var(--space);
+  min-height: 0;
+  overflow: auto;
+}
+
+@media (min-width: 801px) {
+  .details {
+    grid-template-rows: auto minmax(10rem, 1fr) auto;
+  }
+}
+
+@media (max-width: 800px) {
+  .browser {
+    display: block;
+    height: auto;
+  }
+
+  .browser > * + * {
+    margin-top: var(--space);
+  }
+
+  .topics {
+    max-height: 45svh;
+  }
+
+  .app-header {
+    grid-template-columns: 1fr;
+  }
+
+  .connection-state {
+    justify-content: space-between;
+  }
+}
