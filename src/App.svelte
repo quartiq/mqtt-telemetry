@@ -327,8 +327,9 @@
       );
   }
 
-  function openTopic(id: string) {
-    if (topicSnapshot.nodes.get(id)?.children.length) toggleTopic(id, true);
+  function activateTopic(id: string) {
+    if (topicSnapshot.nodes.get(id)?.children.length)
+      toggleTopic(id, !topicExpanded.has(id));
   }
 
   function toggleTopic(id: string, open: boolean) {
@@ -452,7 +453,7 @@
             label="MQTT topics"
             onselect={selectTopic}
             ontoggle={toggleTopic}
-            onactivate={openTopic}
+            onactivate={activateTopic}
           />
         {:else}
           <p class="empty">Waiting for messages…</p>

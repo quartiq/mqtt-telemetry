@@ -50,6 +50,11 @@
     onactivate?.(node.id);
   }
 
+  function doubleClick(event: MouseEvent) {
+    event.preventDefault();
+    activate();
+  }
+
   function keydown(event: KeyboardEvent) {
     const directions: Record<string, TreeDirection> = {
       ArrowDown: "next",
@@ -83,15 +88,16 @@
     aria-selected={active}
     aria-setsize={size}
     class:active
+    class:activatable={Boolean(onactivate)}
     data-tree-id={node.id}
     role="treeitem"
     style:padding-left={`${depth}rem`}
     tabindex={active ? 0 : -1}
     title={onactivate
-      ? `${node.title ?? node.label}\nDouble-click or Enter to open`
+      ? `${node.title ?? node.label}\nDouble-click or Enter to toggle a branch`
       : (node.title ?? node.label)}
     onclick={select}
-    ondblclick={activate}
+    ondblclick={doubleClick}
     onkeydown={keydown}
   >
     {#if internal}
@@ -166,6 +172,10 @@
   .active {
     background: var(--selected);
     box-shadow: inset 2px 0 0 var(--selected-mark);
+  }
+
+  .activatable {
+    user-select: none;
   }
 
   .caret,
