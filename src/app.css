@@ -186,6 +186,11 @@ pre {
   margin-left: auto;
 }
 
+.topics .problem {
+  margin-left: 0;
+  white-space: nowrap;
+}
+
 .topic-tree {
   min-height: 0;
   overflow: auto;

@@ -46,6 +46,19 @@ export function visibleTreeIds(
   return visible;
 }
 
+export function treeTabStopId(
+  selected: string,
+  visible: string[],
+  nodes: Map<string, TreeNodeView>,
+): string {
+  let candidate = selected;
+  while (candidate) {
+    if (visible.includes(candidate)) return candidate;
+    candidate = nodes.get(candidate)?.parent ?? "";
+  }
+  return visible[0] ?? "";
+}
+
 export function moveTreeSelection(
   current: string,
   direction: TreeDirection,

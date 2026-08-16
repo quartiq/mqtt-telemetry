@@ -1,4 +1,5 @@
 export const DEFAULT_HISTORY_LIMIT = 1000;
+export const MAX_HISTORY_LIMIT = 10_000;
 export const DEFAULT_FILTER = "#";
 
 export type AppRoute = {
@@ -17,7 +18,9 @@ export function uniqueFilters(filters: Iterable<string>): string[] {
 export function parseHistoryLimit(value: string | null): number {
   if (!value || !/^[1-9]\d*$/.test(value)) return DEFAULT_HISTORY_LIMIT;
   const parsed = Number(value);
-  return Number.isSafeInteger(parsed) ? parsed : DEFAULT_HISTORY_LIMIT;
+  return Number.isSafeInteger(parsed)
+    ? Math.min(parsed, MAX_HISTORY_LIMIT)
+    : DEFAULT_HISTORY_LIMIT;
 }
 
 export function readRoute(search: string): AppRoute {

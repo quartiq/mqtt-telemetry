@@ -24,16 +24,18 @@ export type SessionCallbacks = {
 export type SessionAuth = { username: string; password: string };
 
 export function clientOptions(auth?: Partial<SessionAuth>): IClientOptions {
+  const username = auth?.username ?? "";
+  const password = auth?.password ?? "";
   return {
     clean: true,
-    clientId: `mqtt-telemetry-${crypto.randomUUID()}`,
+    clientId: `mqtttelemetry${crypto.randomUUID().replaceAll("-", "").slice(0, 10)}`,
     connectTimeout: 5000,
     protocolVersion: 4,
     queueQoSZero: false,
     reconnectPeriod: 0,
     resubscribe: true,
-    ...(auth?.username ? { username: auth.username } : {}),
-    ...(auth?.password ? { password: auth.password } : {}),
+    ...(username || password ? { username } : {}),
+    ...(password ? { password } : {}),
   };
 }
 

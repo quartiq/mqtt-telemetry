@@ -8,7 +8,8 @@ export type JsonPath = (string | number)[];
 export type Payload =
   | { kind: "json"; value: JsonValue }
   | { kind: "text"; value: string }
-  | { kind: "binary"; value: Uint8Array };
+  | { kind: "binary"; value: Uint8Array }
+  | { kind: "omitted"; value: string };
 
 export type TelemetryMessage = {
   id: number;
@@ -31,6 +32,8 @@ type TopicNode = {
 export type TopicSnapshot = {
   roots: string[];
   nodes: Map<string, TreeNodeView>;
+  droppedMessages: number;
+  omittedPayloads: number;
 };
 
 export type JsonSnapshot = {
@@ -40,6 +43,16 @@ export type JsonSnapshot = {
 };
 
 export type PlotPoint = { x: number; y: number };
+
+export type StoreLimits = {
+  maxTopicNodes: number;
+  maxPayloadBytes: number;
+};
+
+export const DEFAULT_STORE_LIMITS: StoreLimits = {
+  maxTopicNodes: 10_000,
+  maxPayloadBytes: 1024 * 1024,
+};
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -79,6 +92,8 @@ export function formatPayload(payload: Payload): string {
       return Array.from(payload.value, (byte) =>
         byte.toString(16).padStart(2, "0"),
       ).join(" ");
+    case "omitted":
+      return payload.value;
   }
 }
 
@@ -149,8 +164,9 @@ export function fieldLabel(path: JsonPath): string {
 
 export function selectedMessageValue(
   message: TelemetryMessage,
-  path: JsonPath,
+  path: JsonPath | undefined,
 ): string {
+  if (!path) return "—";
   if (message.payload.kind !== "json")
     return path.length ? "—" : formatPayload(message.payload);
   const value = getJsonPath(message.payload.value, path);
@@ -210,19 +226,30 @@ export class TelemetryStore {
   readonly nodes = new Map<string, TopicNode>();
   private readonly topics = new Map<string, string>();
   private sequence = 0;
+  private droppedMessages = 0;
+  private omittedPayloads = 0;
 
-  constructor(readonly historyLimit: number) {}
+  constructor(
+    readonly historyLimit: number,
+    private readonly limits: StoreLimits = DEFAULT_STORE_LIMITS,
+  ) {}
 
   add(
     topic: string,
     payload: Uint8Array,
     metadata: { receivedAt: number; retained: boolean; qos: 0 | 1 | 2 },
-  ): { nodeId: string; message: TelemetryMessage } {
+  ): { nodeId: string; message: TelemetryMessage } | undefined {
     const parts = topic.split("/");
+    const ids = parts.map((_, index) => topicId(parts.slice(0, index + 1)));
+    const missing = ids.filter((id) => !this.nodes.has(id)).length;
+    if (this.nodes.size + missing > this.limits.maxTopicNodes) {
+      this.droppedMessages += 1;
+      return undefined;
+    }
     let parent: string | undefined;
     for (let index = 0; index < parts.length; index += 1) {
       const currentParts = parts.slice(0, index + 1);
-      const id = topicId(currentParts);
+      const id = ids[index];
       if (!this.nodes.has(id)) {
         this.nodes.set(id, {
           id,
@@ -238,16 +265,23 @@ export class TelemetryStore {
     }
     const nodeId = parent as string;
     const node = this.nodes.get(nodeId) as TopicNode;
+    let parsed: Payload;
+    if (payload.byteLength > this.limits.maxPayloadBytes) {
+      this.omittedPayloads += 1;
+      parsed = {
+        kind: "omitted",
+        value: `[payload omitted: ${payload.byteLength.toLocaleString()} bytes exceeds the ${this.limits.maxPayloadBytes.toLocaleString()} byte limit]`,
+      };
+    } else {
+      parsed = parsePayload(payload);
+    }
     const message: TelemetryMessage = {
       id: ++this.sequence,
       ...metadata,
       bytes: payload.byteLength,
-      payload: parsePayload(payload),
+      payload: parsed,
     };
-    node.history.push(message);
-    if (node.history.length > this.historyLimit) {
-      node.history.splice(0, node.history.length - this.historyLimit);
-    }
+    node.history = [...node.history, message].slice(-this.historyLimit);
     this.topics.set(topic, nodeId);
     return { nodeId, message };
   }
@@ -296,20 +330,28 @@ export class TelemetryStore {
         ),
       );
       const messages = count(node.id);
+      const displayedMessages = node.history.length || messages;
       views.set(node.id, {
         id: node.id,
         label: node.label,
         ...(node.parent ? { parent: node.parent } : {}),
         children,
-        value: `${messages.toLocaleString()} ${messages === 1 ? "msg" : "msgs"}`,
-        title: node.topic,
+        value: `${displayedMessages.toLocaleString()} ${displayedMessages === 1 ? "msg" : "msgs"}`,
+        title: node.children.size
+          ? `${node.topic}\n${node.history.length.toLocaleString()} direct; ${messages.toLocaleString()} in subtree`
+          : node.topic,
       });
     }
     const roots = [...this.nodes.values()]
       .filter((node) => !node.parent)
       .sort((left, right) => left.label.localeCompare(right.label))
       .map((node) => node.id);
-    return { roots, nodes: views };
+    return {
+      roots,
+      nodes: views,
+      droppedMessages: this.droppedMessages,
+      omittedPayloads: this.omittedPayloads,
+    };
   }
 }
 

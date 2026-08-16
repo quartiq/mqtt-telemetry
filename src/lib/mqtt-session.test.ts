@@ -61,7 +61,12 @@ describe("MQTT session", () => {
       username: "user",
       password: "secret",
     });
-    expect(options.clientId).toMatch(/^mqtt-telemetry-/);
+    expect(options.clientId).toMatch(/^mqtttelemetry[a-f0-9]{10}$/);
+    expect(options.clientId).toHaveLength(23);
+    expect(clientOptions({ password: "secret" })).toMatchObject({
+      username: "",
+      password: "secret",
+    });
   });
 
   it("subscribes filters together and reports messages and reconnect state", async () => {

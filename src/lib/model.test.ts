@@ -62,7 +62,9 @@ describe("topic history", () => {
     const store = new TelemetryStore(2);
     store.add("a", encode("1"), { receivedAt: 1, retained: false, qos: 0 });
     store.add("a", encode("2"), { receivedAt: 2, retained: false, qos: 1 });
+    const before = store.history(store.nodeId("a") as string);
     store.add("a", encode("3"), { receivedAt: 3, retained: false, qos: 2 });
+    expect(store.history(store.nodeId("a") as string)).not.toBe(before);
     store.add("b", encode("4"), { receivedAt: 4, retained: false, qos: 0 });
     expect(
       store.history(store.nodeId("a") as string).map((entry) => entry.id),
@@ -79,7 +81,8 @@ describe("topic history", () => {
     const a = store.nodeId("a") as string;
     expect(store.history(a)).toHaveLength(1);
     expect(snapshot.nodes.get(a)?.children).toHaveLength(1);
-    expect(snapshot.nodes.get(a)?.value).toBe("2 msgs");
+    expect(snapshot.nodes.get(a)?.value).toBe("1 msg");
+    expect(snapshot.nodes.get(a)?.title).toContain("1 direct; 2 in subtree");
     expect(snapshot.nodes.get(store.nodeId("a/b") as string)?.value).toBe(
       "1 msg",
     );
@@ -87,6 +90,31 @@ describe("topic history", () => {
       "(empty)",
       "a",
     ]);
+  });
+
+  it("bounds discovered topics and omits oversized payload contents", () => {
+    const store = new TelemetryStore(10, {
+      maxTopicNodes: 2,
+      maxPayloadBytes: 3,
+    });
+    store.add("a/b", encode("1234"), {
+      receivedAt: 1,
+      retained: false,
+      qos: 0,
+    });
+    expect(
+      store.add("c", encode("1"), {
+        receivedAt: 2,
+        retained: false,
+        qos: 0,
+      }),
+    ).toBeUndefined();
+    const snapshot = store.snapshot();
+    expect(snapshot.omittedPayloads).toBe(1);
+    expect(snapshot.droppedMessages).toBe(1);
+    expect(store.history(store.nodeId("a/b") as string)[0].payload.kind).toBe(
+      "omitted",
+    );
   });
 });
 

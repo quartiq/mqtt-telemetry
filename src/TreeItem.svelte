@@ -8,6 +8,7 @@
     node: TreeNodeView;
     nodes: Map<string, TreeNodeView>;
     selected: string;
+    tabStop: string;
     expanded: Set<string>;
     onselect: (id: string) => void;
     ontoggle: (id: string, open: boolean) => void;
@@ -22,6 +23,7 @@
     node,
     nodes,
     selected,
+    tabStop,
     expanded,
     onselect,
     ontoggle,
@@ -92,7 +94,7 @@
     data-tree-id={node.id}
     role="treeitem"
     style:padding-left={`${depth}rem`}
-    tabindex={active ? 0 : -1}
+    tabindex={tabStop === node.id ? 0 : -1}
     title={onactivate
       ? `${node.title ?? node.label}\nDouble-click or Enter to toggle a branch`
       : (node.title ?? node.label)}
@@ -126,6 +128,7 @@
             node={child}
             {nodes}
             {selected}
+            {tabStop}
             {expanded}
             {onselect}
             {ontoggle}

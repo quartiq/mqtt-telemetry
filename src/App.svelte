@@ -50,6 +50,7 @@
   let selectedMessageId = $state<number | null>(null);
   let selectedField = $state<JsonPath>([]);
   let fieldByTopic = new Map<string, string>();
+  let revealedFieldKey = "";
   let topicExpanded = $state(new Set<string>());
   let jsonExpanded = $state(new Set<string>(["$"]));
   let status = $state("Idle");
@@ -58,6 +59,7 @@
   let connectSerial = 0;
   let viewToken = crypto.randomUUID();
   let lastReceivedAt = 0;
+  let renderFrame = 0;
 
   let topicSnapshot = $derived.by(() => {
     revision;
@@ -81,9 +83,21 @@
       ? jsonTree(currentMessage.payload.value)
       : undefined,
   );
-  let selectedJsonId = $derived(jsonPointer(selectedField) || "$");
-  let points = $derived(plotPoints(currentHistory, selectedField));
-  let selectedFieldLabel = $derived(fieldLabel(selectedField));
+  let activeField = $derived.by(() => {
+    if (!route.fieldPointer) return selectedField;
+    return jsonPointer(selectedField) === route.fieldPointer
+      ? selectedField
+      : undefined;
+  });
+  let selectedJsonId = $derived(
+    activeField ? jsonPointer(activeField) || "$" : route.fieldPointer,
+  );
+  let points = $derived(
+    activeField ? plotPoints(currentHistory, activeField) : [],
+  );
+  let selectedFieldLabel = $derived(
+    activeField ? fieldLabel(activeField) : route.fieldPointer || "$",
+  );
   let directTopicCount = $derived(
     [...topicSnapshot.nodes.keys()].filter((id) => store.history(id).length)
       .length,
@@ -110,9 +124,22 @@
     if (resolved) {
       if (jsonPointer(resolved) !== jsonPointer(selectedField))
         selectedField = resolved;
-      revealJson(jsonPointer(resolved) || "$");
+      const id = jsonPointer(resolved) || "$";
+      const revealKey = `${topic}\0${pointer}`;
+      if (jsonSnapshot?.nodes.has(id) && revealedFieldKey !== revealKey) {
+        revealedFieldKey = revealKey;
+        revealJson(id);
+      }
     } else {
       selectedField = [];
+    }
+  });
+
+  $effect(() => {
+    const id = selectedMessageId;
+    if (id !== null && !currentHistory.some((message) => message.id === id)) {
+      selectedMessageId = null;
+      replaceRoute(route, null);
     }
   });
 
@@ -138,6 +165,7 @@
     if (route.broker) void startConnection(route);
     return () => {
       removeEventListener("popstate", popstate);
+      if (renderFrame) cancelAnimationFrame(renderFrame);
       connectSerial += 1;
       session?.close();
     };
@@ -168,12 +196,15 @@
   }
 
   function resetData(historyLimit: number) {
+    if (renderFrame) cancelAnimationFrame(renderFrame);
+    renderFrame = 0;
     store = new TelemetryStore(historyLimit);
     revision += 1;
     selectedTopicId = "";
     selectedMessageId = null;
     selectedField = [];
     fieldByTopic = new Map();
+    revealedFieldKey = "";
     topicExpanded = new Set();
     jsonExpanded = new Set(["$"]);
     viewToken = crypto.randomUUID();
@@ -216,6 +247,14 @@
     return lastReceivedAt;
   }
 
+  function scheduleRender() {
+    if (renderFrame) return;
+    renderFrame = requestAnimationFrame(() => {
+      renderFrame = 0;
+      revision += 1;
+    });
+  }
+
   async function startConnection(nextRoute: AppRoute) {
     const serial = ++connectSerial;
     session?.close();
@@ -236,7 +275,8 @@
               retained: packet.retain,
               qos: packet.qos,
             });
-            revision += 1;
+            scheduleRender();
+            if (!added) return;
             if (route.selectedTopic === topic) {
               selectLoadedTopic(added.nodeId, false);
             } else if (!route.selectedTopic && !selectedTopicId) {
@@ -297,12 +337,15 @@
   }
 
   function selectLoadedTopic(id: string, reset: boolean) {
+    const changed = selectedTopicId !== id;
     selectedTopicId = id;
-    topicExpanded = new Set([...topicExpanded, ...store.ancestorIds(id)]);
+    if (changed || reset)
+      topicExpanded = new Set([...topicExpanded, ...store.ancestorIds(id)]);
     if (reset) {
       selectedMessageId = null;
       selectedField = [];
       jsonExpanded = new Set(["$"]);
+      revealedFieldKey = "";
     }
   }
 
@@ -345,6 +388,7 @@
     const pointer = jsonPointer(path);
     selectedField = path;
     fieldByTopic.set(selectedTopic, pointer);
+    revealedFieldKey = `${selectedTopic}\0${pointer}`;
     revealJson(id);
     if (route.fieldPointer !== pointer)
       writeRoute({ ...route, fieldPointer: pointer }, selectedMessageId);
@@ -419,13 +463,15 @@
           {#if selectedTopic}<span aria-hidden="true">›</span><span
               >{selectedTopic}</span
             >{/if}
-          {#if selectedField.length}
+          {#if route.fieldPointer}
             <span aria-hidden="true">›</span><span>{selectedFieldLabel}</span>
           {/if}
         </div>
       </div>
       <div class="connection-state">
-        <span class:problem={status !== "Connected"}>{status}</span>
+        <span aria-live="polite" class:problem={status !== "Connected"}
+          >{status}</span
+        >
         <button type="button" onclick={changeConnection}
           >Change connection</button
         >
@@ -442,6 +488,19 @@
         <span class="meta" title={route.filters.join("\n")}
           >{route.filters.join(", ")}</span
         >
+        {#if topicSnapshot.droppedMessages || topicSnapshot.omittedPayloads}
+          <span class="meta problem" title="Browser safety limits applied">
+            {#if topicSnapshot.droppedMessages}
+              {topicSnapshot.droppedMessages.toLocaleString()} dropped
+            {/if}
+            {#if topicSnapshot.droppedMessages && topicSnapshot.omittedPayloads}
+              ·
+            {/if}
+            {#if topicSnapshot.omittedPayloads}
+              {topicSnapshot.omittedPayloads.toLocaleString()} payloads omitted
+            {/if}
+          </span>
+        {/if}
       </header>
       <div class="topic-tree">
         {#if topicSnapshot.roots.length}
@@ -473,7 +532,7 @@
       <HistoryTable
         messages={currentHistory}
         selectedId={selectedMessageId}
-        field={selectedField}
+        field={activeField}
         onselect={selectHistory}
         onlatest={selectLatest}
       />

@@ -2,7 +2,7 @@
 
 <script lang="ts">
   import type { TreeDirection, TreeNodeView } from "./lib/tree";
-  import { moveTreeSelection, visibleTreeIds } from "./lib/tree";
+  import { moveTreeSelection, treeTabStopId, visibleTreeIds } from "./lib/tree";
   import TreeItem from "./TreeItem.svelte";
 
   type Props = {
@@ -28,6 +28,7 @@
   }: Props = $props();
   let focusId = $state("");
   let visible = $derived(visibleTreeIds(roots, nodes, expanded));
+  let tabStop = $derived(treeTabStopId(selected, visible, nodes));
 
   $effect(() => {
     if (!focusId) return;
@@ -65,6 +66,7 @@
         {node}
         {nodes}
         {selected}
+        {tabStop}
         {expanded}
         {onselect}
         {ontoggle}

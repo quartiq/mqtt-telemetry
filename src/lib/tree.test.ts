@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { TreeNodeView } from "./tree";
-import { moveTreeSelection, treeAncestorIds, visibleTreeIds } from "./tree";
+import {
+  moveTreeSelection,
+  treeAncestorIds,
+  treeTabStopId,
+  visibleTreeIds,
+} from "./tree";
 
 const nodes = new Map<string, TreeNodeView>([
   ["a", { id: "a", label: "a", children: ["a/1", "a/2"] }],
@@ -31,5 +36,11 @@ describe("tree navigation", () => {
   it("finds every ancestor needed to reveal a routed node", () => {
     expect(treeAncestorIds("a/1", nodes)).toEqual(["a"]);
     expect(treeAncestorIds("a", nodes)).toEqual([]);
+  });
+
+  it("keeps a visible tab stop when the selection is hidden or absent", () => {
+    const visible = ["a", "b"];
+    expect(treeTabStopId("a/1", visible, nodes)).toBe("a");
+    expect(treeTabStopId("missing", visible, nodes)).toBe("a");
   });
 });

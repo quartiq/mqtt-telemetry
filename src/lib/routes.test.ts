@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_HISTORY_LIMIT,
+  MAX_HISTORY_LIMIT,
   isWebSocketBroker,
   parseHistoryLimit,
   readRoute,
@@ -47,6 +48,7 @@ describe("route configuration", () => {
       expect(parseHistoryLimit(value)).toBe(DEFAULT_HISTORY_LIMIT);
     }
     expect(parseHistoryLimit("1")).toBe(1);
+    expect(parseHistoryLimit("100000")).toBe(MAX_HISTORY_LIMIT);
   });
 
   it("accepts WebSockets and explains browser transport constraints", () => {

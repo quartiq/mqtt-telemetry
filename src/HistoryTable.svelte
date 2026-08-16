@@ -10,7 +10,7 @@
   type Props = {
     messages: TelemetryMessage[];
     selectedId: number | null;
-    field: JsonPath;
+    field: JsonPath | undefined;
     onselect: (id: number) => void;
     onlatest: () => void;
   };
