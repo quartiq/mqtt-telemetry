@@ -157,7 +157,12 @@
           stopConnection();
         }
       } else {
+        const historyLimitChanged = next.historyLimit !== route.historyLimit;
         route = next;
+        if (historyLimitChanged) {
+          store.setHistoryLimit(next.historyLimit);
+          revision += 1;
+        }
         restoreView(event.state);
       }
     };
@@ -231,7 +236,6 @@
         status = "Reconnecting";
         break;
       case "offline":
-      case "closed":
         status = "Disconnected";
         break;
       case "error":
@@ -255,7 +259,7 @@
     });
   }
 
-  async function startConnection(nextRoute: AppRoute) {
+  function startConnection(nextRoute: AppRoute) {
     const serial = ++connectSerial;
     session?.close();
     session = undefined;
@@ -264,7 +268,7 @@
     status = "Connecting";
     error = "";
     try {
-      const nextSession = await MqttSession.connect(
+      const nextSession = MqttSession.connect(
         nextRoute.broker,
         nextRoute.filters,
         {
@@ -370,11 +374,6 @@
       );
   }
 
-  function activateTopic(id: string) {
-    if (topicSnapshot.nodes.get(id)?.children.length)
-      toggleTopic(id, !topicExpanded.has(id));
-  }
-
   function toggleTopic(id: string, open: boolean) {
     const next = new Set(topicExpanded);
     if (open) next.add(id);
@@ -417,6 +416,25 @@
   function selectLatest() {
     selectedMessageId = null;
     writeRoute(route, null);
+  }
+
+  function changeHistoryLimit(limit: number) {
+    store.setHistoryLimit(limit);
+    revision += 1;
+    const id = selectedMessageId;
+    const nextMessageId = currentHistory.some((message) => message.id === id)
+      ? id
+      : null;
+    selectedMessageId = nextMessageId;
+    writeRoute({ ...route, historyLimit: limit }, nextMessageId);
+  }
+
+  function clearHistory() {
+    if (!selectedTopicId) return;
+    store.clearHistory(selectedTopicId);
+    selectedMessageId = null;
+    revision += 1;
+    replaceRoute(route, null);
   }
 
   function restoreView(state: unknown) {
@@ -512,7 +530,6 @@
             label="MQTT topics"
             onselect={selectTopic}
             ontoggle={toggleTopic}
-            onactivate={activateTopic}
           />
         {:else}
           <p class="empty">Waiting for messages…</p>
@@ -533,8 +550,11 @@
         messages={currentHistory}
         selectedId={selectedMessageId}
         field={activeField}
+        historyLimit={route.historyLimit}
         onselect={selectHistory}
         onlatest={selectLatest}
+        onlimit={changeHistoryLimit}
+        onclear={clearHistory}
       />
       <TelemetryPlot {points} label={selectedFieldLabel} />
     </section>

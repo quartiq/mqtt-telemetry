@@ -72,6 +72,26 @@ describe("topic history", () => {
     expect(store.history(store.nodeId("b") as string)).toHaveLength(1);
   });
 
+  it("adjusts the limit immediately and clears one topic", () => {
+    const store = new TelemetryStore(3);
+    for (let receivedAt = 1; receivedAt <= 3; receivedAt += 1) {
+      store.add("a", encode(String(receivedAt)), {
+        receivedAt,
+        retained: false,
+        qos: 0,
+      });
+    }
+    store.add("b", encode("1"), { receivedAt: 1, retained: false, qos: 0 });
+
+    const a = store.nodeId("a") as string;
+    const b = store.nodeId("b") as string;
+    store.setHistoryLimit(2);
+    expect(store.history(a).map((entry) => entry.id)).toEqual([2, 3]);
+    store.clearHistory(a);
+    expect(store.history(a)).toEqual([]);
+    expect(store.history(b)).toHaveLength(1);
+  });
+
   it("represents topics that are also branches and preserves empty levels", () => {
     const store = new TelemetryStore(10);
     store.add("a", encode("1"), { receivedAt: 1, retained: false, qos: 0 });

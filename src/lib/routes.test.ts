@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_HISTORY_LIMIT,
   MAX_HISTORY_LIMIT,
+  connectionKey,
   isWebSocketBroker,
   parseHistoryLimit,
   readRoute,
@@ -29,6 +30,13 @@ describe("route configuration", () => {
       fieldPointer: "/environment/temperature",
     };
     expect(readRoute(routeSearch(expected))).toEqual(expected);
+  });
+
+  it("does not treat a live history-limit change as a new connection", () => {
+    const route = readRoute("?broker=wss://broker.example&topic=a/#");
+    expect(connectionKey({ ...route, historyLimit: 12 })).toBe(
+      connectionKey({ ...route, historyLimit: 34 }),
+    );
   });
 
   it("removes only exact duplicate and empty filters", () => {

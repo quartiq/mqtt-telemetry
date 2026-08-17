@@ -13,11 +13,13 @@ Open the printed URL and enter an MQTT-over-WebSocket broker such as `ws://local
 
 The connection form accepts one MQTT subscription filter per line and defaults to `#`. `$` topics are not matched by `#`; add a filter such as `$SYS/#` explicitly when needed.
 
+The browser keeps retrying after initial or later transport failures and resubscribes after reconnection. Changing connection explicitly stops those retries.
+
 ## Browsing
 
-The topic tree is populated as messages arrive. A click selects a topic; double-click or **Enter** toggles a branch. Use the caret or **Space** to fold a branch and the arrow, **Home**, **End**, **Page Up**, and **Page Down** keys to move through a tree. Select a JSON field in the message tree to show that field in every history row and plot its finite numeric values. The last field is remembered for each topic, and a field carried to a new topic remains selected when that topic has the same JSON path. Retained replays are visible in history but excluded from the plot because their original publication time is unknown.
+The topic tree is populated as messages arrive. Both trees use the same controls: click selects a node; double-click or **Enter** toggles a branch; the caret or **Space** also folds it; and the arrow, **Home**, **End**, **Page Up**, and **Page Down** keys move through visible nodes. Select a JSON field in the message tree to show that field in every history row and plot its finite numeric values. The last field is remembered for each topic, and a field carried to a new topic remains selected when that topic has the same JSON path. Retained replays are visible in history but excluded from the plot because their original publication time is unknown.
 
-The newest message is followed automatically. Selecting a history row freezes that message for inspection; **Up**, **Down**, **Home**, and **End** move through history without adding every row to the Tab order. **Latest** resumes following incoming messages. If a frozen message reaches the configured history limit and is evicted, the view resumes following the latest message.
+The newest message is followed automatically. Selecting a history row freezes that message for inspection; **Up**, **Down**, **Home**, and **End** move through history without adding every row to the Tab order. **Latest** resumes following incoming messages. The History header changes the per-topic limit immediately and can clear the selected topic's local browser history without publishing to the broker. If a frozen message is cleared or reaches the configured history limit and is evicted, the view resumes following the latest message.
 
 Browser Back and Forward traverse connection, topic, historical-message, and field choices. Broker, subscriptions, selected topic, and selected field are encoded in the URL. Opening such a URL reveals the selected field in the JSON tree. Historical-message selection remains page-session state because message history is not persisted across reloads.
 

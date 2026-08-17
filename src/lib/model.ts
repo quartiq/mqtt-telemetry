@@ -230,7 +230,7 @@ export class TelemetryStore {
   private omittedPayloads = 0;
 
   constructor(
-    readonly historyLimit: number,
+    private historyLimit: number,
     private readonly limits: StoreLimits = DEFAULT_STORE_LIMITS,
   ) {}
 
@@ -296,6 +296,18 @@ export class TelemetryStore {
 
   history(id: string): TelemetryMessage[] {
     return this.nodes.get(id)?.history ?? [];
+  }
+
+  setHistoryLimit(limit: number): void {
+    this.historyLimit = limit;
+    for (const node of this.nodes.values()) {
+      node.history = node.history.slice(-limit);
+    }
+  }
+
+  clearHistory(id: string): void {
+    const node = this.nodes.get(id);
+    if (node) node.history = [];
   }
 
   ancestorIds(id: string): string[] {

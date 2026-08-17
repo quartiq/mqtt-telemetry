@@ -13,19 +13,10 @@
     label: string;
     onselect: (id: string) => void;
     ontoggle: (id: string, open: boolean) => void;
-    onactivate?: (id: string) => void;
   };
 
-  let {
-    roots,
-    nodes,
-    selected,
-    expanded,
-    label,
-    onselect,
-    ontoggle,
-    onactivate,
-  }: Props = $props();
+  let { roots, nodes, selected, expanded, label, onselect, ontoggle }: Props =
+    $props();
   let focusId = $state("");
   let visible = $derived(visibleTreeIds(roots, nodes, expanded));
   let tabStop = $derived(treeTabStopId(selected, visible, nodes));
@@ -70,7 +61,6 @@
         {expanded}
         {onselect}
         {ontoggle}
-        {onactivate}
         {move}
         index={index + 1}
         size={roots.length}

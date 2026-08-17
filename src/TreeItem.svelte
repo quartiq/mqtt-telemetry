@@ -12,7 +12,6 @@
     expanded: Set<string>;
     onselect: (id: string) => void;
     ontoggle: (id: string, open: boolean) => void;
-    onactivate?: (id: string) => void;
     move: (id: string, direction: TreeDirection) => void;
     depth?: number;
     index?: number;
@@ -27,7 +26,6 @@
     expanded,
     onselect,
     ontoggle,
-    onactivate,
     move,
     depth = 0,
     index = 1,
@@ -49,12 +47,7 @@
 
   function activate() {
     onselect(node.id);
-    onactivate?.(node.id);
-  }
-
-  function doubleClick(event: MouseEvent) {
-    event.preventDefault();
-    activate();
+    if (internal) ontoggle(node.id, !open);
   }
 
   function keydown(event: KeyboardEvent) {
@@ -90,16 +83,15 @@
     aria-selected={active}
     aria-setsize={size}
     class:active
-    class:activatable={Boolean(onactivate)}
     data-tree-id={node.id}
     role="treeitem"
     style:padding-left={`${depth}rem`}
     tabindex={tabStop === node.id ? 0 : -1}
-    title={onactivate
-      ? `${node.title ?? node.label}\nDouble-click or Enter to toggle a branch`
+    title={internal
+      ? `${node.title ?? node.label}\nDouble-click or Enter to toggle this branch`
       : (node.title ?? node.label)}
     onclick={select}
-    ondblclick={doubleClick}
+    ondblclick={activate}
     onkeydown={keydown}
   >
     {#if internal}
@@ -132,7 +124,6 @@
             {expanded}
             {onselect}
             {ontoggle}
-            {onactivate}
             {move}
             depth={depth + 1}
             index={childIndex + 1}
@@ -175,10 +166,6 @@
   .active {
     background: var(--selected);
     box-shadow: inset 2px 0 0 var(--selected-mark);
-  }
-
-  .activatable {
-    user-select: none;
   }
 
   .caret,

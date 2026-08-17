@@ -6,16 +6,29 @@
     type JsonPath,
     type TelemetryMessage,
   } from "./lib/model";
+  import { MAX_HISTORY_LIMIT } from "./lib/routes";
 
   type Props = {
     messages: TelemetryMessage[];
     selectedId: number | null;
     field: JsonPath | undefined;
+    historyLimit: number;
     onselect: (id: number) => void;
     onlatest: () => void;
+    onlimit: (limit: number) => void;
+    onclear: () => void;
   };
 
-  let { messages, selectedId, field, onselect, onlatest }: Props = $props();
+  let {
+    messages,
+    selectedId,
+    field,
+    historyLimit,
+    onselect,
+    onlatest,
+    onlimit,
+    onclear,
+  }: Props = $props();
   let newestFirst = $derived([...messages].reverse());
   let activeId = $derived(selectedId ?? newestFirst[0]?.id);
 
@@ -62,6 +75,15 @@
       onselect(id);
     }
   }
+
+  function changeLimit(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    if (!input.reportValidity()) {
+      input.value = String(historyLimit);
+      return;
+    }
+    onlimit(Number(input.value));
+  }
 </script>
 
 <section class="panel history-panel">
@@ -69,9 +91,27 @@
     <h2>
       History <span class="count">({messages.length.toLocaleString()})</span>
     </h2>
-    <button disabled={selectedId === null} type="button" onclick={onlatest}
-      >Latest</button
-    >
+    <div class="controls">
+      <label title="Maximum messages kept per topic">
+        Limit
+        <input
+          aria-label="History limit"
+          max={MAX_HISTORY_LIMIT}
+          min="1"
+          onchange={changeLimit}
+          required
+          step="1"
+          type="number"
+          value={historyLimit}
+        />
+      </label>
+      <button disabled={!messages.length} type="button" onclick={onclear}
+        >Clear</button
+      >
+      <button disabled={selectedId === null} type="button" onclick={onlatest}
+        >Latest</button
+      >
+    </div>
   </header>
   {#if messages.length}
     <div class="table-scroll">
@@ -115,8 +155,25 @@
     min-height: 0;
   }
 
-  header button {
+  .controls {
+    align-items: baseline;
+    display: flex;
+    gap: var(--space-tight);
     margin-left: auto;
+  }
+
+  .controls label {
+    align-items: baseline;
+    color: var(--muted);
+    display: flex;
+    font-size: var(--text-small);
+    gap: var(--space-tight);
+  }
+
+  .controls input {
+    height: var(--line);
+    padding-block: 0;
+    width: 5.5rem;
   }
 
   .count {

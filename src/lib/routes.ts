@@ -69,9 +69,5 @@ export function isWebSocketBroker(
 }
 
 export function connectionKey(route: AppRoute): string {
-  return JSON.stringify([
-    route.broker,
-    uniqueFilters(route.filters),
-    route.historyLimit,
-  ]);
+  return JSON.stringify([route.broker, uniqueFilters(route.filters)]);
 }
