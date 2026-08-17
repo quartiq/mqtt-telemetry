@@ -89,6 +89,9 @@ describe("route configuration", () => {
     expect(isWebSocketBroker("ws://localhost:9001", "https:")).toContain(
       "HTTPS",
     );
+    expect(
+      isWebSocketBroker("wss://user:secret@broker.example", "https:"),
+    ).toContain("credentials");
     expect(isWebSocketBroker("localhost", "http:")).toContain("complete");
   });
 });

@@ -1,7 +1,7 @@
 <svelte:options runes={true} />
 
 <script lang="ts">
-  import type { PlotPoint } from "./lib/model";
+  import { downsamplePlotPoints, type PlotPoint } from "./lib/model";
 
   type Props = { points: PlotPoint[]; label: string };
   let { points, label }: Props = $props();
@@ -12,6 +12,9 @@
   const right = 12;
   const top = 14;
   const bottom = 30;
+  let displayPoints = $derived(
+    downsamplePlotPoints(points, width - left - right),
+  );
   let bounds = $derived.by(() => {
     if (points.length < 2) return undefined;
     const xMin = points[0].x;
@@ -33,7 +36,7 @@
     if (!bounds) return "";
     const plotWidth = width - left - right;
     const plotHeight = height - top - bottom;
-    return points
+    return displayPoints
       .map((point) => {
         const x =
           left +

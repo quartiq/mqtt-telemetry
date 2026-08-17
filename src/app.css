@@ -178,8 +178,28 @@ pre {
 .topics {
   display: grid;
   grid-row: 2 / -1;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
+}
+
+.topic-search {
+  align-items: baseline;
+  display: flex;
+  gap: var(--space-tight);
+  margin-bottom: var(--space-tight);
+}
+
+.topic-search input {
+  height: var(--line);
+  padding-block: 0;
+}
+
+.topic-search .meta {
+  flex: none;
+}
+
+.topic-search button {
+  flex: none;
 }
 
 .topics .meta {

@@ -26,7 +26,11 @@
     uniqueFilters,
     type AppRoute,
   } from "./lib/routes";
-  import { treeAncestorIds } from "./lib/tree";
+  import {
+    filterTree,
+    selectionAfterCollapse,
+    treeAncestorIds,
+  } from "./lib/tree";
 
   type ViewState = {
     app: "mqtt-telemetry";
@@ -52,6 +56,7 @@
   let fieldByTopic = new Map<string, string>();
   let revealedFieldKey = "";
   let topicExpanded = $state(new Set<string>());
+  let topicSearch = $state("");
   let jsonExpanded = $state(new Set<string>(["$"]));
   let status = $state("Idle");
   let error = $state("");
@@ -64,6 +69,17 @@
     revision;
     return store.snapshot();
   });
+  let topicFilter = $derived(
+    filterTree(topicSnapshot.roots, topicSnapshot.nodes, topicSearch),
+  );
+  let visibleTopics = $derived(
+    topicSearch.trim() ? topicFilter : topicSnapshot,
+  );
+  let visibleTopicExpanded = $derived(
+    topicSearch.trim()
+      ? new Set([...topicExpanded, ...topicFilter.expanded])
+      : topicExpanded,
+  );
   let selectedTopic = $derived(store.topic(selectedTopicId) ?? "");
   let currentHistory = $derived.by(() => {
     revision;
@@ -179,9 +195,11 @@
       }
     };
     addEventListener("popstate", popstate);
+    addEventListener("keydown", browserKeydown);
     if (route.broker) startConnection(route);
     return () => {
       removeEventListener("popstate", popstate);
+      removeEventListener("keydown", browserKeydown);
       if (renderFrame) cancelAnimationFrame(renderFrame);
       connectSerial += 1;
       session?.close();
@@ -223,6 +241,7 @@
     fieldByTopic = new Map();
     revealedFieldKey = "";
     topicExpanded = new Set();
+    topicSearch = "";
     jsonExpanded = new Set(["$"]);
     viewToken = crypto.randomUUID();
     lastReceivedAt = 0;
@@ -287,6 +306,7 @@
             const added = store.add(topic, payload, {
               receivedAt: receiptTime(),
               retained: packet.retain,
+              duplicate: packet.dup,
               qos: packet.qos,
             });
             scheduleRender();
@@ -383,6 +403,14 @@
   }
 
   function toggleTopic(id: string, open: boolean) {
+    if (!open) {
+      const selected = selectionAfterCollapse(
+        selectedTopicId,
+        id,
+        topicSnapshot.nodes,
+      );
+      if (selected !== selectedTopicId) selectTopic(selected);
+    }
     const next = new Set(topicExpanded);
     if (open) next.add(id);
     else next.delete(id);
@@ -410,6 +438,14 @@
   }
 
   function toggleJson(id: string, open: boolean) {
+    if (!open && jsonSnapshot) {
+      const selected = selectionAfterCollapse(
+        selectedJsonId,
+        id,
+        jsonSnapshot.nodes,
+      );
+      if (selected !== selectedJsonId) selectJson(selected);
+    }
     const next = new Set(jsonExpanded);
     if (open) next.add(id);
     else next.delete(id);
@@ -445,6 +481,14 @@
     replaceRoute(route, null);
   }
 
+  function clearTopicSubtree() {
+    if (!selectedTopicId) return;
+    store.clearSubtree(selectedTopicId);
+    selectedMessageId = null;
+    revision += 1;
+    replaceRoute(route, null);
+  }
+
   function restoreView(state: unknown) {
     const id = route.selectedTopic
       ? store.nodeId(route.selectedTopic)
@@ -464,6 +508,30 @@
     )
       ? messageId
       : null;
+  }
+
+  function topicSearchKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      topicSearch = "";
+      (event.currentTarget as HTMLInputElement).blur();
+    } else if (event.key === "Enter") {
+      const first = topicFilter.matches[0];
+      if (first) selectTopic(first);
+    }
+  }
+
+  function browserKeydown(event: KeyboardEvent) {
+    if (
+      event.key !== "/" ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.altKey ||
+      event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLTextAreaElement
+    )
+      return;
+    event.preventDefault();
+    document.querySelector<HTMLInputElement>("#topic-search")?.focus();
   }
 </script>
 
@@ -520,18 +588,42 @@
           </span>
         {/if}
       </header>
+      <div class="topic-search">
+        <input
+          aria-label="Search topic paths"
+          id="topic-search"
+          onkeydown={topicSearchKeydown}
+          placeholder="Search topics  /"
+          type="search"
+          bind:value={topicSearch}
+        />
+        {#if topicSearch.trim()}
+          <span class="meta">
+            {topicFilter.matches.length.toLocaleString()}
+            {topicFilter.matches.length === 1 ? "match" : "matches"}
+          </span>
+        {/if}
+        <button
+          disabled={!selectedTopicId}
+          title="Clear local history for the selected topic and its subtopics"
+          type="button"
+          onclick={clearTopicSubtree}>Clear subtree</button
+        >
+      </div>
       <div class="topic-tree">
-        {#if topicSnapshot.roots.length}
+        {#if visibleTopics.roots.length}
           <TreeView
-            roots={topicSnapshot.roots}
-            nodes={topicSnapshot.nodes}
+            roots={visibleTopics.roots}
+            nodes={visibleTopics.nodes}
             revision={topicSnapshot.revision}
             selected={selectedTopicId}
-            expanded={topicExpanded}
+            expanded={visibleTopicExpanded}
             label="MQTT topics"
             onselect={selectTopic}
             ontoggle={toggleTopic}
           />
+        {:else if topicSearch.trim()}
+          <p class="empty">No matching topics.</p>
         {:else}
           <p class="empty">Waiting for messages…</p>
         {/if}

@@ -15,8 +15,10 @@ export type TelemetryMessage = {
   id: number;
   receivedAt: number;
   retained: boolean;
+  duplicate: boolean;
   qos: 0 | 1 | 2;
   bytes: number;
+  unsafeIntegers: boolean;
   payload: Payload;
 };
 
@@ -95,6 +97,23 @@ export function parsePayload(bytes: Uint8Array): Payload {
   } catch {
     return { kind: "text", value: text };
   }
+}
+
+function hasUnsafeInteger(payload: Payload): boolean {
+  if (payload.kind !== "json") return false;
+  const pending: JsonValue[] = [payload.value];
+  while (pending.length) {
+    const value = pending.pop() as JsonValue;
+    if (
+      typeof value === "number" &&
+      Number.isInteger(value) &&
+      !Number.isSafeInteger(value)
+    )
+      return true;
+    if (Array.isArray(value)) pending.push(...value);
+    else if (isJsonObject(value)) pending.push(...Object.values(value));
+  }
+  return false;
 }
 
 export function formatValue(value: JsonValue): string {
@@ -207,6 +226,43 @@ export function plotPoints(
       ? [{ x: message.receivedAt, y: value }]
       : [];
   });
+}
+
+export function downsamplePlotPoints(
+  points: PlotPoint[],
+  limit: number,
+): PlotPoint[] {
+  if (points.length <= limit || limit < 4) return points;
+  const buckets = Math.max(1, Math.floor((limit - 2) / 2));
+  const sampled: PlotPoint[] = [points[0]];
+  const interior = points.length - 2;
+  for (let bucket = 0; bucket < buckets; bucket += 1) {
+    const start = 1 + Math.floor((bucket * interior) / buckets);
+    const end = 1 + Math.floor(((bucket + 1) * interior) / buckets);
+    if (start >= end) continue;
+    let low = points[start];
+    let high = low;
+    for (let index = start + 1; index < end; index += 1) {
+      const point = points[index];
+      if (point.y < low.y) low = point;
+      if (point.y > high.y) high = point;
+    }
+    if (low.x <= high.x) sampled.push(low, ...(high === low ? [] : [high]));
+    else sampled.push(high, low);
+  }
+  sampled.push(points.at(-1) as PlotPoint);
+  return sampled;
+}
+
+export function messageFrequency(history: TelemetryMessage[]): string {
+  const live = history.filter((message) => !message.retained).slice(-100);
+  if (live.length < 2) return "";
+  const seconds =
+    (live.at(-1)!.receivedAt - live[0].receivedAt) / (live.length - 1) / 1000;
+  if (!(seconds > 0)) return "";
+  if (seconds < 1)
+    return `${(1 / seconds).toLocaleString(undefined, { maximumSignificantDigits: 3 })} msg/s`;
+  return `every ${seconds.toLocaleString(undefined, { maximumSignificantDigits: 3 })} s`;
 }
 
 export function jsonTree(
@@ -329,7 +385,12 @@ export class TelemetryStore {
   add(
     topic: string,
     payload: Uint8Array,
-    metadata: { receivedAt: number; retained: boolean; qos: 0 | 1 | 2 },
+    metadata: {
+      receivedAt: number;
+      retained: boolean;
+      duplicate?: boolean;
+      qos: 0 | 1 | 2;
+    },
   ): { nodeId: string; message: TelemetryMessage } | undefined {
     const parts = topic.split("/");
     const ids = parts.map((_, index) => topicId(parts.slice(0, index + 1)));
@@ -384,14 +445,16 @@ export class TelemetryStore {
     const message: TelemetryMessage = {
       id: ++this.sequence,
       ...metadata,
+      duplicate: metadata.duplicate ?? false,
       bytes: payload.byteLength,
+      unsafeIntegers: hasUnsafeInteger(parsed),
       payload: parsed,
     };
     const cost =
       parsed.kind === "omitted"
         ? Math.max(256, parsed.value.length * 2)
         : Math.max(256, payload.byteLength * 4);
-    node.history = [...node.history, message];
+    node.history.push(message);
     this.retained.set(message.id, { nodeId, cost });
     this.historyBytes += cost;
     this.adjustSubtree(nodeId, 1);
@@ -412,7 +475,7 @@ export class TelemetryStore {
   }
 
   history(id: string): TelemetryMessage[] {
-    return this.nodes.get(id)?.history ?? [];
+    return [...(this.nodes.get(id)?.history ?? [])];
   }
 
   setHistoryLimit(limit: number): void {
@@ -428,6 +491,18 @@ export class TelemetryStore {
     const node = this.nodes.get(id);
     if (!node?.history.length) return;
     this.dropOldest(id, node.history.length, false);
+    this.revision += 1;
+  }
+
+  clearSubtree(id: string): void {
+    const pending = [id];
+    while (pending.length) {
+      const node = this.nodes.get(pending.pop() as string);
+      if (!node) continue;
+      pending.push(...node.children);
+      if (node.history.length)
+        this.dropOldest(node.id, node.history.length, false);
+    }
     this.revision += 1;
   }
 
@@ -497,7 +572,7 @@ export class TelemetryStore {
   ): void {
     const node = this.nodes.get(nodeId) as TopicNode;
     const removed = node.history.slice(0, count);
-    node.history = node.history.slice(removed.length);
+    node.history.splice(0, removed.length);
     for (const message of removed) {
       const retained = this.retained.get(message.id);
       if (!retained) continue;

@@ -45,6 +45,59 @@ export function treeAncestorIds(
   return ancestors;
 }
 
+export function selectionAfterCollapse(
+  selected: string,
+  collapsed: string,
+  nodes: Map<string, TreeNodeView>,
+): string {
+  return treeAncestorIds(selected, nodes).includes(collapsed)
+    ? collapsed
+    : selected;
+}
+
+export type TreeFilter = {
+  roots: string[];
+  nodes: Map<string, TreeNodeView>;
+  matches: string[];
+  expanded: Set<string>;
+};
+
+export function filterTree(
+  roots: string[],
+  nodes: Map<string, TreeNodeView>,
+  query: string,
+): TreeFilter {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return { roots, nodes, matches: [], expanded: new Set() };
+
+  const matches = [...nodes.values()]
+    .filter((node) =>
+      (node.title ?? node.label).toLocaleLowerCase().includes(needle),
+    )
+    .map((node) => node.id);
+  const included = new Set(matches);
+  for (const id of matches)
+    treeAncestorIds(id, nodes).forEach((parent) => included.add(parent));
+
+  const filtered = new Map<string, TreeNodeView>();
+  for (const id of included) {
+    const node = nodes.get(id);
+    if (!node) continue;
+    filtered.set(id, {
+      ...node,
+      children: node.children.filter((child) => included.has(child)),
+    });
+  }
+  return {
+    roots: roots.filter((id) => included.has(id)),
+    nodes: filtered,
+    matches,
+    expanded: new Set(
+      [...included].filter((id) => filtered.get(id)?.children.length),
+    ),
+  };
+}
+
 export function visibleTreeIds(
   roots: string[],
   nodes: Map<string, TreeNodeView>,

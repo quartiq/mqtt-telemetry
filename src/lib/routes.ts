@@ -73,6 +73,9 @@ export function isWebSocketBroker(
   if (url.protocol !== "ws:" && url.protocol !== "wss:") {
     return "Browsers can connect to MQTT only over ws:// or wss:// WebSockets.";
   }
+  if (url.username || url.password) {
+    return "Do not put credentials in the broker URL. Use the username and password fields.";
+  }
   if (pageProtocol === "https:" && url.protocol === "ws:") {
     return "An HTTPS page cannot connect to a ws:// broker. Use wss:// or open the app over HTTP.";
   }

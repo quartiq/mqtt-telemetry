@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   TelemetryStore,
+  downsamplePlotPoints,
   fieldLabel,
   getJsonPath,
   jsonPointer,
   jsonTree,
+  messageFrequency,
   parsePayload,
   plotPoints,
   resolveJsonPointer,
@@ -24,8 +26,10 @@ function message(
     id,
     receivedAt,
     retained,
+    duplicate: false,
     qos: 0,
     bytes: value.length,
+    unsafeIntegers: false,
     payload: parsePayload(encode(value)),
   };
 }
@@ -39,6 +43,18 @@ describe("payloads and JSON fields", () => {
     });
     expect(parsePayload(new Uint8Array()).kind).toBe("text");
     expect(parsePayload(new Uint8Array([0xff])).kind).toBe("binary");
+  });
+
+  it("marks parsed JSON integers whose exact value cannot be represented", () => {
+    const store = new TelemetryStore(1);
+    const added = store.add("a", encode('{"counter":9007199254740993}'), {
+      receivedAt: 1,
+      retained: false,
+      duplicate: true,
+      qos: 0,
+    });
+    expect(added?.message.unsafeIntegers).toBe(true);
+    expect(added?.message.duplicate).toBe(true);
   });
 
   it("round-trips object keys, array indexes, slashes, and tildes", () => {
@@ -127,6 +143,20 @@ describe("topic history", () => {
     store.clearHistory(a);
     expect(store.history(a)).toEqual([]);
     expect(store.history(b)).toHaveLength(1);
+  });
+
+  it("clears a selected topic subtree without clearing its siblings", () => {
+    const store = new TelemetryStore(10);
+    for (const topic of ["a", "a/b", "a/c/d", "other"]) {
+      store.add(topic, encode("1"), { receivedAt: 1, retained: false, qos: 0 });
+    }
+    store.clearSubtree(store.nodeId("a") as string);
+    for (const topic of ["a", "a/b", "a/c/d"])
+      expect(store.history(store.nodeId(topic) as string)).toEqual([]);
+    expect(store.history(store.nodeId("other") as string)).toHaveLength(1);
+    expect(store.snapshot().nodes.get(store.nodeId("a") as string)?.value).toBe(
+      "0 msgs",
+    );
   });
 
   it("evicts the globally oldest history within the shared byte budget", () => {
@@ -257,5 +287,31 @@ describe("plot extraction", () => {
       { x: 1, y: 1 },
       { x: 5, y: 5 },
     ]);
+  });
+
+  it("downsamples in time order while preserving bucket extrema", () => {
+    const points = Array.from({ length: 100 }, (_, x) => ({
+      x,
+      y: x === 50 ? 1000 : x,
+    }));
+    const sampled = downsamplePlotPoints(points, 20);
+    expect(sampled.length).toBeLessThanOrEqual(20);
+    expect(sampled[0]).toEqual(points[0]);
+    expect(sampled.at(-1)).toEqual(points.at(-1));
+    expect(sampled).toContainEqual({ x: 50, y: 1000 });
+    expect(
+      sampled.every(
+        (point, index) => !index || sampled[index - 1].x <= point.x,
+      ),
+    ).toBe(true);
+  });
+
+  it("summarizes recent live-message frequency", () => {
+    expect(messageFrequency([message(1, 0, "1"), message(2, 100, "2")])).toBe(
+      "10 msg/s",
+    );
+    expect(messageFrequency([message(1, 0, "1"), message(2, 2000, "2")])).toBe(
+      "every 2 s",
+    );
   });
 });

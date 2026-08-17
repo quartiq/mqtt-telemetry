@@ -32,8 +32,9 @@
       <span class="meta">
         {timestamp(message.receivedAt)} · {message.retained
           ? "retained · "
-          : ""}QoS
+          : ""}{message.duplicate ? "possible duplicate · " : ""}QoS
         {message.qos} · {message.bytes.toLocaleString()} bytes
+        {message.unsafeIntegers ? " · unsafe integer precision" : ""}
       </span>
     {/if}
   </header>

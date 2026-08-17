@@ -2,6 +2,7 @@
 
 <script lang="ts">
   import {
+    messageFrequency,
     selectedMessageValue,
     type JsonPath,
     type TelemetryMessage,
@@ -29,8 +30,27 @@
     onlimit,
     onclear,
   }: Props = $props();
-  let newestFirst = $derived([...messages].reverse());
-  let activeId = $derived(selectedId ?? newestFirst[0]?.id);
+  const rowLimit = 500;
+  let activeId = $derived(selectedId ?? messages.at(-1)?.id);
+  let visibleMessages = $derived.by(() => {
+    if (messages.length <= rowLimit) return [...messages].reverse();
+    const selectedIndex =
+      selectedId === null
+        ? messages.length - 1
+        : Math.max(
+            0,
+            messages.findIndex((message) => message.id === selectedId),
+          );
+    const start = Math.max(
+      0,
+      Math.min(
+        messages.length - rowLimit,
+        selectedIndex - Math.floor(rowLimit / 2),
+      ),
+    );
+    return messages.slice(start, start + rowLimit).reverse();
+  });
+  let frequency = $derived(messageFrequency(messages));
 
   function timestamp(value: number): string {
     return new Date(value).toLocaleTimeString(undefined, {
@@ -48,15 +68,15 @@
   }
 
   function move(id: number, key: string) {
-    const index = newestFirst.findIndex((message) => message.id === id);
+    const index = messages.findIndex((message) => message.id === id);
     const nextIndex =
       key === "Home"
-        ? 0
+        ? messages.length - 1
         : key === "End"
-          ? newestFirst.length - 1
-          : index + (key === "ArrowDown" ? 1 : -1);
+          ? 0
+          : index + (key === "ArrowDown" ? -1 : 1);
     const next =
-      newestFirst[Math.max(0, Math.min(newestFirst.length - 1, nextIndex))];
+      messages[Math.max(0, Math.min(messages.length - 1, nextIndex))];
     if (!next || next.id === id) return;
     onselect(next.id);
     requestAnimationFrame(() =>
@@ -91,6 +111,7 @@
     <h2>
       History <span class="count">({messages.length.toLocaleString()})</span>
     </h2>
+    {#if frequency}<span class="meta">{frequency}</span>{/if}
     <div class="controls">
       <label title="Maximum messages kept per topic">
         Limit
@@ -120,7 +141,7 @@
           <tr><th>Time</th><th>Delivery</th><th>Value</th></tr>
         </thead>
         <tbody>
-          {#each newestFirst as message (message.id)}
+          {#each visibleMessages as message (message.id)}
             {@const value = selectedMessageValue(message, field)}
             <tr
               aria-selected={activeId === message.id}
@@ -135,13 +156,20 @@
                   ? "retained"
                   : timestamp(message.receivedAt)}</td
               >
-              <td>QoS {message.qos}</td>
+              <td title={message.duplicate ? "Possible MQTT redelivery" : ""}
+                >QoS {message.qos}{message.duplicate ? " · DUP" : ""}</td
+              >
               <td title={value}>{value}</td>
             </tr>
           {/each}
         </tbody>
       </table>
     </div>
+    {#if messages.length > visibleMessages.length}
+      <span class="window-note meta">
+        Showing {visibleMessages.length.toLocaleString()} rows around the selection
+      </span>
+    {/if}
   {:else}
     <p class="empty">No direct messages on this topic.</p>
   {/if}
@@ -150,7 +178,7 @@
 <style>
   .history-panel {
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
     min-height: 0;
   }
 
@@ -185,6 +213,11 @@
     overflow: auto;
   }
 
+  .window-note {
+    border-top: 1px solid var(--border);
+    padding-top: var(--space-tight);
+  }
+
   table {
     border-collapse: collapse;
     font-size: var(--text-small);
@@ -210,7 +243,7 @@
 
   th:nth-child(2),
   td:nth-child(2) {
-    width: 4.5rem;
+    width: 6.5rem;
   }
 
   tbody tr {
