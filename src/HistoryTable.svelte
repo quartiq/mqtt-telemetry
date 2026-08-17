@@ -4,6 +4,7 @@
   import {
     messagePayloadPreview,
     messageFrequency,
+    messageSpan,
     selectedMessageValue,
     type JsonPath,
     type TelemetryMessage,
@@ -16,18 +17,10 @@
     fieldLabel?: string;
     onselect: (id: number) => void;
     onlatest: () => void;
-    onclear: () => void;
   };
 
-  let {
-    messages,
-    selectedId,
-    field,
-    fieldLabel,
-    onselect,
-    onlatest,
-    onclear,
-  }: Props = $props();
+  let { messages, selectedId, field, fieldLabel, onselect, onlatest }: Props =
+    $props();
   const rowLimit = 500;
   let activeId = $derived(selectedId ?? messages.at(-1)?.id);
   let visibleMessages = $derived.by(() => {
@@ -49,6 +42,7 @@
     return messages.slice(start, start + rowLimit).reverse();
   });
   let frequency = $derived(messageFrequency(messages));
+  let span = $derived(messageSpan(messages));
 
   function timestamp(value: number): string {
     return new Date(value).toLocaleTimeString(undefined, {
@@ -103,6 +97,7 @@
     </h2>
     <div class="summary meta">
       {#if frequency}<span>{frequency} · </span>{/if}
+      {#if span}<span>{span} · </span>{/if}
       <span title={fieldLabel ?? "Full payload summary"}
         >{fieldLabel ? `field ${fieldLabel}` : "payload"}</span
       >
@@ -110,12 +105,6 @@
     <div class="controls">
       <button disabled={selectedId === null} type="button" onclick={onlatest}
         >Latest</button
-      >
-      <button
-        disabled={!messages.length}
-        title="Clear buffered browser data for this topic only"
-        type="button"
-        onclick={onclear}>Clear local…</button
       >
     </div>
   </header>

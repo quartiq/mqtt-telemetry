@@ -278,6 +278,21 @@ export function messageFrequency(history: TelemetryMessage[]): string {
   return `every ${seconds.toLocaleString(undefined, { maximumSignificantDigits: 3 })} s`;
 }
 
+export function messageSpan(history: TelemetryMessage[]): string {
+  const live = history.filter((message) => !message.retained);
+  if (live.length < 2) return "";
+  const milliseconds = live.at(-1)!.receivedAt - live[0].receivedAt;
+  if (!(milliseconds > 0)) return "";
+  if (milliseconds < 1000) return `${Math.round(milliseconds)} ms span`;
+  const seconds = Math.round(milliseconds / 1000);
+  if (seconds < 60) return `${seconds} s span`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s span`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m span`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h span`;
+}
+
 export function jsonTree(
   root: JsonValue,
   limits: JsonTreeLimits = DEFAULT_JSON_TREE_LIMITS,
@@ -506,13 +521,6 @@ export class TelemetryStore {
       const excess = node.history.length - limit;
       if (excess > 0) this.dropOldest(node.id, excess, false);
     }
-    this.revision += 1;
-  }
-
-  clearHistory(id: string): void {
-    const node = this.nodes.get(id);
-    if (!node?.history.length) return;
-    this.dropOldest(id, node.history.length, false);
     this.revision += 1;
   }
 

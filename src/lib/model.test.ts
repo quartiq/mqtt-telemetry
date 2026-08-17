@@ -8,6 +8,7 @@ import {
   jsonTree,
   messagePayloadPreview,
   messageFrequency,
+  messageSpan,
   parsePayload,
   plotSeries,
   resolveJsonPointer,
@@ -128,7 +129,7 @@ describe("topic history", () => {
     expect(store.history(store.nodeId("b") as string)).toHaveLength(1);
   });
 
-  it("adjusts the limit immediately and clears one topic", () => {
+  it("adjusts the limit immediately", () => {
     const store = new TelemetryStore(3);
     for (let receivedAt = 1; receivedAt <= 3; receivedAt += 1) {
       store.add("a", encode(String(receivedAt)), {
@@ -143,8 +144,6 @@ describe("topic history", () => {
     const b = store.nodeId("b") as string;
     store.setHistoryLimit(2);
     expect(store.history(a).map((entry) => entry.id)).toEqual([2, 3]);
-    store.clearHistory(a);
-    expect(store.history(a)).toEqual([]);
     expect(store.history(b)).toHaveLength(1);
   });
 
@@ -225,7 +224,7 @@ describe("topic history", () => {
     expect(store.topic(branch as string)).toBe("a");
     expect(before.topicCount).toBe(1);
 
-    store.clearHistory(leaf);
+    store.clearSubtree(leaf);
     const after = store.snapshot();
     expect(after.nodes).toBe(before.nodes);
     expect(after.revision).toBeGreaterThan(before.revision);
@@ -320,6 +319,15 @@ describe("plot extraction", () => {
     );
     expect(messageFrequency([message(1, 0, "1"), message(2, 2000, "2")])).toBe(
       "every 2 s",
+    );
+  });
+
+  it("summarizes the live history span", () => {
+    expect(messageSpan([message(1, 0, "1"), message(2, 100, "2")])).toBe(
+      "100 ms span",
+    );
+    expect(messageSpan([message(1, 0, "1"), message(2, 62_000, "2")])).toBe(
+      "1m 2s span",
     );
   });
 });

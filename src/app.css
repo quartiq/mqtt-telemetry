@@ -169,15 +169,10 @@ pre {
   color: var(--error);
 }
 
-.header-error,
-.header-notice {
+.header-error {
   font-size: var(--text-small);
   font-weight: 500;
   grid-column: 1 / -1;
-}
-
-.header-notice {
-  color: var(--muted);
 }
 
 .topics {

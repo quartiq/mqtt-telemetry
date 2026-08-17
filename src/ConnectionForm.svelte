@@ -41,14 +41,16 @@
       <h1>MQTT Telemetry</h1>
       <span class="meta">JSON topic browser</span>
     </header>
-    <form onsubmit={submit}>
+    <form autocomplete="on" onsubmit={submit}>
       <label>
         Broker
         <input
           autocomplete="url"
           bind:value={broker}
+          name="broker"
           placeholder="ws://localhost:9001"
           required
+          title="Use MQTT over WebSocket. LAN brokers may require browser Local Network Access permission; TLS certificates must be browser-trusted."
           type="url"
         />
       </label>
@@ -59,13 +61,18 @@
       <div class="credentials">
         <label>
           Username
-          <input autocomplete="username" bind:value={username} />
+          <input
+            autocomplete="username"
+            bind:value={username}
+            name="username"
+          />
         </label>
         <label>
           Password
           <input
             autocomplete="current-password"
             bind:value={password}
+            name="password"
             type="password"
           />
         </label>

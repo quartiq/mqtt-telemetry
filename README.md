@@ -11,19 +11,21 @@ npm run dev
 
 Open the printed URL and enter an MQTT-over-WebSocket broker such as `ws://localhost:9001`. Browser applications cannot connect directly to ordinary `mqtt://` TCP ports. An HTTPS deployment must use a `wss://` broker because browsers block mixed content.
 
+Chrome may require Local Network Access permission when a public site connects to a private or loopback broker. Browser security behavior for WebSockets is evolving; the most portable deployments use a browser-trusted `wss://` broker or serve the app and broker endpoint through the same HTTPS reverse proxy. JavaScript cannot bypass an invalid or self-signed WebSocket certificate.
+
 The connection form accepts one MQTT subscription filter per line and defaults to `#`. `$` topics are not matched by `#`; add a filter such as `$SYS/#` explicitly when needed.
 
 The browser keeps retrying after initial or later transport failures and resubscribes after reconnection. Changing connection explicitly stops those retries.
 
 ## Browsing
 
-The topic tree is populated as messages arrive. Press **/** to search complete topic paths and **Escape** to clear the search. Both trees use the same controls: click selects a node; double-click or **Enter** toggles a branch; the caret or **Space** also folds it; and the arrow, **Home**, **End**, **Page Up**, and **Page Down** keys move through visible nodes. Collapsing a branch selects it if its selected descendant would otherwise become hidden.
+The topic tree is populated as messages arrive; select a topic explicitly unless the URL names one. Press **/** to search complete topic paths and **Escape** to clear the search. Both trees use the same controls: click selects a node; double-click or **Enter** toggles a branch; the caret or **Space** also folds it; and the arrow, **Home**, **End**, **Page Up**, and **Page Down** keys move through visible nodes. Collapsing a branch selects it if its selected descendant would otherwise become hidden.
 
 Topic history initially shows a bounded compact preview of each complete payload. Select a JSON field in the current-value tree to project that field into every history row and plot its finite numeric values. No field and the JSON root are distinct selections. The last field is remembered for each topic, and a field carried to a new topic remains selected when that topic has the same JSON path. The current-value header reports when a remembered field is absent from the displayed message. Retained replays are visible in history but excluded from the plot because their original publication time is unknown. MQTT redeliveries are marked `DUP` rather than discarded.
 
 The newest message is followed automatically. Selecting a history row marks the current value as historical and freezes that message for inspection; **Up**, **Down**, **Home**, and **End** move through history without adding every row to the Tab order. **Latest** resumes following incoming messages.
 
-The connection form and Topics panel configure how many messages are kept per topic. Lowering the limit discards older buffered messages across every topic immediately. **Clear local…** in Topic history clears only the exact selected topic; **Clear local branch history…** clears that topic and its discovered subtopics. Both actions affect this browser tab only: they do not publish, change subscriptions, or remove retained data from the broker. A retained publication that was cleared locally can therefore reappear after reconnecting and resubscribing. If a frozen message is cleared or evicted, the view resumes following the latest message.
+The connection form and Topics panel configure how many messages are kept per topic. Lowering the limit discards older buffered messages across every topic immediately. **Clear history** in the topic browser immediately clears the selected topic and its discovered subtopics. It affects this browser tab only: it does not publish, change subscriptions, or remove retained data from the broker. A retained publication that was cleared locally can therefore reappear after reconnecting and resubscribing. If a frozen message is cleared or evicted, the view resumes following the latest message.
 
 Browser Back and Forward traverse connection, topic, historical-message, and field choices. Broker, subscriptions, selected topic, and selected field are encoded in the URL. Opening such a URL reveals the selected field in the JSON tree. Historical-message selection remains page-session state because message history is not persisted across reloads.
 
@@ -43,7 +45,7 @@ Example:
 ?broker=ws://localhost:9001&topic=sensors/%23&topic=alerts/%2B&history=500
 ```
 
-Username and password entered in the connection form are never placed in the URL. They are stored in `sessionStorage` for the current browser tab, keyed by broker URL. Broker URLs containing embedded credentials are rejected because URLs are shared through browser history and the address bar. Broker-specific secret query parameters cannot be recognized automatically and should not be used in shared links.
+Username and password entered in the connection form are never placed in the URL or application storage. The form uses standard autocomplete fields so the browser's credential manager can remember them. Broker URLs containing embedded credentials are rejected because URLs are shared through browser history and the address bar. Broker-specific secret query parameters cannot be recognized automatically and should not be used in shared links.
 
 For browser safety, payload contents above 1 MiB are omitted, discovery stops after 10,000 topic nodes, and history is globally limited to 100,000 messages and an estimated 64 MiB of payload storage. Oldest messages are evicted first across topics. JSON value trees stop after 10,000 nodes or 64 levels. Existing topics continue updating; the Topics header reports dropped publications, omitted payloads, and global history evictions.
 
@@ -56,7 +58,13 @@ npm test
 npm run build
 ```
 
-The static production site is written to `dist/` and can be served by any ordinary static web server.
+The production build is the single self-contained file `dist/index.html`. Serve it from any ordinary static web server, for example:
+
+```sh
+python3 -m http.server --directory dist 8000
+```
+
+Opening it directly as a `file://` URL is not a supported deployment: browser origin, storage, and local-network behavior for local files is inconsistent.
 
 ## Scope
 

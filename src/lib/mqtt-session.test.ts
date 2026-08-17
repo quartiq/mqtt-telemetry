@@ -5,9 +5,11 @@ vi.mock("mqtt", () => ({ default: { connect: mocks.connect } }));
 
 import { MqttSession, clientOptions, type SessionStatus } from "./mqtt-session";
 
+type Grant = { topic: string; qos: 0 | 1 | 2 | 128 };
+
 function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((accept) => {
+  let resolve!: (grants: Grant[]) => void;
+  const promise = new Promise<Grant[]>((accept) => {
     resolve = accept;
   });
   return { promise, resolve };
@@ -16,7 +18,10 @@ function deferred() {
 class FakeClient {
   connected = false;
   listeners = new Map<string, ((...args: unknown[]) => void)[]>();
-  subscribeAsync = vi.fn().mockResolvedValue([]);
+  subscribeAsync = vi.fn().mockResolvedValue([
+    { topic: "sensors/#", qos: 0 },
+    { topic: "alerts/+", qos: 0 },
+  ]);
   end = vi.fn();
 
   on(event: string, callback: (...args: never[]) => void): this {
@@ -53,8 +58,8 @@ describe("MQTT session", () => {
     const options = clientOptions({ username: "user", password: "secret" });
     expect(options).toMatchObject({
       clean: true,
-      connectTimeout: 5000,
-      keepalive: 15,
+      connectTimeout: 15_000,
+      keepalive: 30,
       protocolVersion: 4,
       queueQoSZero: false,
       reconnectPeriod: 1000,
@@ -83,9 +88,12 @@ describe("MQTT session", () => {
     client.emit("connect");
     await Promise.resolve();
     expect(statuses).toEqual([]);
-    first.resolve();
+    first.resolve([
+      { topic: "sensors/#", qos: 0 },
+      { topic: "alerts/+", qos: 0 },
+    ]);
     await vi.waitFor(() =>
-      expect(statuses.at(-1)).toEqual({ state: "connected" }),
+      expect(statuses.at(-1)).toEqual({ state: "connected", rejected: [] }),
     );
 
     client.emit("offline");
@@ -99,15 +107,18 @@ describe("MQTT session", () => {
       { qos: 0 },
     );
     expect(statuses.at(-1)).toEqual({ state: "reconnecting" });
-    second.resolve();
+    second.resolve([
+      { topic: "sensors/#", qos: 0 },
+      { topic: "alerts/+", qos: 0 },
+    ]);
     await vi.waitFor(() =>
-      expect(statuses.at(-1)).toEqual({ state: "connected" }),
+      expect(statuses.at(-1)).toEqual({ state: "connected", rejected: [] }),
     );
 
     session.close();
     client.emit("close");
     expect(client.end).toHaveBeenCalledWith(true);
-    expect(statuses.at(-1)).toEqual({ state: "connected" });
+    expect(statuses.at(-1)).toEqual({ state: "connected", rejected: [] });
   });
 
   it("forwards published messages", () => {
@@ -131,7 +142,10 @@ describe("MQTT session", () => {
     const client = new FakeClient();
     client.subscribeAsync
       .mockRejectedValueOnce(new Error("subscribe failed"))
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce([
+        { topic: "sensors/#", qos: 0 },
+        { topic: "alerts/+", qos: 0 },
+      ]);
     const statuses: SessionStatus[] = [];
     open(client, statuses);
 
@@ -147,9 +161,27 @@ describe("MQTT session", () => {
     client.emit("reconnect");
     client.emit("connect");
     await vi.waitFor(() =>
-      expect(statuses.at(-1)).toEqual({ state: "connected" }),
+      expect(statuses.at(-1)).toEqual({ state: "connected", rejected: [] }),
     );
     expect(client.subscribeAsync).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports filters rejected by SUBACK without hiding accepted filters", async () => {
+    const client = new FakeClient();
+    client.subscribeAsync.mockResolvedValueOnce([
+      { topic: "sensors/#", qos: 0 },
+      { topic: "alerts/+", qos: 128 },
+    ]);
+    const statuses: SessionStatus[] = [];
+    open(client, statuses);
+
+    client.emit("connect");
+    await vi.waitFor(() =>
+      expect(statuses.at(-1)).toEqual({
+        state: "connected",
+        rejected: ["alerts/+"],
+      }),
+    );
   });
 
   it("ignores a stale SUBACK from an interrupted connection", async () => {
@@ -157,7 +189,10 @@ describe("MQTT session", () => {
     const stale = deferred();
     client.subscribeAsync
       .mockImplementationOnce(() => stale.promise)
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce([
+        { topic: "sensors/#", qos: 0 },
+        { topic: "alerts/+", qos: 0 },
+      ]);
     const statuses: SessionStatus[] = [];
     open(client, statuses);
 
@@ -166,13 +201,16 @@ describe("MQTT session", () => {
     client.emit("close");
     client.emit("connect");
     await vi.waitFor(() =>
-      expect(statuses.at(-1)).toEqual({ state: "connected" }),
+      expect(statuses.at(-1)).toEqual({ state: "connected", rejected: [] }),
     );
     const connectedCount = statuses.filter(
       ({ state }) => state === "connected",
     ).length;
 
-    stale.resolve();
+    stale.resolve([
+      { topic: "sensors/#", qos: 0 },
+      { topic: "alerts/+", qos: 0 },
+    ]);
     await Promise.resolve();
     expect(statuses.filter(({ state }) => state === "connected")).toHaveLength(
       connectedCount,

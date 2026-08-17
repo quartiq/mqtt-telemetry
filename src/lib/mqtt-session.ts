@@ -7,7 +7,8 @@ import mqtt, {
 import { isWebSocketBroker } from "./routes";
 
 export type SessionStatus =
-  | { state: "connected" | "reconnecting" | "offline" }
+  | { state: "connected"; rejected: string[] }
+  | { state: "reconnecting" | "offline" }
   | { state: "error"; error: string };
 
 export type IncomingMessage = {
@@ -29,8 +30,8 @@ export function clientOptions(auth?: Partial<SessionAuth>): IClientOptions {
   return {
     clean: true,
     clientId: `mqtttelemetry${crypto.randomUUID().replaceAll("-", "").slice(0, 10)}`,
-    connectTimeout: 5000,
-    keepalive: 15,
+    connectTimeout: 15_000,
+    keepalive: 30,
     protocolVersion: 4,
     queueQoSZero: false,
     reconnectPeriod: 1000,
@@ -69,10 +70,14 @@ export class MqttSession {
     filters: string[],
     generation: number,
   ): Promise<void> {
+    let rejected: string[];
     try {
-      await this.client.subscribeAsync(filters, {
+      const grants = await this.client.subscribeAsync(filters, {
         qos: 0,
       } satisfies IClientSubscribeOptions);
+      rejected = grants
+        .filter(({ qos }) => qos === 128)
+        .map(({ topic }) => topic);
     } catch (error) {
       if (
         generation === this.generation &&
@@ -91,7 +96,7 @@ export class MqttSession {
       this.client.connected &&
       !this.closing
     )
-      this.callbacks.status({ state: "connected" });
+      this.callbacks.status({ state: "connected", rejected });
   }
 
   static open(

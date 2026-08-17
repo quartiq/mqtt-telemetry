@@ -8,7 +8,6 @@
   import MessagePanel from "./MessagePanel.svelte";
   import TelemetryPlot from "./TelemetryPlot.svelte";
   import TreeView from "./TreeView.svelte";
-  import { loadAuth, saveAuth } from "./lib/auth-store";
   import {
     TelemetryStore,
     fieldLabel,
@@ -44,9 +43,8 @@
   let formBroker = $state(initialRoute.broker);
   let formFilters = $state(initialRoute.filters.join("\n"));
   let formHistoryLimit = $state(initialRoute.historyLimit);
-  const initialAuth = loadAuth(initialRoute.broker);
-  let username = $state(initialAuth.username);
-  let password = $state(initialAuth.password);
+  let username = $state("");
+  let password = $state("");
   let authBroker = initialRoute.broker;
 
   let session = $state<MqttSession | undefined>();
@@ -62,12 +60,10 @@
   let jsonExpanded = $state(new Set<string>(["$"]));
   let status = $state("Idle");
   let error = $state("");
-  let notice = $state("");
   let connectSerial = 0;
   let viewToken = crypto.randomUUID();
   let lastReceivedAt = 0;
   let renderFrame = 0;
-  let noticeTimer = 0;
 
   let topicSnapshot = $derived.by(() => {
     revision;
@@ -147,8 +143,6 @@
       .join(" · "),
   );
 
-  $effect(() => loadBrokerAuth(formBroker.trim()));
-
   $effect(() => {
     const topic = selectedTopic;
     if (!topic) {
@@ -203,9 +197,13 @@
         route = next;
         formFilters = next.filters.join("\n");
         formHistoryLimit = next.historyLimit;
+        if (next.broker !== authBroker) {
+          username = "";
+          password = "";
+          authBroker = next.broker;
+        }
         if (next.broker) {
           formBroker = next.broker;
-          loadBrokerAuth(next.broker);
           startConnection(next);
         } else {
           stopConnection();
@@ -228,7 +226,6 @@
       removeEventListener("popstate", popstate);
       removeEventListener("keydown", browserKeydown);
       if (renderFrame) cancelAnimationFrame(renderFrame);
-      if (noticeTimer) clearTimeout(noticeTimer);
       connectSerial += 1;
       session?.close();
     };
@@ -252,12 +249,6 @@
     writeRoute(next, messageId, true);
   }
 
-  function loadBrokerAuth(broker: string) {
-    if (authBroker === broker) return;
-    authBroker = broker;
-    ({ username, password } = loadAuth(broker));
-  }
-
   function resetData(historyLimit: number) {
     if (renderFrame) cancelAnimationFrame(renderFrame);
     renderFrame = 0;
@@ -273,7 +264,6 @@
     jsonExpanded = new Set(["$"]);
     viewToken = crypto.randomUUID();
     lastReceivedAt = 0;
-    report("");
   }
 
   function stopConnection() {
@@ -289,7 +279,9 @@
     switch (next.state) {
       case "connected":
         status = "Connected";
-        error = "";
+        error = next.rejected.length
+          ? `Subscription rejected: ${next.rejected.join(", ")}`
+          : "";
         break;
       case "reconnecting":
         status = "Reconnecting";
@@ -342,12 +334,6 @@
             if (!added) return;
             if (route.selectedTopic === topic) {
               selectLoadedTopic(added.nodeId, false);
-            } else if (!route.selectedTopic && !selectedTopicId) {
-              selectLoadedTopic(added.nodeId, false);
-              replaceRoute(
-                { ...route, selectedTopic: topic, fieldPointer: null },
-                null,
-              );
             }
           },
           status: (next) => {
@@ -377,7 +363,7 @@
       return;
     }
     const filters = uniqueFilters(formFilters.split(/\r?\n/));
-    saveAuth(broker, { username, password });
+    authBroker = broker;
     const next: AppRoute = {
       broker,
       filters,
@@ -500,13 +486,6 @@
 
   function changeHistoryLimit(limit: number): boolean {
     if (limit === route.historyLimit) return true;
-    if (
-      limit < route.historyLimit &&
-      !confirm(
-        `Keep only ${limit.toLocaleString()} messages per topic? Older local messages across all topics will be discarded immediately.`,
-      )
-    )
-      return false;
     store.setHistoryLimit(limit);
     formHistoryLimit = limit;
     revision += 1;
@@ -519,51 +498,12 @@
     return true;
   }
 
-  function clearHistory() {
-    if (!selectedTopicId) return;
-    const count = currentHistory.length;
-    if (
-      !confirm(
-        `Clear ${count.toLocaleString()} local ${count === 1 ? "message" : "messages"} for ${selectedTopic}? The broker, broker-retained messages, and subscription are unchanged.`,
-      )
-    )
-      return;
-    store.clearHistory(selectedTopicId);
-    selectedMessageId = null;
-    revision += 1;
-    replaceRoute(route, null);
-    report(
-      `Cleared ${count.toLocaleString()} local ${count === 1 ? "message" : "messages"}; broker unchanged.`,
-    );
-  }
-
   function clearTopicSubtree() {
     if (!selectedTopicId) return;
-    const count = store.subtreeMessageCount(selectedTopicId);
-    if (
-      !confirm(
-        `Clear ${count.toLocaleString()} local ${count === 1 ? "message" : "messages"} for ${selectedTopic} and its subtopics? The broker, broker-retained messages, and subscription are unchanged.`,
-      )
-    )
-      return;
     store.clearSubtree(selectedTopicId);
     selectedMessageId = null;
     revision += 1;
     replaceRoute(route, null);
-    report(
-      `Cleared ${count.toLocaleString()} local ${count === 1 ? "message" : "messages"}; broker unchanged.`,
-    );
-  }
-
-  function report(message: string) {
-    if (noticeTimer) clearTimeout(noticeTimer);
-    notice = message;
-    noticeTimer = message
-      ? window.setTimeout(() => {
-          notice = "";
-          noticeTimer = 0;
-        }, 5000)
-      : 0;
   }
 
   function restoreView(state: unknown) {
@@ -647,8 +587,6 @@
         >
       </div>
       {#if error}<strong class="header-error">{error}</strong>{/if}
-      {#if notice}<span aria-live="polite" class="header-notice">{notice}</span
-        >{/if}
     </header>
 
     <aside class="topics panel">
@@ -710,9 +648,9 @@
       <footer class="topic-actions">
         <button
           disabled={!selectedSubtreeCount}
-          title="Clear buffered browser data for the selected topic and its subtopics"
+          title="Clear buffered history for the selected topic and its subtopics. Broker-retained messages are unchanged."
           type="button"
-          onclick={clearTopicSubtree}>Clear local branch history…</button
+          onclick={clearTopicSubtree}>Clear history</button
         >
       </footer>
     </aside>
@@ -735,7 +673,6 @@
         fieldLabel={selectedFieldLabel}
         onselect={selectHistory}
         onlatest={selectLatest}
-        onclear={clearHistory}
       />
       <TelemetryPlot
         points={series.points}
