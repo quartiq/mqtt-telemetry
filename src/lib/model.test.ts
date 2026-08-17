@@ -6,9 +6,10 @@ import {
   getJsonPath,
   jsonPointer,
   jsonTree,
+  messagePayloadPreview,
   messageFrequency,
   parsePayload,
-  plotPoints,
+  plotSeries,
   resolveJsonPointer,
   selectedMessageValue,
   type TelemetryMessage,
@@ -99,8 +100,10 @@ describe("payloads and JSON fields", () => {
 
   it("summarizes structured history values and truncates long scalars", () => {
     expect(selectedMessageValue(message(1, 1, '{"a":1,"b":2}'), [])).toBe(
-      "{2 fields}",
+      '{"a":1,"b":2}',
     );
+    expect(messagePayloadPreview(message(1, 1, "[]"))).toBe("[]");
+    expect(messagePayloadPreview(message(1, 1, "{}"))).toBe("{}");
     const value = selectedMessageValue(
       message(2, 2, JSON.stringify("x".repeat(1000))),
       [],
@@ -150,10 +153,12 @@ describe("topic history", () => {
     for (const topic of ["a", "a/b", "a/c/d", "other"]) {
       store.add(topic, encode("1"), { receivedAt: 1, retained: false, qos: 0 });
     }
+    expect(store.subtreeMessageCount(store.nodeId("a") as string)).toBe(3);
     store.clearSubtree(store.nodeId("a") as string);
     for (const topic of ["a", "a/b", "a/c/d"])
       expect(store.history(store.nodeId(topic) as string)).toEqual([]);
     expect(store.history(store.nodeId("other") as string)).toHaveLength(1);
+    expect(store.subtreeMessageCount(store.nodeId("a") as string)).toBe(0);
     expect(store.snapshot().nodes.get(store.nodeId("a") as string)?.value).toBe(
       "0 msgs",
     );
@@ -283,10 +288,13 @@ describe("plot extraction", () => {
       message(4, 4, '{"v":"4"}'),
       message(5, 5, '{"v":5}'),
     ];
-    expect(plotPoints(history, ["v"])).toEqual([
-      { x: 1, y: 1 },
-      { x: 5, y: 5 },
-    ]);
+    expect(plotSeries(history, ["v"])).toEqual({
+      points: [
+        { x: 1, y: 1 },
+        { x: 5, y: 5 },
+      ],
+      retainedExcluded: 1,
+    });
   });
 
   it("downsamples in time order while preserving bucket extrema", () => {

@@ -12,13 +12,26 @@
     message?: TelemetryMessage;
     snapshot?: JsonSnapshot;
     selected: string;
+    selectedLabel?: string;
+    following: boolean;
     expanded: Set<string>;
     onselect: (id: string) => void;
     ontoggle: (id: string, open: boolean) => void;
   };
 
-  let { message, snapshot, selected, expanded, onselect, ontoggle }: Props =
-    $props();
+  let {
+    message,
+    snapshot,
+    selected,
+    selectedLabel,
+    following,
+    expanded,
+    onselect,
+    ontoggle,
+  }: Props = $props();
+  let fieldMissing = $derived(
+    Boolean(selected && snapshot && !snapshot.nodes.has(selected)),
+  );
 
   function timestamp(value: number): string {
     return new Date(value).toLocaleString();
@@ -27,15 +40,23 @@
 
 <section class="panel message-panel">
   <header>
-    <h2>Message</h2>
+    <h2>Current value</h2>
     {#if message}
       <span class="meta">
+        {following ? "Following latest" : "Historical"} ·
         {timestamp(message.receivedAt)} · {message.retained
           ? "retained · "
           : ""}{message.duplicate ? "possible duplicate · " : ""}QoS
         {message.qos} · {message.bytes.toLocaleString()} bytes
         {message.unsafeIntegers ? " · unsafe integer precision" : ""}
       </span>
+      {#if fieldMissing}
+        <span
+          class="missing"
+          title={`${selectedLabel} is absent from this message`}
+          >field absent</span
+        >
+      {/if}
     {/if}
   </header>
   {#if message?.payload.kind === "json" && snapshot}
@@ -72,6 +93,19 @@
   pre {
     min-height: 0;
     overflow: auto;
+  }
+
+  .missing {
+    color: var(--muted);
+    flex: none;
+    font-size: var(--text-small);
+  }
+
+  .message-panel > header .meta {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   @media (max-width: 800px) {

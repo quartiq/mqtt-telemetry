@@ -17,7 +17,7 @@ describe("route configuration", () => {
       filters: ["#"],
       historyLimit: DEFAULT_HISTORY_LIMIT,
       selectedTopic: "",
-      fieldPointer: "",
+      fieldPointer: null,
     });
   });
 
@@ -47,6 +47,14 @@ describe("route configuration", () => {
       selectedTopic: "sensors/room",
       fieldPointer: "/value",
     });
+  });
+
+  it("distinguishes no selected field from the JSON root", () => {
+    expect(readRoute("?selected=a").fieldPointer).toBeNull();
+    expect(readRoute("?selected=a&field=").fieldPointer).toBe("");
+    const route = { ...readRoute("?selected=a"), fieldPointer: "" };
+    expect(routeSearch(route)).toContain("&field=");
+    expect(readRoute(routeSearch(route)).fieldPointer).toBe("");
   });
 
   it("does not treat a live history-limit change as a new connection", () => {

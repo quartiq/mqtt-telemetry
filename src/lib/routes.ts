@@ -7,7 +7,7 @@ export type AppRoute = {
   filters: string[];
   historyLimit: number;
   selectedTopic: string;
-  fieldPointer: string;
+  fieldPointer: string | null;
 };
 
 export function uniqueFilters(filters: Iterable<string>): string[] {
@@ -25,14 +25,16 @@ export function parseHistoryLimit(value: string | null): number {
 
 export function readRoute(search: string): AppRoute {
   const params = new URLSearchParams(search);
-  const fieldPointer = params.get("field") ?? "";
+  const fieldPointer = params.has("field") ? (params.get("field") ?? "") : null;
   return {
     broker: params.get("broker")?.trim() ?? "",
     filters: uniqueFilters(params.getAll("topic")),
     historyLimit: parseHistoryLimit(params.get("history")),
     selectedTopic: params.get("selected") ?? "",
     fieldPointer:
-      !fieldPointer || fieldPointer.startsWith("/") ? fieldPointer : "",
+      fieldPointer === null || !fieldPointer || fieldPointer.startsWith("/")
+        ? fieldPointer
+        : null,
   };
 }
 
@@ -45,7 +47,7 @@ export function routeSearch(route: AppRoute): string {
     params.push(["history", String(route.historyLimit)]);
   }
   if (route.selectedTopic) params.push(["selected", route.selectedTopic]);
-  if (route.fieldPointer) params.push(["field", route.fieldPointer]);
+  if (route.fieldPointer !== null) params.push(["field", route.fieldPointer]);
   return `?${params
     .map(([key, value]) => `${key}=${readableQueryValue(value)}`)
     .join("&")}`;

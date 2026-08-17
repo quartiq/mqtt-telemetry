@@ -3,6 +3,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import ConnectionForm from "./ConnectionForm.svelte";
+  import HistoryLimit from "./HistoryLimit.svelte";
   import HistoryTable from "./HistoryTable.svelte";
   import MessagePanel from "./MessagePanel.svelte";
   import TelemetryPlot from "./TelemetryPlot.svelte";
@@ -13,7 +14,7 @@
     fieldLabel,
     jsonPointer,
     jsonTree,
-    plotPoints,
+    plotSeries,
     resolveJsonPointer,
     type JsonPath,
   } from "./lib/model";
@@ -42,6 +43,7 @@
   let route = $state(initialRoute);
   let formBroker = $state(initialRoute.broker);
   let formFilters = $state(initialRoute.filters.join("\n"));
+  let formHistoryLimit = $state(initialRoute.historyLimit);
   const initialAuth = loadAuth(initialRoute.broker);
   let username = $state(initialAuth.username);
   let password = $state(initialAuth.password);
@@ -52,18 +54,20 @@
   let revision = $state(0);
   let selectedTopicId = $state("");
   let selectedMessageId = $state<number | null>(null);
-  let selectedField = $state<JsonPath>([]);
-  let fieldByTopic = new Map<string, string>();
+  let selectedField = $state<JsonPath | undefined>();
+  let fieldByTopic = new Map<string, string | null>();
   let revealedFieldKey = "";
   let topicExpanded = $state(new Set<string>());
   let topicSearch = $state("");
   let jsonExpanded = $state(new Set<string>(["$"]));
   let status = $state("Idle");
   let error = $state("");
+  let notice = $state("");
   let connectSerial = 0;
   let viewToken = crypto.randomUUID();
   let lastReceivedAt = 0;
   let renderFrame = 0;
+  let noticeTimer = 0;
 
   let topicSnapshot = $derived.by(() => {
     revision;
@@ -81,6 +85,10 @@
       : topicExpanded,
   );
   let selectedTopic = $derived(store.topic(selectedTopicId) ?? "");
+  let selectedSubtreeCount = $derived.by(() => {
+    revision;
+    return selectedTopicId ? store.subtreeMessageCount(selectedTopicId) : 0;
+  });
   let currentHistory = $derived.by(() => {
     revision;
     return selectedTopicId ? store.history(selectedTopicId) : [];
@@ -99,19 +107,29 @@
       : undefined,
   );
   let activeField = $derived.by(() => {
-    if (!route.fieldPointer) return selectedField;
+    if (route.fieldPointer === null || !selectedField) return undefined;
     return jsonPointer(selectedField) === route.fieldPointer
       ? selectedField
       : undefined;
   });
   let selectedJsonId = $derived(
-    activeField ? jsonPointer(activeField) || "$" : route.fieldPointer,
+    route.fieldPointer === null
+      ? ""
+      : activeField
+        ? jsonPointer(activeField) || "$"
+        : route.fieldPointer || "$",
   );
-  let points = $derived(
-    activeField ? plotPoints(currentHistory, activeField) : [],
+  let series = $derived(
+    activeField
+      ? plotSeries(currentHistory, activeField)
+      : { points: [], retainedExcluded: 0 },
   );
   let selectedFieldLabel = $derived(
-    activeField ? fieldLabel(activeField) : route.fieldPointer || "$",
+    route.fieldPointer === null
+      ? undefined
+      : activeField
+        ? fieldLabel(activeField)
+        : route.fieldPointer || "$",
   );
   let topicWarning = $derived(
     [
@@ -134,14 +152,18 @@
   $effect(() => {
     const topic = selectedTopic;
     if (!topic) {
-      selectedField = [];
+      selectedField = undefined;
       return;
     }
     const pointer =
       route.selectedTopic === topic
         ? route.fieldPointer
-        : (fieldByTopic.get(topic) ?? "");
+        : (fieldByTopic.get(topic) ?? null);
     fieldByTopic.set(topic, pointer);
+    if (pointer === null) {
+      selectedField = undefined;
+      return;
+    }
     let resolved: JsonPath | undefined;
     for (let index = currentHistory.length - 1; index >= 0; index -= 1) {
       const payload = currentHistory[index].payload;
@@ -150,7 +172,10 @@
       if (resolved) break;
     }
     if (resolved) {
-      if (jsonPointer(resolved) !== jsonPointer(selectedField))
+      if (
+        !selectedField ||
+        jsonPointer(resolved) !== jsonPointer(selectedField)
+      )
         selectedField = resolved;
       const id = jsonPointer(resolved) || "$";
       const revealKey = `${topic}\0${pointer}`;
@@ -159,7 +184,7 @@
         revealJson(id);
       }
     } else {
-      selectedField = [];
+      selectedField = undefined;
     }
   });
 
@@ -177,6 +202,7 @@
       if (connectionKey(next) !== connectionKey(route)) {
         route = next;
         formFilters = next.filters.join("\n");
+        formHistoryLimit = next.historyLimit;
         if (next.broker) {
           formBroker = next.broker;
           loadBrokerAuth(next.broker);
@@ -187,6 +213,7 @@
       } else {
         const historyLimitChanged = next.historyLimit !== route.historyLimit;
         route = next;
+        formHistoryLimit = next.historyLimit;
         if (historyLimitChanged) {
           store.setHistoryLimit(next.historyLimit);
           revision += 1;
@@ -201,6 +228,7 @@
       removeEventListener("popstate", popstate);
       removeEventListener("keydown", browserKeydown);
       if (renderFrame) cancelAnimationFrame(renderFrame);
+      if (noticeTimer) clearTimeout(noticeTimer);
       connectSerial += 1;
       session?.close();
     };
@@ -237,7 +265,7 @@
     revision += 1;
     selectedTopicId = "";
     selectedMessageId = null;
-    selectedField = [];
+    selectedField = undefined;
     fieldByTopic = new Map();
     revealedFieldKey = "";
     topicExpanded = new Set();
@@ -245,6 +273,7 @@
     jsonExpanded = new Set(["$"]);
     viewToken = crypto.randomUUID();
     lastReceivedAt = 0;
+    report("");
   }
 
   function stopConnection() {
@@ -316,7 +345,7 @@
             } else if (!route.selectedTopic && !selectedTopicId) {
               selectLoadedTopic(added.nodeId, false);
               replaceRoute(
-                { ...route, selectedTopic: topic, fieldPointer: "" },
+                { ...route, selectedTopic: topic, fieldPointer: null },
                 null,
               );
             }
@@ -352,9 +381,9 @@
     const next: AppRoute = {
       broker,
       filters,
-      historyLimit: route.historyLimit,
+      historyLimit: formHistoryLimit,
       selectedTopic: "",
-      fieldPointer: "",
+      fieldPointer: null,
     };
     writeRoute(next, null);
     startConnection(next);
@@ -362,7 +391,12 @@
 
   function changeConnection() {
     const previousBroker = route.broker;
-    const next = { ...route, broker: "", selectedTopic: "", fieldPointer: "" };
+    const next = {
+      ...route,
+      broker: "",
+      selectedTopic: "",
+      fieldPointer: null,
+    };
     writeRoute(next, null);
     stopConnection();
     formBroker = previousBroker;
@@ -375,7 +409,7 @@
       topicExpanded = new Set([...topicExpanded, ...store.ancestorIds(id)]);
     if (reset) {
       selectedMessageId = null;
-      selectedField = [];
+      selectedField = undefined;
       jsonExpanded = new Set(["$"]);
       revealedFieldKey = "";
     }
@@ -384,10 +418,12 @@
   function selectTopic(id: string) {
     const topic = store.topic(id);
     if (topic === undefined) return;
-    const pointer =
-      fieldByTopic.get(topic) ??
-      fieldByTopic.get(selectedTopic) ??
-      route.fieldPointer;
+    let pointer: string | null;
+    if (fieldByTopic.has(topic))
+      pointer = fieldByTopic.get(topic) as string | null;
+    else if (fieldByTopic.has(selectedTopic))
+      pointer = fieldByTopic.get(selectedTopic) as string | null;
+    else pointer = route.fieldPointer;
     const unchanged =
       id === selectedTopicId &&
       selectedMessageId === null &&
@@ -462,8 +498,17 @@
     writeRoute(route, null);
   }
 
-  function changeHistoryLimit(limit: number) {
+  function changeHistoryLimit(limit: number): boolean {
+    if (limit === route.historyLimit) return true;
+    if (
+      limit < route.historyLimit &&
+      !confirm(
+        `Keep only ${limit.toLocaleString()} messages per topic? Older local messages across all topics will be discarded immediately.`,
+      )
+    )
+      return false;
     store.setHistoryLimit(limit);
+    formHistoryLimit = limit;
     revision += 1;
     const id = selectedMessageId;
     const nextMessageId = currentHistory.some((message) => message.id === id)
@@ -471,22 +516,54 @@
       : null;
     selectedMessageId = nextMessageId;
     writeRoute({ ...route, historyLimit: limit }, nextMessageId);
+    return true;
   }
 
   function clearHistory() {
     if (!selectedTopicId) return;
+    const count = currentHistory.length;
+    if (
+      !confirm(
+        `Clear ${count.toLocaleString()} local ${count === 1 ? "message" : "messages"} for ${selectedTopic}? The broker, broker-retained messages, and subscription are unchanged.`,
+      )
+    )
+      return;
     store.clearHistory(selectedTopicId);
     selectedMessageId = null;
     revision += 1;
     replaceRoute(route, null);
+    report(
+      `Cleared ${count.toLocaleString()} local ${count === 1 ? "message" : "messages"}; broker unchanged.`,
+    );
   }
 
   function clearTopicSubtree() {
     if (!selectedTopicId) return;
+    const count = store.subtreeMessageCount(selectedTopicId);
+    if (
+      !confirm(
+        `Clear ${count.toLocaleString()} local ${count === 1 ? "message" : "messages"} for ${selectedTopic} and its subtopics? The broker, broker-retained messages, and subscription are unchanged.`,
+      )
+    )
+      return;
     store.clearSubtree(selectedTopicId);
     selectedMessageId = null;
     revision += 1;
     replaceRoute(route, null);
+    report(
+      `Cleared ${count.toLocaleString()} local ${count === 1 ? "message" : "messages"}; broker unchanged.`,
+    );
+  }
+
+  function report(message: string) {
+    if (noticeTimer) clearTimeout(noticeTimer);
+    notice = message;
+    noticeTimer = message
+      ? window.setTimeout(() => {
+          notice = "";
+          noticeTimer = 0;
+        }, 5000)
+      : 0;
   }
 
   function restoreView(state: unknown) {
@@ -541,7 +618,7 @@
     bind:filters={formFilters}
     bind:username
     bind:password
-    historyLimit={route.historyLimit}
+    bind:historyLimit={formHistoryLimit}
     {status}
     {error}
     onconnect={connectFromForm}
@@ -556,7 +633,7 @@
           {#if selectedTopic}<span aria-hidden="true">›</span><span
               >{selectedTopic}</span
             >{/if}
-          {#if route.fieldPointer}
+          {#if route.fieldPointer !== null}
             <span aria-hidden="true">›</span><span>{selectedFieldLabel}</span>
           {/if}
         </div>
@@ -570,6 +647,8 @@
         >
       </div>
       {#if error}<strong class="header-error">{error}</strong>{/if}
+      {#if notice}<span aria-live="polite" class="header-notice">{notice}</span
+        >{/if}
     </header>
 
     <aside class="topics panel">
@@ -588,6 +667,12 @@
           </span>
         {/if}
       </header>
+      <div class="topic-policy">
+        <HistoryLimit
+          value={route.historyLimit}
+          onchange={changeHistoryLimit}
+        />
+      </div>
       <div class="topic-search">
         <input
           aria-label="Search topic paths"
@@ -603,12 +688,6 @@
             {topicFilter.matches.length === 1 ? "match" : "matches"}
           </span>
         {/if}
-        <button
-          disabled={!selectedTopicId}
-          title="Clear local history for the selected topic and its subtopics"
-          type="button"
-          onclick={clearTopicSubtree}>Clear subtree</button
-        >
       </div>
       <div class="topic-tree">
         {#if visibleTopics.roots.length}
@@ -628,6 +707,14 @@
           <p class="empty">Waiting for messages…</p>
         {/if}
       </div>
+      <footer class="topic-actions">
+        <button
+          disabled={!selectedSubtreeCount}
+          title="Clear buffered browser data for the selected topic and its subtopics"
+          type="button"
+          onclick={clearTopicSubtree}>Clear local branch history…</button
+        >
+      </footer>
     </aside>
 
     <section class="details">
@@ -635,6 +722,8 @@
         message={currentMessage}
         snapshot={jsonSnapshot}
         selected={selectedJsonId}
+        selectedLabel={selectedFieldLabel}
+        following={selectedMessageId === null}
         expanded={jsonExpanded}
         onselect={selectJson}
         ontoggle={toggleJson}
@@ -643,13 +732,16 @@
         messages={currentHistory}
         selectedId={selectedMessageId}
         field={activeField}
-        historyLimit={route.historyLimit}
+        fieldLabel={selectedFieldLabel}
         onselect={selectHistory}
         onlatest={selectLatest}
-        onlimit={changeHistoryLimit}
         onclear={clearHistory}
       />
-      <TelemetryPlot {points} label={selectedFieldLabel} />
+      <TelemetryPlot
+        points={series.points}
+        label={selectedFieldLabel}
+        retainedExcluded={series.retainedExcluded}
+      />
     </section>
   </main>
 {/if}

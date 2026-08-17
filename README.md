@@ -17,21 +17,25 @@ The browser keeps retrying after initial or later transport failures and resubsc
 
 ## Browsing
 
-The topic tree is populated as messages arrive. Press **/** to search complete topic paths and **Escape** to clear the search. Both trees use the same controls: click selects a node; double-click or **Enter** toggles a branch; the caret or **Space** also folds it; and the arrow, **Home**, **End**, **Page Up**, and **Page Down** keys move through visible nodes. Collapsing a branch selects it if its selected descendant would otherwise become hidden. Select a JSON field in the message tree to show that field in every history row and plot its finite numeric values. The last field is remembered for each topic, and a field carried to a new topic remains selected when that topic has the same JSON path. Retained replays are visible in history but excluded from the plot because their original publication time is unknown. MQTT redeliveries are marked `DUP` rather than discarded.
+The topic tree is populated as messages arrive. Press **/** to search complete topic paths and **Escape** to clear the search. Both trees use the same controls: click selects a node; double-click or **Enter** toggles a branch; the caret or **Space** also folds it; and the arrow, **Home**, **End**, **Page Up**, and **Page Down** keys move through visible nodes. Collapsing a branch selects it if its selected descendant would otherwise become hidden.
 
-The newest message is followed automatically. Selecting a history row freezes that message for inspection; **Up**, **Down**, **Home**, and **End** move through history without adding every row to the Tab order. **Latest** resumes following incoming messages. The History header changes the per-topic limit immediately and can clear only the selected topic's local browser history. **Clear subtree** in the topic browser clears the selected topic and all of its subtopics. Neither action publishes to the broker. If a frozen message is cleared or reaches the configured history limit and is evicted, the view resumes following the latest message.
+Topic history initially shows a bounded compact preview of each complete payload. Select a JSON field in the current-value tree to project that field into every history row and plot its finite numeric values. No field and the JSON root are distinct selections. The last field is remembered for each topic, and a field carried to a new topic remains selected when that topic has the same JSON path. The current-value header reports when a remembered field is absent from the displayed message. Retained replays are visible in history but excluded from the plot because their original publication time is unknown. MQTT redeliveries are marked `DUP` rather than discarded.
+
+The newest message is followed automatically. Selecting a history row marks the current value as historical and freezes that message for inspection; **Up**, **Down**, **Home**, and **End** move through history without adding every row to the Tab order. **Latest** resumes following incoming messages.
+
+The connection form and Topics panel configure how many messages are kept per topic. Lowering the limit discards older buffered messages across every topic immediately. **Clear local…** in Topic history clears only the exact selected topic; **Clear local branch history…** clears that topic and its discovered subtopics. Both actions affect this browser tab only: they do not publish, change subscriptions, or remove retained data from the broker. A retained publication that was cleared locally can therefore reappear after reconnecting and resubscribing. If a frozen message is cleared or evicted, the view resumes following the latest message.
 
 Browser Back and Forward traverse connection, topic, historical-message, and field choices. Broker, subscriptions, selected topic, and selected field are encoded in the URL. Opening such a URL reveals the selected field in the JSON tree. Historical-message selection remains page-session state because message history is not persisted across reloads.
 
 ## URL parameters
 
-| Parameter  | Meaning                                                                                     |
-| ---------- | ------------------------------------------------------------------------------------------- |
-| `broker`   | Full `ws://` or `wss://` MQTT WebSocket URL. A valid value connects automatically.          |
-| `topic`    | MQTT subscription filter. Repeat the parameter for multiple subscriptions. Defaults to `#`. |
-| `history`  | Per-topic message limit from `1` to `10000`. Defaults to `1000`.                            |
-| `selected` | Currently selected concrete topic.                                                          |
-| `field`    | Selected JSON field encoded as an RFC 6901 JSON Pointer.                                    |
+| Parameter  | Meaning                                                                                                             |
+| ---------- | ------------------------------------------------------------------------------------------------------------------- |
+| `broker`   | Full `ws://` or `wss://` MQTT WebSocket URL. A valid value connects automatically.                                  |
+| `topic`    | MQTT subscription filter. Repeat the parameter for multiple subscriptions. Defaults to `#`.                         |
+| `history`  | Per-topic message limit from `1` to `10000`. Defaults to `1000`.                                                    |
+| `selected` | Currently selected concrete topic.                                                                                  |
+| `field`    | Selected JSON field encoded as an RFC 6901 JSON Pointer. Omit it for no selection; an empty value selects the root. |
 
 Example:
 
@@ -56,4 +60,4 @@ The static production site is written to `dist/` and can be served by any ordina
 
 ## Scope
 
-The frontend does not publish messages, clear retained topics, persist telemetry, provide draggable dashboards, or connect to multiple brokers simultaneously. Its runtime dependencies are Svelte and MQTT.js; the accessible trees and SVG plot are implemented locally.
+The frontend does not publish messages, clear broker-retained topics, persist telemetry, provide draggable dashboards, or connect to multiple brokers simultaneously. In MQTT, removing a retained value is a broker-side publish operation; the local history actions above never perform it. The runtime dependencies are Svelte and MQTT.js; the accessible trees and SVG plot are implemented locally.

@@ -3,8 +3,12 @@
 <script lang="ts">
   import { downsamplePlotPoints, type PlotPoint } from "./lib/model";
 
-  type Props = { points: PlotPoint[]; label: string };
-  let { points, label }: Props = $props();
+  type Props = {
+    points: PlotPoint[];
+    label?: string;
+    retainedExcluded: number;
+  };
+  let { points, label, retainedExcluded }: Props = $props();
 
   const width = 640;
   const height = 220;
@@ -60,10 +64,20 @@
   }
 </script>
 
-<section class="panel plot-panel" aria-label={`Plot of ${label}`}>
+<section
+  class="panel plot-panel"
+  aria-label={label ? `Plot of ${label}` : "Plot"}
+>
   <header>
     <h2>Plot</h2>
-    <span class="meta">{label}</span>
+    {#if label}<span class="meta" title={label}>{label}</span>{/if}
+    <span class="samples meta">
+      {points.length.toLocaleString()}
+      {points.length === 1 ? "live sample" : "live samples"}
+      {retainedExcluded
+        ? ` · ${retainedExcluded.toLocaleString()} retained excluded`
+        : ""}
+    </span>
   </header>
   {#if bounds}
     <svg
@@ -99,7 +113,9 @@
     </svg>
   {:else}
     <p class="empty">
-      Select a numeric JSON field with at least two live samples.
+      {label
+        ? "This field needs at least two live numeric samples."
+        : "Select a numeric JSON field to plot it."}
     </p>
   {/if}
 </section>
@@ -117,6 +133,17 @@
     height: 100%;
     min-height: 0;
     width: 100%;
+  }
+
+  header .meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .samples {
+    flex: none;
+    margin-left: auto;
   }
 
   .axis,

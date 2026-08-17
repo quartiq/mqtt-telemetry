@@ -1,6 +1,8 @@
 <svelte:options runes={true} />
 
 <script lang="ts">
+  import HistoryLimit from "./HistoryLimit.svelte";
+
   type Props = {
     broker: string;
     filters: string;
@@ -17,7 +19,7 @@
     filters = $bindable(),
     username = $bindable(),
     password = $bindable(),
-    historyLimit,
+    historyLimit = $bindable(),
     status,
     error,
     onconnect,
@@ -26,6 +28,10 @@
   function submit(event: SubmitEvent) {
     event.preventDefault();
     onconnect();
+  }
+
+  function changeHistoryLimit(value: number) {
+    historyLimit = value;
   }
 </script>
 
@@ -66,9 +72,7 @@
       </div>
       <div class="actions">
         <button type="submit">Connect</button>
-        <span class="meta"
-          >Keeping {historyLimit.toLocaleString()} messages per topic</span
-        >
+        <HistoryLimit value={historyLimit} onchange={changeHistoryLimit} />
       </div>
     </form>
     <div aria-live="polite" class="feedback">

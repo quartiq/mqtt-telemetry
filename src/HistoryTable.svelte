@@ -2,21 +2,20 @@
 
 <script lang="ts">
   import {
+    messagePayloadPreview,
     messageFrequency,
     selectedMessageValue,
     type JsonPath,
     type TelemetryMessage,
   } from "./lib/model";
-  import { MAX_HISTORY_LIMIT } from "./lib/routes";
 
   type Props = {
     messages: TelemetryMessage[];
     selectedId: number | null;
     field: JsonPath | undefined;
-    historyLimit: number;
+    fieldLabel?: string;
     onselect: (id: number) => void;
     onlatest: () => void;
-    onlimit: (limit: number) => void;
     onclear: () => void;
   };
 
@@ -24,10 +23,9 @@
     messages,
     selectedId,
     field,
-    historyLimit,
+    fieldLabel,
     onselect,
     onlatest,
-    onlimit,
     onclear,
   }: Props = $props();
   const rowLimit = 500;
@@ -95,42 +93,29 @@
       onselect(id);
     }
   }
-
-  function changeLimit(event: Event) {
-    const input = event.currentTarget as HTMLInputElement;
-    if (!input.reportValidity()) {
-      input.value = String(historyLimit);
-      return;
-    }
-    onlimit(Number(input.value));
-  }
 </script>
 
 <section class="panel history-panel">
   <header>
     <h2>
-      History <span class="count">({messages.length.toLocaleString()})</span>
+      Topic history
+      <span class="count">({messages.length.toLocaleString()})</span>
     </h2>
-    {#if frequency}<span class="meta">{frequency}</span>{/if}
-    <div class="controls">
-      <label title="Maximum messages kept per topic">
-        Limit
-        <input
-          aria-label="History limit"
-          max={MAX_HISTORY_LIMIT}
-          min="1"
-          onchange={changeLimit}
-          required
-          step="1"
-          type="number"
-          value={historyLimit}
-        />
-      </label>
-      <button disabled={!messages.length} type="button" onclick={onclear}
-        >Clear</button
+    <div class="summary meta">
+      {#if frequency}<span>{frequency} · </span>{/if}
+      <span title={fieldLabel ?? "Full payload summary"}
+        >{fieldLabel ? `field ${fieldLabel}` : "payload"}</span
       >
+    </div>
+    <div class="controls">
       <button disabled={selectedId === null} type="button" onclick={onlatest}
         >Latest</button
+      >
+      <button
+        disabled={!messages.length}
+        title="Clear buffered browser data for this topic only"
+        type="button"
+        onclick={onclear}>Clear local…</button
       >
     </div>
   </header>
@@ -142,7 +127,9 @@
         </thead>
         <tbody>
           {#each visibleMessages as message (message.id)}
-            {@const value = selectedMessageValue(message, field)}
+            {@const value = field
+              ? selectedMessageValue(message, field)
+              : messagePayloadPreview(message)}
             <tr
               aria-selected={activeId === message.id}
               class:selected={activeId === message.id}
@@ -186,26 +173,30 @@
     align-items: baseline;
     display: flex;
     gap: var(--space-tight);
-    margin-left: auto;
-  }
-
-  .controls label {
-    align-items: baseline;
-    color: var(--muted);
-    display: flex;
-    font-size: var(--text-small);
-    gap: var(--space-tight);
-  }
-
-  .controls input {
-    height: var(--line);
-    padding-block: 0;
-    width: 5.5rem;
+    white-space: nowrap;
   }
 
   .count {
     color: var(--muted);
     font-weight: 400;
+  }
+
+  .history-panel > header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  h2 {
+    white-space: nowrap;
+  }
+
+  .summary {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .table-scroll {

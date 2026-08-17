@@ -50,6 +50,7 @@ export type JsonSnapshot = {
 };
 
 export type PlotPoint = { x: number; y: number };
+export type PlotSeries = { points: PlotPoint[]; retainedExcluded: number };
 
 export type StoreLimits = {
   maxHistoryBytes: number;
@@ -202,30 +203,42 @@ export function fieldLabel(path: JsonPath): string {
 
 export function selectedMessageValue(
   message: TelemetryMessage,
-  path: JsonPath | undefined,
+  path: JsonPath,
 ): string {
-  if (!path) return "—";
   if (message.payload.kind !== "json")
     return path.length ? "—" : truncate(formatPayload(message.payload));
   const value = getJsonPath(message.payload.value, path);
   if (value === undefined) return "—";
-  if (Array.isArray(value)) return `[${value.length.toLocaleString()} items]`;
-  if (isJsonObject(value))
-    return `{${Object.keys(value).length.toLocaleString()} fields}`;
   return truncate(formatValue(value));
 }
 
-export function plotPoints(
+export function messagePayloadPreview(message: TelemetryMessage): string {
+  switch (message.payload.kind) {
+    case "json":
+      return truncate(formatValue(message.payload.value));
+    case "text":
+      return truncate(message.payload.value || "empty text");
+    case "binary":
+      return `binary (${message.bytes.toLocaleString()} bytes)`;
+    case "omitted":
+      return message.payload.value;
+  }
+}
+
+export function plotSeries(
   history: TelemetryMessage[],
   path: JsonPath,
-): PlotPoint[] {
-  return history.flatMap((message) => {
-    if (message.retained || message.payload.kind !== "json") return [];
+): PlotSeries {
+  const points: PlotPoint[] = [];
+  let retainedExcluded = 0;
+  for (const message of history) {
+    if (message.payload.kind !== "json") continue;
     const value = getJsonPath(message.payload.value, path);
-    return typeof value === "number" && Number.isFinite(value)
-      ? [{ x: message.receivedAt, y: value }]
-      : [];
-  });
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    if (message.retained) retainedExcluded += 1;
+    else points.push({ x: message.receivedAt, y: value });
+  }
+  return { points, retainedExcluded };
 }
 
 export function downsamplePlotPoints(
@@ -274,9 +287,14 @@ export function jsonTree(
   let nodeLimitReached = false;
 
   const summary = (value: JsonValue): string => {
-    if (Array.isArray(value)) return `[${value.length.toLocaleString()} items]`;
-    if (isJsonObject(value))
-      return `{${Object.keys(value).length.toLocaleString()} fields}`;
+    if (Array.isArray(value))
+      return value.length
+        ? `array (${value.length.toLocaleString()} items)`
+        : "[]";
+    if (isJsonObject(value)) {
+      const count = Object.keys(value).length;
+      return count ? `object (${count.toLocaleString()} fields)` : "{}";
+    }
     return formatValue(value);
   };
 
@@ -472,6 +490,10 @@ export class TelemetryStore {
 
   topic(id: string): string | undefined {
     return this.nodes.get(id)?.topic;
+  }
+
+  subtreeMessageCount(id: string): number {
+    return this.nodes.get(id)?.messageCount ?? 0;
   }
 
   history(id: string): TelemetryMessage[] {
