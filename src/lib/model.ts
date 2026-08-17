@@ -28,13 +28,13 @@ type TopicNode = {
   children: string[];
   history: TelemetryMessage[];
   published: boolean;
-  subtreeMessages: number;
+  messageCount: number;
 };
 
 export type TopicSnapshot = {
   roots: string[];
   nodes: Map<string, TreeNodeView>;
-  version: number;
+  revision: number;
   topicCount: number;
   droppedMessages: number;
   evictedMessages: number;
@@ -303,18 +303,16 @@ function truncate(value: string, limit = 256): string {
 
 export class TelemetryStore {
   private readonly nodes = new Map<string, TopicNode>();
-  private readonly nodesByTopic = new Map<string, string>();
   private readonly views = new Map<string, TreeNodeView>();
   private roots: string[] = [];
+  // Map insertion order is arrival order; its first remaining value is oldest.
   private readonly retained = new Map<
     number,
-    { nodeId: string; cost: number; previous?: number; next?: number }
+    { nodeId: string; cost: number }
   >();
-  private oldestRetained?: number;
-  private newestRetained?: number;
   private historyBytes = 0;
   private sequence = 0;
-  private version = 0;
+  private revision = 0;
   private topicCount = 0;
   private droppedMessages = 0;
   private evictedMessages = 0;
@@ -338,7 +336,7 @@ export class TelemetryStore {
     const missing = ids.filter((id) => !this.nodes.has(id)).length;
     if (this.nodes.size + missing > this.limits.maxTopicNodes) {
       this.droppedMessages += 1;
-      this.version += 1;
+      this.revision += 1;
       return undefined;
     }
     let parent: string | undefined;
@@ -354,9 +352,8 @@ export class TelemetryStore {
           children: [],
           history: [],
           published: false,
-          subtreeMessages: 0,
+          messageCount: 0,
         });
-        this.nodesByTopic.set(currentParts.join("/"), id);
         this.views.set(id, this.nodeView(id));
         if (parent) {
           const parentNode = this.nodes.get(parent) as TopicNode;
@@ -395,36 +392,19 @@ export class TelemetryStore {
         ? Math.max(256, parsed.value.length * 2)
         : Math.max(256, payload.byteLength * 4);
     node.history = [...node.history, message];
-    this.retained.set(message.id, {
-      nodeId,
-      cost,
-      ...(this.newestRetained === undefined
-        ? {}
-        : { previous: this.newestRetained }),
-    });
-    if (this.newestRetained === undefined) {
-      this.oldestRetained = message.id;
-    } else {
-      const newest = this.retained.get(this.newestRetained);
-      if (newest) newest.next = message.id;
-    }
-    this.newestRetained = message.id;
+    this.retained.set(message.id, { nodeId, cost });
     this.historyBytes += cost;
     this.adjustSubtree(nodeId, 1);
     const excess = node.history.length - this.historyLimit;
-    if (excess > 0)
-      this.removeMessages(
-        nodeId,
-        node.history.slice(0, excess).map(({ id }) => id),
-        false,
-      );
+    if (excess > 0) this.dropOldest(nodeId, excess, false);
     this.enforceGlobalBudget();
-    this.version += 1;
+    this.revision += 1;
     return { nodeId, message };
   }
 
   nodeId(topic: string): string | undefined {
-    return this.nodesByTopic.get(topic);
+    const id = topicId(topic.split("/"));
+    return this.nodes.has(id) ? id : undefined;
   }
 
   topic(id: string): string | undefined {
@@ -439,25 +419,16 @@ export class TelemetryStore {
     this.historyLimit = limit;
     for (const node of this.nodes.values()) {
       const excess = node.history.length - limit;
-      if (excess > 0)
-        this.removeMessages(
-          node.id,
-          node.history.slice(0, excess).map(({ id }) => id),
-          false,
-        );
+      if (excess > 0) this.dropOldest(node.id, excess, false);
     }
-    this.version += 1;
+    this.revision += 1;
   }
 
   clearHistory(id: string): void {
     const node = this.nodes.get(id);
     if (!node?.history.length) return;
-    this.removeMessages(
-      id,
-      node.history.map(({ id: messageId }) => messageId),
-      false,
-    );
-    this.version += 1;
+    this.dropOldest(id, node.history.length, false);
+    this.revision += 1;
   }
 
   ancestorIds(id: string): string[] {
@@ -474,7 +445,7 @@ export class TelemetryStore {
     return {
       roots: this.roots,
       nodes: this.views,
-      version: this.version,
+      revision: this.revision,
       topicCount: this.topicCount,
       droppedMessages: this.droppedMessages,
       evictedMessages: this.evictedMessages,
@@ -493,15 +464,14 @@ export class TelemetryStore {
   private nodeView(id: string): TreeNodeView {
     const node = this.nodes.get(id) as TopicNode;
     const direct = node.history.length;
-    const displayed = direct || node.subtreeMessages;
     return {
       id,
       label: node.label,
       ...(node.parent ? { parent: node.parent } : {}),
       children: node.children,
-      value: `${displayed.toLocaleString()} ${displayed === 1 ? "msg" : "msgs"}`,
+      value: `${node.messageCount.toLocaleString()} ${node.messageCount === 1 ? "msg" : "msgs"}`,
       title: node.children.length
-        ? `${node.topic}\n${direct.toLocaleString()} direct; ${node.subtreeMessages.toLocaleString()} in subtree`
+        ? `${node.topic}\n${direct.toLocaleString()} direct; ${node.messageCount.toLocaleString()} total`
         : node.topic,
     };
   }
@@ -514,44 +484,29 @@ export class TelemetryStore {
     let current: string | undefined = id;
     while (current) {
       const node = this.nodes.get(current) as TopicNode;
-      node.subtreeMessages += delta;
+      node.messageCount += delta;
       this.refreshView(current);
       current = node.parent;
     }
   }
 
-  private removeMessages(
+  private dropOldest(
     nodeId: string,
-    ids: number[],
-    globalEviction: boolean,
+    count: number,
+    countAsEvicted: boolean,
   ): void {
-    if (!ids.length) return;
-    const removed = new Set(ids);
     const node = this.nodes.get(nodeId) as TopicNode;
-    node.history = node.history.filter(({ id }) => !removed.has(id));
-    let count = 0;
-    for (const id of removed) {
-      const retained = this.retained.get(id);
+    const removed = node.history.slice(0, count);
+    node.history = node.history.slice(removed.length);
+    for (const message of removed) {
+      const retained = this.retained.get(message.id);
       if (!retained) continue;
-      if (retained.previous === undefined) {
-        this.oldestRetained = retained.next;
-      } else {
-        const previous = this.retained.get(retained.previous);
-        if (previous) previous.next = retained.next;
-      }
-      if (retained.next === undefined) {
-        this.newestRetained = retained.previous;
-      } else {
-        const next = this.retained.get(retained.next);
-        if (next) next.previous = retained.previous;
-      }
-      this.retained.delete(id);
+      this.retained.delete(message.id);
       this.historyBytes -= retained.cost;
-      count += 1;
     }
-    if (count) {
-      this.adjustSubtree(nodeId, -count);
-      if (globalEviction) this.evictedMessages += count;
+    if (removed.length) {
+      this.adjustSubtree(nodeId, -removed.length);
+      if (countAsEvicted) this.evictedMessages += removed.length;
     }
   }
 
@@ -560,11 +515,9 @@ export class TelemetryStore {
       this.retained.size > this.limits.maxHistoryMessages ||
       this.historyBytes > this.limits.maxHistoryBytes
     ) {
-      const oldestId = this.oldestRetained;
-      if (oldestId === undefined) break;
-      const oldest = this.retained.get(oldestId);
+      const oldest = this.retained.values().next().value;
       if (!oldest) break;
-      this.removeMessages(oldest.nodeId, [oldestId], true);
+      this.dropOldest(oldest.nodeId, 1, true);
     }
   }
 }

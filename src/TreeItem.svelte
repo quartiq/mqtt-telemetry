@@ -1,59 +1,39 @@
 <svelte:options runes={true} />
 
 <script lang="ts">
-  import type { TreeDirection, TreeNodeView } from "./lib/tree";
+  import type { TreeContext, TreeDirection, TreeNodeView } from "./lib/tree";
   import TreeItem from "./TreeItem.svelte";
 
   type Props = {
     id: string;
-    nodes: Map<string, TreeNodeView>;
-    version: number;
-    selected: string;
-    tabStop: string;
-    expanded: Set<string>;
-    onselect: (id: string) => void;
-    ontoggle: (id: string, open: boolean) => void;
-    move: (id: string, direction: TreeDirection) => void;
+    context: TreeContext;
     depth?: number;
     index?: number;
     size?: number;
   };
 
-  let {
-    id,
-    nodes,
-    version,
-    selected,
-    tabStop,
-    expanded,
-    onselect,
-    ontoggle,
-    move,
-    depth = 0,
-    index = 1,
-    size = 1,
-  }: Props = $props();
+  let { id, context, depth = 0, index = 1, size = 1 }: Props = $props();
   let node = $derived.by(() => {
-    version;
-    return nodes.get(id) as TreeNodeView;
+    context.revision;
+    return context.nodes.get(id) as TreeNodeView;
   });
   let internal = $derived(node.children.length > 0);
-  let open = $derived(expanded.has(node.id));
-  let active = $derived(selected === node.id);
+  let open = $derived(context.expanded.has(node.id));
+  let active = $derived(context.selected === node.id);
 
   function toggle(event: MouseEvent) {
     event.stopPropagation();
-    ontoggle(node.id, !open);
+    context.actions.toggle(node.id, !open);
   }
 
   function select(event: MouseEvent) {
     event.currentTarget instanceof HTMLElement && event.currentTarget.focus();
-    onselect(node.id);
+    context.actions.select(node.id);
   }
 
   function activate() {
-    onselect(node.id);
-    if (internal) ontoggle(node.id, !open);
+    context.actions.select(node.id);
+    if (internal) context.actions.toggle(node.id, !open);
   }
 
   function keydown(event: KeyboardEvent) {
@@ -70,13 +50,13 @@
     const direction = directions[event.key];
     if (direction) {
       event.preventDefault();
-      move(node.id, direction);
+      context.actions.move(node.id, direction);
     } else if (event.key === "Enter") {
       event.preventDefault();
       activate();
     } else if (event.key === " " && internal) {
       event.preventDefault();
-      ontoggle(node.id, !open);
+      context.actions.toggle(node.id, !open);
     }
   }
 </script>
@@ -92,7 +72,7 @@
     data-tree-id={node.id}
     role="treeitem"
     style:padding-left={`${depth}rem`}
-    tabindex={tabStop === node.id ? 0 : -1}
+    tabindex={context.tabStop === node.id ? 0 : -1}
     title={internal
       ? `${node.title ?? node.label}\nDouble-click or Enter to toggle this branch`
       : (node.title ?? node.label)}
@@ -122,14 +102,7 @@
       {#each node.children as childId, childIndex (childId)}
         <TreeItem
           id={childId}
-          {nodes}
-          {version}
-          {selected}
-          {tabStop}
-          {expanded}
-          {onselect}
-          {ontoggle}
-          {move}
+          {context}
           depth={depth + 1}
           index={childIndex + 1}
           size={node.children.length}

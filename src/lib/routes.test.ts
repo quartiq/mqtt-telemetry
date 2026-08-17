@@ -29,7 +29,24 @@ describe("route configuration", () => {
       selectedTopic: "sensors/room/temperature",
       fieldPointer: "/environment/temperature",
     };
-    expect(readRoute(routeSearch(expected))).toEqual(expected);
+    const search = routeSearch(expected);
+    expect(search).toBe(
+      "?broker=wss://broker.example/mqtt?token=public&topic=sensors/%23&topic=alerts/%2B&topic=%20room/temperature%20&history=42&selected=sensors/room/temperature&field=/environment/temperature",
+    );
+    expect(readRoute(search)).toEqual(expected);
+  });
+
+  it("keeps fully escaped links compatible", () => {
+    expect(
+      readRoute(
+        "?broker=wss%3A%2F%2Fbroker.example&topic=sensors%2F%23&selected=sensors%2Froom&field=%2Fvalue",
+      ),
+    ).toMatchObject({
+      broker: "wss://broker.example",
+      filters: ["sensors/#"],
+      selectedTopic: "sensors/room",
+      fieldPointer: "/value",
+    });
   });
 
   it("does not treat a live history-limit change as a new connection", () => {

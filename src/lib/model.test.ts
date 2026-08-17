@@ -193,7 +193,7 @@ describe("topic history", () => {
     store.clearHistory(leaf);
     const after = store.snapshot();
     expect(after.nodes).toBe(before.nodes);
-    expect(after.version).toBeGreaterThan(before.version);
+    expect(after.revision).toBeGreaterThan(before.revision);
     expect(after.topicCount).toBe(1);
     expect(after.nodes.get(leaf)?.value).toBe("0 msgs");
   });
@@ -207,8 +207,8 @@ describe("topic history", () => {
     const a = store.nodeId("a") as string;
     expect(store.history(a)).toHaveLength(1);
     expect(snapshot.nodes.get(a)?.children).toHaveLength(1);
-    expect(snapshot.nodes.get(a)?.value).toBe("1 msg");
-    expect(snapshot.nodes.get(a)?.title).toContain("1 direct; 2 in subtree");
+    expect(snapshot.nodes.get(a)?.value).toBe("2 msgs");
+    expect(snapshot.nodes.get(a)?.title).toContain("1 direct; 2 total");
     expect(snapshot.nodes.get(store.nodeId("a/b") as string)?.value).toBe(
       "1 msg",
     );

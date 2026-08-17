@@ -113,6 +113,8 @@
       .join(" · "),
   );
 
+  $effect(() => loadBrokerAuth(formBroker.trim()));
+
   $effect(() => {
     const topic = selectedTopic;
     if (!topic) {
@@ -523,7 +525,7 @@
           <TreeView
             roots={topicSnapshot.roots}
             nodes={topicSnapshot.nodes}
-            version={topicSnapshot.version}
+            revision={topicSnapshot.revision}
             selected={selectedTopicId}
             expanded={topicExpanded}
             label="MQTT topics"

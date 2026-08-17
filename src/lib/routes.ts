@@ -37,16 +37,27 @@ export function readRoute(search: string): AppRoute {
 }
 
 export function routeSearch(route: AppRoute): string {
-  const params = new URLSearchParams();
-  if (route.broker) params.set("broker", route.broker);
+  const params: [string, string][] = [];
+  if (route.broker) params.push(["broker", route.broker]);
   for (const filter of uniqueFilters(route.filters))
-    params.append("topic", filter);
+    params.push(["topic", filter]);
   if (route.historyLimit !== DEFAULT_HISTORY_LIMIT) {
-    params.set("history", String(route.historyLimit));
+    params.push(["history", String(route.historyLimit)]);
   }
-  if (route.selectedTopic) params.set("selected", route.selectedTopic);
-  if (route.fieldPointer) params.set("field", route.fieldPointer);
-  return `?${params.toString()}`;
+  if (route.selectedTopic) params.push(["selected", route.selectedTopic]);
+  if (route.fieldPointer) params.push(["field", route.fieldPointer]);
+  return `?${params
+    .map(([key, value]) => `${key}=${readableQueryValue(value)}`)
+    .join("&")}`;
+}
+
+function readableQueryValue(value: string): string {
+  return encodeURIComponent(value)
+    .replaceAll("%2F", "/")
+    .replaceAll("%3A", ":")
+    .replaceAll("%3F", "?")
+    .replaceAll("%3D", "=")
+    .replaceAll("%40", "@");
 }
 
 export function isWebSocketBroker(

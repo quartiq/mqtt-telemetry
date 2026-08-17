@@ -36,7 +36,7 @@ Browser Back and Forward traverse connection, topic, historical-message, and fie
 Example:
 
 ```text
-?broker=ws%3A%2F%2Flocalhost%3A9001&topic=sensors%2F%23&topic=alerts%2F%2B&history=500
+?broker=ws://localhost:9001&topic=sensors/%23&topic=alerts/%2B&history=500
 ```
 
 Username and password entered in the connection form are never placed in the URL. They are stored in `sessionStorage` for the current browser tab, keyed by broker URL. Broker URLs are themselves shared through the address bar, so do not put secret tokens or credentials in a broker URL.

@@ -57,16 +57,7 @@ export class MqttSession {
       if (!this.closing) callbacks.status({ state: "reconnecting" });
     });
     client.on("offline", () => {
-      if (!this.closing) {
-        this.generation += 1;
-        callbacks.status({ state: "offline" });
-      }
-    });
-    client.on("close", () => {
-      if (!this.closing) {
-        this.generation += 1;
-        callbacks.status({ state: "reconnecting" });
-      }
+      if (!this.closing) callbacks.status({ state: "offline" });
     });
     client.on("error", (error: Error) => {
       if (!this.closing)
@@ -119,7 +110,6 @@ export class MqttSession {
   close(): void {
     if (this.closing) return;
     this.closing = true;
-    this.generation += 1;
     this.client.end(true);
   }
 }

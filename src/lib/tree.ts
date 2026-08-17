@@ -17,6 +17,21 @@ export type TreeDirection =
   | "pageNext"
   | "pagePrevious";
 
+export type TreeActions = {
+  select: (id: string) => void;
+  toggle: (id: string, open: boolean) => void;
+  move: (id: string, direction: TreeDirection) => void;
+};
+
+export type TreeContext = {
+  nodes: Map<string, TreeNodeView>;
+  revision: number;
+  selected: string;
+  tabStop: string;
+  expanded: Set<string>;
+  actions: TreeActions;
+};
+
 export function treeAncestorIds(
   id: string,
   nodes: Map<string, TreeNodeView>,

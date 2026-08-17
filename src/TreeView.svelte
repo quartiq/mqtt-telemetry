@@ -1,14 +1,19 @@
 <svelte:options runes={true} />
 
 <script lang="ts">
-  import type { TreeDirection, TreeNodeView } from "./lib/tree";
+  import type {
+    TreeActions,
+    TreeContext,
+    TreeDirection,
+    TreeNodeView,
+  } from "./lib/tree";
   import { moveTreeSelection, treeTabStopId, visibleTreeIds } from "./lib/tree";
   import TreeItem from "./TreeItem.svelte";
 
   type Props = {
     roots: string[];
     nodes: Map<string, TreeNodeView>;
-    version: number;
+    revision?: number;
     selected: string;
     expanded: Set<string>;
     label: string;
@@ -19,7 +24,7 @@
   let {
     roots,
     nodes,
-    version,
+    revision = 0,
     selected,
     expanded,
     label,
@@ -27,11 +32,24 @@
     ontoggle,
   }: Props = $props();
   let focusId = $state("");
+  const actions: TreeActions = {
+    select: (id) => onselect(id),
+    toggle: (id, open) => ontoggle(id, open),
+    move,
+  };
   let visible = $derived.by(() => {
-    version;
+    revision;
     return visibleTreeIds(roots, nodes, expanded);
   });
   let tabStop = $derived(treeTabStopId(selected, visible, nodes));
+  let context: TreeContext = $derived({
+    nodes,
+    revision,
+    selected,
+    tabStop,
+    expanded,
+    actions,
+  });
 
   $effect(() => {
     if (!focusId) return;
@@ -63,19 +81,7 @@
 
 <ul aria-label={label} role="tree">
   {#each roots as id, index (id)}
-    <TreeItem
-      {id}
-      {nodes}
-      {version}
-      {selected}
-      {tabStop}
-      {expanded}
-      {onselect}
-      {ontoggle}
-      {move}
-      index={index + 1}
-      size={roots.length}
-    />
+    <TreeItem {id} {context} index={index + 1} size={roots.length} />
   {/each}
 </ul>
 

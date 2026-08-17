@@ -89,11 +89,15 @@ describe("MQTT session", () => {
     );
 
     client.emit("offline");
-    client.emit("close");
     client.emit("reconnect");
     client.emit("connect");
     await Promise.resolve();
     expect(client.subscribeAsync).toHaveBeenCalledTimes(2);
+    expect(client.subscribeAsync).toHaveBeenNthCalledWith(
+      2,
+      ["sensors/#", "alerts/+"],
+      { qos: 0 },
+    );
     expect(statuses.at(-1)).toEqual({ state: "reconnecting" });
     second.resolve();
     await vi.waitFor(() =>
@@ -184,11 +188,7 @@ describe("MQTT session", () => {
     client.emit("close");
     client.emit("reconnect");
     expect(client.end).not.toHaveBeenCalled();
-    expect(statuses).toEqual([
-      { state: "offline" },
-      { state: "reconnecting" },
-      { state: "reconnecting" },
-    ]);
+    expect(statuses).toEqual([{ state: "offline" }, { state: "reconnecting" }]);
 
     session.close();
   });
