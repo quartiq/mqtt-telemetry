@@ -121,6 +121,7 @@
         </thead>
         <tbody>
           {#each newestFirst as message (message.id)}
+            {@const value = selectedMessageValue(message, field)}
             <tr
               aria-selected={activeId === message.id}
               class:selected={activeId === message.id}
@@ -135,9 +136,7 @@
                   : timestamp(message.receivedAt)}</td
               >
               <td>QoS {message.qos}</td>
-              <td title={selectedMessageValue(message, field)}
-                >{selectedMessageValue(message, field)}</td
-              >
+              <td title={value}>{value}</td>
             </tr>
           {/each}
         </tbody>

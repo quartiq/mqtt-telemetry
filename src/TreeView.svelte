@@ -8,6 +8,7 @@
   type Props = {
     roots: string[];
     nodes: Map<string, TreeNodeView>;
+    version: number;
     selected: string;
     expanded: Set<string>;
     label: string;
@@ -15,10 +16,21 @@
     ontoggle: (id: string, open: boolean) => void;
   };
 
-  let { roots, nodes, selected, expanded, label, onselect, ontoggle }: Props =
-    $props();
+  let {
+    roots,
+    nodes,
+    version,
+    selected,
+    expanded,
+    label,
+    onselect,
+    ontoggle,
+  }: Props = $props();
   let focusId = $state("");
-  let visible = $derived(visibleTreeIds(roots, nodes, expanded));
+  let visible = $derived.by(() => {
+    version;
+    return visibleTreeIds(roots, nodes, expanded);
+  });
   let tabStop = $derived(treeTabStopId(selected, visible, nodes));
 
   $effect(() => {
@@ -51,21 +63,19 @@
 
 <ul aria-label={label} role="tree">
   {#each roots as id, index (id)}
-    {@const node = nodes.get(id)}
-    {#if node}
-      <TreeItem
-        {node}
-        {nodes}
-        {selected}
-        {tabStop}
-        {expanded}
-        {onselect}
-        {ontoggle}
-        {move}
-        index={index + 1}
-        size={roots.length}
-      />
-    {/if}
+    <TreeItem
+      {id}
+      {nodes}
+      {version}
+      {selected}
+      {tabStop}
+      {expanded}
+      {onselect}
+      {ontoggle}
+      {move}
+      index={index + 1}
+      size={roots.length}
+    />
   {/each}
 </ul>
 

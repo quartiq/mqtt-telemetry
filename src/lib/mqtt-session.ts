@@ -34,7 +34,7 @@ export function clientOptions(auth?: Partial<SessionAuth>): IClientOptions {
     protocolVersion: 4,
     queueQoSZero: false,
     reconnectPeriod: 1000,
-    resubscribe: true,
+    resubscribe: false,
     ...(username || password ? { username } : {}),
     ...(password ? { password } : {}),
   };
@@ -42,12 +42,7 @@ export function clientOptions(auth?: Partial<SessionAuth>): IClientOptions {
 
 export class MqttSession {
   private closing = false;
-  private subscribed = false;
-  private readonly online = () => {
-    if (this.closing || !this.client.reconnecting) return;
-    this.callbacks.status({ state: "reconnecting" });
-    this.client.reconnect();
-  };
+  private generation = 0;
 
   private constructor(
     private readonly client: MqttClient,
@@ -57,44 +52,58 @@ export class MqttSession {
     client.on("message", (topic, payload, packet) => {
       callbacks.message({ topic, payload, packet });
     });
-    client.on("connect", () => void this.connected(filters));
+    client.on("connect", () => void this.connected(filters, ++this.generation));
     client.on("reconnect", () => {
       if (!this.closing) callbacks.status({ state: "reconnecting" });
     });
     client.on("offline", () => {
-      if (!this.closing) callbacks.status({ state: "offline" });
+      if (!this.closing) {
+        this.generation += 1;
+        callbacks.status({ state: "offline" });
+      }
     });
     client.on("close", () => {
-      if (!this.closing) callbacks.status({ state: "reconnecting" });
+      if (!this.closing) {
+        this.generation += 1;
+        callbacks.status({ state: "reconnecting" });
+      }
     });
     client.on("error", (error: Error) => {
       if (!this.closing)
         callbacks.status({ state: "error", error: error.message });
     });
-    globalThis.addEventListener?.("online", this.online);
   }
 
-  private async connected(filters: string[]): Promise<void> {
-    if (!this.subscribed) {
-      try {
-        await this.client.subscribeAsync(filters, {
-          qos: 0,
-        } satisfies IClientSubscribeOptions);
-        this.subscribed = true;
-      } catch (error) {
-        if (!this.closing) {
-          this.callbacks.status({
-            state: "error",
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-        return;
+  private async connected(
+    filters: string[],
+    generation: number,
+  ): Promise<void> {
+    try {
+      await this.client.subscribeAsync(filters, {
+        qos: 0,
+      } satisfies IClientSubscribeOptions);
+    } catch (error) {
+      if (
+        generation === this.generation &&
+        this.client.connected &&
+        !this.closing
+      ) {
+        this.callbacks.status({
+          state: "error",
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
+      return;
     }
-    if (!this.closing) this.callbacks.status({ state: "connected" });
+    if (
+      generation === this.generation &&
+      this.client.connected &&
+      !this.closing
+    )
+      this.callbacks.status({ state: "connected" });
   }
 
-  static connect(
+  static open(
     broker: string,
     filters: string[],
     callbacks: SessionCallbacks,
@@ -110,7 +119,7 @@ export class MqttSession {
   close(): void {
     if (this.closing) return;
     this.closing = true;
-    globalThis.removeEventListener?.("online", this.online);
+    this.generation += 1;
     this.client.end(true);
   }
 }

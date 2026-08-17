@@ -42,6 +42,7 @@
       <TreeView
         roots={snapshot.roots}
         nodes={snapshot.nodes}
+        version={message.id}
         {selected}
         {expanded}
         label="JSON fields"

@@ -9,7 +9,6 @@
     historyLimit: number;
     status: string;
     error: string;
-    busy: boolean;
     onconnect: () => void;
   };
 
@@ -21,7 +20,6 @@
     historyLimit,
     status,
     error,
-    busy,
     onconnect,
   }: Props = $props();
 
@@ -43,7 +41,6 @@
         <input
           autocomplete="url"
           bind:value={broker}
-          disabled={busy}
           placeholder="ws://localhost:9001"
           required
           type="url"
@@ -51,31 +48,24 @@
       </label>
       <label>
         Subscriptions <span class="hint">one MQTT filter per line</span>
-        <textarea bind:value={filters} disabled={busy} rows="4"></textarea>
+        <textarea bind:value={filters} rows="4"></textarea>
       </label>
       <div class="credentials">
         <label>
           Username
-          <input
-            autocomplete="username"
-            bind:value={username}
-            disabled={busy}
-          />
+          <input autocomplete="username" bind:value={username} />
         </label>
         <label>
           Password
           <input
             autocomplete="current-password"
             bind:value={password}
-            disabled={busy}
             type="password"
           />
         </label>
       </div>
       <div class="actions">
-        <button disabled={busy} type="submit"
-          >{busy ? "Connecting…" : "Connect"}</button
-        >
+        <button type="submit">Connect</button>
         <span class="meta"
           >Keeping {historyLimit.toLocaleString()} messages per topic</span
         >

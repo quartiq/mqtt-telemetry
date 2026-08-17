@@ -41,7 +41,7 @@ Example:
 
 Username and password entered in the connection form are never placed in the URL. They are stored in `sessionStorage` for the current browser tab, keyed by broker URL. Broker URLs are themselves shared through the address bar, so do not put secret tokens or credentials in a broker URL.
 
-For browser safety, payload contents above 1 MiB are omitted and discovery stops adding new topic nodes after 10,000 nodes. Existing topics continue updating; the Topics header reports any affected publications.
+For browser safety, payload contents above 1 MiB are omitted, discovery stops after 10,000 topic nodes, and history is globally limited to 100,000 messages and an estimated 64 MiB of payload storage. Oldest messages are evicted first across topics. JSON value trees stop after 10,000 nodes or 64 levels. Existing topics continue updating; the Topics header reports dropped publications, omitted payloads, and global history evictions.
 
 ## Build and verify
 

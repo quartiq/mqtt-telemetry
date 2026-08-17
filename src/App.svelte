@@ -55,7 +55,6 @@
   let jsonExpanded = $state(new Set<string>(["$"]));
   let status = $state("Idle");
   let error = $state("");
-  let busy = $state(false);
   let connectSerial = 0;
   let viewToken = crypto.randomUUID();
   let lastReceivedAt = 0;
@@ -98,9 +97,20 @@
   let selectedFieldLabel = $derived(
     activeField ? fieldLabel(activeField) : route.fieldPointer || "$",
   );
-  let directTopicCount = $derived(
-    [...topicSnapshot.nodes.keys()].filter((id) => store.history(id).length)
-      .length,
+  let topicWarning = $derived(
+    [
+      topicSnapshot.droppedMessages
+        ? `${topicSnapshot.droppedMessages.toLocaleString()} dropped`
+        : "",
+      topicSnapshot.evictedMessages
+        ? `${topicSnapshot.evictedMessages.toLocaleString()} globally evicted`
+        : "",
+      topicSnapshot.omittedPayloads
+        ? `${topicSnapshot.omittedPayloads.toLocaleString()} payloads omitted`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" · "),
   );
 
   $effect(() => {
@@ -152,7 +162,7 @@
         if (next.broker) {
           formBroker = next.broker;
           loadBrokerAuth(next.broker);
-          void startConnection(next);
+          startConnection(next);
         } else {
           stopConnection();
         }
@@ -167,7 +177,7 @@
       }
     };
     addEventListener("popstate", popstate);
-    if (route.broker) void startConnection(route);
+    if (route.broker) startConnection(route);
     return () => {
       removeEventListener("popstate", popstate);
       if (renderFrame) cancelAnimationFrame(renderFrame);
@@ -220,7 +230,6 @@
     connectSerial += 1;
     session?.close();
     session = undefined;
-    busy = false;
     status = "Idle";
     error = "";
     resetData(route.historyLimit);
@@ -264,11 +273,10 @@
     session?.close();
     session = undefined;
     resetData(nextRoute.historyLimit);
-    busy = true;
     status = "Connecting";
     error = "";
     try {
-      const nextSession = MqttSession.connect(
+      const nextSession = MqttSession.open(
         nextRoute.broker,
         nextRoute.filters,
         {
@@ -302,11 +310,9 @@
         return;
       }
       session = nextSession;
-      busy = false;
       restoreView(history.state);
     } catch (caught) {
       if (serial !== connectSerial) return;
-      busy = false;
       status = "Connection failed";
       error = caught instanceof Error ? caught.message : String(caught);
     }
@@ -329,7 +335,7 @@
       fieldPointer: "",
     };
     writeRoute(next, null);
-    void startConnection(next);
+    startConnection(next);
   }
 
   function changeConnection() {
@@ -468,7 +474,6 @@
     historyLimit={route.historyLimit}
     {status}
     {error}
-    {busy}
     onconnect={connectFromForm}
   />
 {:else}
@@ -500,23 +505,16 @@
     <aside class="topics panel">
       <header>
         <h2>
-          Topics <span class="count">({directTopicCount.toLocaleString()})</span
+          Topics <span class="count"
+            >({topicSnapshot.topicCount.toLocaleString()})</span
           >
         </h2>
         <span class="meta" title={route.filters.join("\n")}
           >{route.filters.join(", ")}</span
         >
-        {#if topicSnapshot.droppedMessages || topicSnapshot.omittedPayloads}
+        {#if topicWarning}
           <span class="meta problem" title="Browser safety limits applied">
-            {#if topicSnapshot.droppedMessages}
-              {topicSnapshot.droppedMessages.toLocaleString()} dropped
-            {/if}
-            {#if topicSnapshot.droppedMessages && topicSnapshot.omittedPayloads}
-              ·
-            {/if}
-            {#if topicSnapshot.omittedPayloads}
-              {topicSnapshot.omittedPayloads.toLocaleString()} payloads omitted
-            {/if}
+            {topicWarning}
           </span>
         {/if}
       </header>
@@ -525,6 +523,7 @@
           <TreeView
             roots={topicSnapshot.roots}
             nodes={topicSnapshot.nodes}
+            version={topicSnapshot.version}
             selected={selectedTopicId}
             expanded={topicExpanded}
             label="MQTT topics"

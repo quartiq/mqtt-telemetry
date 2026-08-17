@@ -5,8 +5,9 @@
   import TreeItem from "./TreeItem.svelte";
 
   type Props = {
-    node: TreeNodeView;
+    id: string;
     nodes: Map<string, TreeNodeView>;
+    version: number;
     selected: string;
     tabStop: string;
     expanded: Set<string>;
@@ -19,8 +20,9 @@
   };
 
   let {
-    node,
+    id,
     nodes,
+    version,
     selected,
     tabStop,
     expanded,
@@ -31,6 +33,10 @@
     index = 1,
     size = 1,
   }: Props = $props();
+  let node = $derived.by(() => {
+    version;
+    return nodes.get(id) as TreeNodeView;
+  });
   let internal = $derived(node.children.length > 0);
   let open = $derived(expanded.has(node.id));
   let active = $derived(selected === node.id);
@@ -114,22 +120,20 @@
   {#if internal && open}
     <ul role="group">
       {#each node.children as childId, childIndex (childId)}
-        {@const child = nodes.get(childId)}
-        {#if child}
-          <TreeItem
-            node={child}
-            {nodes}
-            {selected}
-            {tabStop}
-            {expanded}
-            {onselect}
-            {ontoggle}
-            {move}
-            depth={depth + 1}
-            index={childIndex + 1}
-            size={node.children.length}
-          />
-        {/if}
+        <TreeItem
+          id={childId}
+          {nodes}
+          {version}
+          {selected}
+          {tabStop}
+          {expanded}
+          {onselect}
+          {ontoggle}
+          {move}
+          depth={depth + 1}
+          index={childIndex + 1}
+          size={node.children.length}
+        />
       {/each}
     </ul>
   {/if}
