@@ -524,6 +524,13 @@ export class TelemetryStore {
     this.revision += 1;
   }
 
+  clearHistory(id: string): void {
+    const node = this.nodes.get(id);
+    if (!node?.history.length) return;
+    this.dropOldest(id, node.history.length, false);
+    this.revision += 1;
+  }
+
   clearSubtree(id: string): void {
     const pending = [id];
     while (pending.length) {

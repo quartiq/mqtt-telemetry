@@ -3,6 +3,7 @@
 <script lang="ts">
   import type {
     TreeActions,
+    TreeActivity,
     TreeContext,
     TreeDirection,
     TreeNodeView,
@@ -16,6 +17,7 @@
     revision?: number;
     selected: string;
     expanded: Set<string>;
+    activity?: Map<string, TreeActivity>;
     label: string;
     onselect: (id: string) => void;
     ontoggle: (id: string, open: boolean) => void;
@@ -27,6 +29,7 @@
     revision = 0,
     selected,
     expanded,
+    activity = new Map(),
     label,
     onselect,
     ontoggle,
@@ -48,6 +51,7 @@
     selected,
     tabStop,
     expanded,
+    activity,
     actions,
   });
 

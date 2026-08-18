@@ -20,6 +20,34 @@
   let internal = $derived(node.children.length > 0);
   let open = $derived(context.expanded.has(node.id));
   let active = $derived(context.selected === node.id);
+  let activity = $derived.by(() => {
+    context.revision;
+    return context.activity.get(node.id);
+  });
+
+  const flashFrames = [
+    { background: "var(--flash)" },
+    { background: "var(--flash-end)" },
+  ];
+
+  function flash(node: HTMLElement, initial?: typeof activity) {
+    let animation: Animation | undefined;
+    const run = (next?: typeof activity) => {
+      if (!next || performance.now() - next.at > 1000) return;
+      animation?.cancel();
+      animation = node.animate(flashFrames, {
+        duration: 1000,
+        easing: "ease-out",
+      });
+    };
+    run(initial);
+    return {
+      update: run,
+      destroy() {
+        animation?.cancel();
+      },
+    };
+  }
 
   function toggle(event: MouseEvent) {
     event.stopPropagation();
@@ -79,6 +107,7 @@
     onclick={select}
     ondblclick={activate}
     onkeydown={keydown}
+    use:flash={activity}
   >
     {#if internal}
       <button
@@ -133,6 +162,7 @@
     min-width: 0;
     overflow: hidden;
     padding-right: var(--space-tight);
+    --flash-end: transparent;
   }
 
   [role="treeitem"]:focus-visible {
@@ -143,6 +173,7 @@
   .active {
     background: var(--selected);
     box-shadow: inset 2px 0 0 var(--selected-mark);
+    --flash-end: var(--selected);
   }
 
   .caret,

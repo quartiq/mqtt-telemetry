@@ -147,6 +147,24 @@ describe("topic history", () => {
     expect(store.history(b)).toHaveLength(1);
   });
 
+  it("clears one topic without clearing descendants", () => {
+    const store = new TelemetryStore(10);
+    store.add("a", encode("1"), { receivedAt: 1, retained: false, qos: 0 });
+    store.add("a/b", encode("2"), {
+      receivedAt: 2,
+      retained: false,
+      qos: 0,
+    });
+    const a = store.nodeId("a") as string;
+    const child = store.nodeId("a/b") as string;
+
+    store.clearHistory(a);
+
+    expect(store.history(a)).toEqual([]);
+    expect(store.history(child)).toHaveLength(1);
+    expect(store.subtreeMessageCount(a)).toBe(1);
+  });
+
   it("clears a selected topic subtree without clearing its siblings", () => {
     const store = new TelemetryStore(10);
     for (const topic of ["a", "a/b", "a/c/d", "other"]) {

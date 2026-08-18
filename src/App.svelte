@@ -30,6 +30,7 @@
     filterTree,
     selectionAfterCollapse,
     treeAncestorIds,
+    type TreeActivity,
   } from "./lib/tree";
 
   type ViewState = {
@@ -56,6 +57,7 @@
   let fieldByTopic = new Map<string, string | null>();
   let revealedFieldKey = "";
   let topicExpanded = $state(new Set<string>());
+  let topicActivity = $state.raw(new Map<string, TreeActivity>());
   let topicSearch = $state("");
   let jsonExpanded = $state(new Set<string>(["$"]));
   let status = $state("Idle");
@@ -89,6 +91,9 @@
     revision;
     return selectedTopicId ? store.history(selectedTopicId) : [];
   });
+  let selectedDescendantCount = $derived(
+    Math.max(0, selectedSubtreeCount - currentHistory.length),
+  );
   let currentMessage = $derived.by(() => {
     if (!currentHistory.length) return undefined;
     if (selectedMessageId === null) return currentHistory.at(-1);
@@ -260,6 +265,7 @@
     fieldByTopic = new Map();
     revealedFieldKey = "";
     topicExpanded = new Set();
+    topicActivity = new Map();
     topicSearch = "";
     jsonExpanded = new Set(["$"]);
     viewToken = crypto.randomUUID();
@@ -332,6 +338,10 @@
             });
             scheduleRender();
             if (!added) return;
+            const activity = {
+              at: performance.now(),
+            };
+            topicActivity.set(added.nodeId, activity);
             if (route.selectedTopic === topic) {
               selectLoadedTopic(added.nodeId, false);
             }
@@ -506,6 +516,14 @@
     replaceRoute(route, null);
   }
 
+  function clearTopicHistory() {
+    if (!selectedTopicId) return;
+    store.clearHistory(selectedTopicId);
+    selectedMessageId = null;
+    revision += 1;
+    replaceRoute(route, null);
+  }
+
   function restoreView(state: unknown) {
     const id = route.selectedTopic
       ? store.nodeId(route.selectedTopic)
@@ -606,6 +624,20 @@
         {/if}
       </header>
       <div class="topic-policy">
+        <div class="topic-actions">
+          <button
+            disabled={!currentHistory.length}
+            title="Clear local history for the selected topic only. Broker-retained messages are unchanged."
+            type="button"
+            onclick={clearTopicHistory}>Clear</button
+          >
+          <button
+            disabled={!selectedDescendantCount}
+            title="Clear local history for the selected topic and its subtopics. Broker-retained messages are unchanged."
+            type="button"
+            onclick={clearTopicSubtree}>Clear subtree</button
+          >
+        </div>
         <HistoryLimit
           value={route.historyLimit}
           onchange={changeHistoryLimit}
@@ -635,6 +667,7 @@
             revision={topicSnapshot.revision}
             selected={selectedTopicId}
             expanded={visibleTopicExpanded}
+            activity={topicActivity}
             label="MQTT topics"
             onselect={selectTopic}
             ontoggle={toggleTopic}
@@ -645,14 +678,6 @@
           <p class="empty">Waiting for messages…</p>
         {/if}
       </div>
-      <footer class="topic-actions">
-        <button
-          disabled={!selectedSubtreeCount}
-          title="Clear buffered history for the selected topic and its subtopics. Broker-retained messages are unchanged."
-          type="button"
-          onclick={clearTopicSubtree}>Clear history</button
-        >
-      </footer>
     </aside>
 
     <section class="details">

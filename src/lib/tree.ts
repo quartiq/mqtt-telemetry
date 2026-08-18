@@ -23,12 +23,17 @@ export type TreeActions = {
   move: (id: string, direction: TreeDirection) => void;
 };
 
+export type TreeActivity = {
+  at: number;
+};
+
 export type TreeContext = {
   nodes: Map<string, TreeNodeView>;
   revision: number;
   selected: string;
   tabStop: string;
   expanded: Set<string>;
+  activity: Map<string, TreeActivity>;
   actions: TreeActions;
 };
 
