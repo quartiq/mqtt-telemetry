@@ -60,6 +60,7 @@
   let topicActivity = $state.raw(new Map<string, TreeActivity>());
   let topicSearch = $state("");
   let jsonExpanded = $state(new Set<string>(["$"]));
+  const jsonExpandedByTopic = new Map<string, Set<string>>();
   let status = $state("Idle");
   let error = $state("");
   let connectSerial = 0;
@@ -268,6 +269,7 @@
     topicActivity = new Map();
     topicSearch = "";
     jsonExpanded = new Set(["$"]);
+    jsonExpandedByTopic.clear();
     viewToken = crypto.randomUUID();
     lastReceivedAt = 0;
   }
@@ -400,13 +402,18 @@
 
   function selectLoadedTopic(id: string, reset: boolean) {
     const changed = selectedTopicId !== id;
+    const previousTopic = selectedTopic;
+    const nextTopic = store.topic(id) ?? "";
+    if (changed) {
+      if (previousTopic) jsonExpandedByTopic.set(previousTopic, jsonExpanded);
+      jsonExpanded = new Set(jsonExpandedByTopic.get(nextTopic) ?? ["$"]);
+    }
     selectedTopicId = id;
     if (changed || reset)
       topicExpanded = new Set([...topicExpanded, ...store.ancestorIds(id)]);
     if (reset) {
       selectedMessageId = null;
       selectedField = undefined;
-      jsonExpanded = new Set(["$"]);
       revealedFieldKey = "";
     }
   }
@@ -466,7 +473,12 @@
       ? treeAncestorIds(id, jsonSnapshot.nodes)
       : [];
     if (ancestors.some((ancestor) => !jsonExpanded.has(ancestor)))
-      jsonExpanded = new Set([...jsonExpanded, ...ancestors]);
+      rememberJsonExpansion(new Set([...jsonExpanded, ...ancestors]));
+  }
+
+  function rememberJsonExpansion(expanded: Set<string>) {
+    jsonExpanded = expanded;
+    if (selectedTopic) jsonExpandedByTopic.set(selectedTopic, expanded);
   }
 
   function toggleJson(id: string, open: boolean) {
@@ -481,7 +493,7 @@
     const next = new Set(jsonExpanded);
     if (open) next.add(id);
     else next.delete(id);
-    jsonExpanded = next;
+    rememberJsonExpansion(next);
   }
 
   function selectHistory(messageId: number) {
