@@ -41,7 +41,7 @@ export function clientOptions(auth?: Partial<SessionAuth>): IClientOptions {
     keepalive: 30,
     protocolVersion: 4,
     queueQoSZero: false,
-    reconnectPeriod: 1000,
+    reconnectPeriod: 0,
     resubscribe: false,
     ...(username || password ? { username } : {}),
     ...(password ? { password } : {}),
@@ -49,72 +49,61 @@ export function clientOptions(auth?: Partial<SessionAuth>): IClientOptions {
 }
 
 export class MqttSession {
+  private closing = false;
   private generation = 0;
-  private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
-  private state: "opening" | "receiving" | "offline" | "suspended" | "closed" =
-    "opening";
+  private offline = false;
 
   private constructor(
     private readonly client: MqttClient,
     private readonly callbacks: SessionCallbacks,
-    filters: string[],
+    private readonly filters: string[],
   ) {
     client.on("message", (topic, payload, packet) => {
-      if (this.state === "receiving")
-        callbacks.message({ topic, payload, packet });
+      if (!this.closing) callbacks.message({ topic, payload, packet });
     });
     client.on("connect", () => {
-      if (this.state === "closed" || this.state === "suspended") return;
-      this.state = "receiving";
-      void this.connected(filters, ++this.generation);
+      if (this.closing) return;
+      this.offline = false;
+      void this.connected(++this.generation);
     });
     client.on("reconnect", () => {
-      if (this.state !== "closed" && this.state !== "suspended")
-        callbacks.status({ state: "reconnecting" });
+      if (!this.closing) callbacks.status({ state: "reconnecting" });
     });
     client.on("offline", () => this.noteOffline());
     client.on("close", () => this.noteOffline());
     client.on("error", (error: Error) => {
-      if (this.state === "closed" || this.state === "suspended") return;
-      if (isTransportTimeout(error)) {
-        this.state = "opening";
-        this.generation += 1;
-        callbacks.status({ state: "reconnecting" });
-      } else {
-        callbacks.status({ state: "error", error: error.message });
-      }
+      if (this.closing) return;
+      callbacks.status(
+        isTransportTimeout(error)
+          ? { state: "reconnecting" }
+          : { state: "error", error: error.message },
+      );
     });
   }
 
   private noteOffline(): void {
-    if (
-      this.state === "closed" ||
-      this.state === "suspended" ||
-      this.state === "offline"
-    )
-      return;
-    this.state = "offline";
+    if (this.closing || this.offline) return;
+    this.offline = true;
     this.generation += 1;
     this.callbacks.status({ state: "offline" });
   }
 
-  private async connected(
-    filters: string[],
-    generation: number,
-  ): Promise<void> {
+  private async subscribe(): Promise<string[]> {
+    const grants = await this.client.subscribeAsync(this.filters, {
+      qos: 0,
+    } satisfies IClientSubscribeOptions);
+    return grants.filter(({ qos }) => qos === 128).map(({ topic }) => topic);
+  }
+
+  private async connected(generation: number): Promise<void> {
     let rejected: string[];
     try {
-      const grants = await this.client.subscribeAsync(filters, {
-        qos: 0,
-      } satisfies IClientSubscribeOptions);
-      rejected = grants
-        .filter(({ qos }) => qos === 128)
-        .map(({ topic }) => topic);
+      rejected = await this.subscribe();
     } catch (error) {
       if (
         generation === this.generation &&
         this.client.connected &&
-        this.state === "receiving"
+        !this.closing
       ) {
         this.callbacks.status({
           state: "error",
@@ -126,51 +115,66 @@ export class MqttSession {
     if (
       generation === this.generation &&
       this.client.connected &&
-      this.state === "receiving"
+      !this.closing
     )
       this.callbacks.status({ state: "connected", rejected });
   }
 
-  static open(
+  static async connect(
     broker: string,
     filters: string[],
     callbacks: SessionCallbacks,
     auth?: Partial<SessionAuth>,
-  ): MqttSession {
+  ): Promise<MqttSession> {
     const brokerError = isWebSocketBroker(broker);
     if (brokerError) throw new Error(brokerError);
 
     const client = mqtt.connect(broker, clientOptions(auth));
-    return new MqttSession(client, callbacks, filters);
-  }
-
-  recover(): void {
-    if (this.state === "closed" || this.recoveryTimer) return;
-    this.state = "opening";
-    this.generation += 1;
-    this.callbacks.status({ state: "reconnecting" });
-    this.recoveryTimer = setTimeout(() => {
-      this.recoveryTimer = undefined;
-      if (this.state === "closed" || this.state === "suspended") return;
-      this.client.reconnect();
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        client.off("connect", connected);
+        client.off("close", closed);
+        client.off("error", failed);
+      };
+      const connected = () => {
+        cleanup();
+        resolve();
+      };
+      const closed = () => {
+        cleanup();
+        client.end(true);
+        reject(new Error(`Could not connect to ${broker}`));
+      };
+      const failed = (error: Error) => {
+        cleanup();
+        client.end(true);
+        reject(error);
+      };
+      client.once("connect", connected);
+      client.once("close", closed);
+      client.once("error", failed);
     });
-  }
 
-  suspend(): void {
-    if (this.state === "closed" || this.state === "suspended") return;
-    clearTimeout(this.recoveryTimer);
-    this.recoveryTimer = undefined;
-    this.generation += 1;
-    this.state = "suspended";
-    this.client.end(true);
+    const session = new MqttSession(client, callbacks, filters);
+    const generation = ++session.generation;
+    let rejected: string[];
+    try {
+      rejected = await session.subscribe();
+      if (generation !== session.generation || !client.connected)
+        throw new Error("Connection closed while subscribing");
+    } catch (error) {
+      session.close();
+      throw error;
+    }
+    client.options.reconnectPeriod = 1000;
+    callbacks.status({ state: "connected", rejected });
+    return session;
   }
 
   close(): void {
-    if (this.state === "closed") return;
-    clearTimeout(this.recoveryTimer);
-    this.recoveryTimer = undefined;
+    if (this.closing) return;
+    this.closing = true;
     this.generation += 1;
-    this.state = "closed";
     this.client.end(true);
   }
 }

@@ -11,6 +11,7 @@
     historyLimit: number;
     status: string;
     error: string;
+    connecting: boolean;
     onconnect: () => void;
   };
 
@@ -22,6 +23,7 @@
     historyLimit = $bindable(),
     status,
     error,
+    connecting,
     onconnect,
   }: Props = $props();
 
@@ -78,7 +80,9 @@
         </label>
       </div>
       <div class="actions">
-        <button type="submit">Connect</button>
+        <button disabled={connecting} type="submit"
+          >{connecting ? "Connecting…" : "Connect"}</button
+        >
         <HistoryLimit value={historyLimit} onchange={changeHistoryLimit} />
       </div>
     </form>
