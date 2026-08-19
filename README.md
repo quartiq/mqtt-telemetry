@@ -15,7 +15,7 @@ Chrome may require Local Network Access permission when a public site connects t
 
 The connection form accepts one MQTT subscription filter per line and defaults to `#`. `$` topics are not matched by `#`; add a filter such as `$SYS/#` explicitly when needed.
 
-The browser keeps retrying after initial or later transport failures and resubscribes after reconnection. Changing connection explicitly stops those retries.
+The browser keeps retrying after initial or later transport failures and resubscribes after reconnection. MQTT transport timeouts remain retrying states rather than terminal errors. After browser freeze, back/forward-cache restoration, a network-online transition, or a visible-page clock jump caused by computer sleep, the browser discards messages from the stale transport and starts a fresh WebSocket connection without clearing local history. Changing connection explicitly stops the old session and its retries.
 
 ## Browsing
 

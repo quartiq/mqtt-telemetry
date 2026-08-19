@@ -23,6 +23,7 @@ class FakeClient {
     { topic: "alerts/+", qos: 0 },
   ]);
   end = vi.fn();
+  reconnect = vi.fn();
 
   on(event: string, callback: (...args: never[]) => void): this {
     this.listeners.set(event, [
@@ -131,6 +132,7 @@ describe("MQTT session", () => {
     });
     const packet = { cmd: "publish", qos: 0, retain: false };
 
+    client.emit("connect");
     client.emit("message", "sensors/room", new Uint8Array([49]), packet);
 
     expect(messages).toEqual([
@@ -229,5 +231,70 @@ describe("MQTT session", () => {
     expect(statuses).toEqual([{ state: "offline" }, { state: "reconnecting" }]);
 
     session.close();
+  });
+
+  it("presents transport timeouts as MQTT.js-owned retries", async () => {
+    const client = new FakeClient();
+    const statuses: SessionStatus[] = [];
+    open(client, statuses);
+
+    client.emit("error", new Error("Keepalive timeout"));
+    client.emit("error", new Error("connack timeout"));
+
+    expect(statuses).toEqual([
+      { state: "reconnecting" },
+      { state: "reconnecting" },
+    ]);
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(client.reconnect).not.toHaveBeenCalled();
+  });
+
+  it("allows browser recovery signals to reconnect once per turn", async () => {
+    const client = new FakeClient();
+    const statuses: SessionStatus[] = [];
+    const session = open(client, statuses);
+
+    session.recover();
+    session.recover();
+
+    await vi.waitFor(() => expect(client.reconnect).toHaveBeenCalledOnce());
+    expect(statuses).toEqual([{ state: "reconnecting" }]);
+  });
+
+  it("discards messages across suspension and accepts the new transport", async () => {
+    const client = new FakeClient();
+    const messages: unknown[] = [];
+    mocks.connect.mockReturnValueOnce(client as never);
+    const session = MqttSession.open("ws://broker.example/mqtt", ["#"], {
+      status: vi.fn(),
+      message: (message) => messages.push(message),
+    });
+    const packet = { cmd: "publish", qos: 0, retain: false };
+
+    client.emit("connect");
+    session.suspend();
+    client.emit("message", "stale", new Uint8Array([49]), packet);
+    session.recover();
+    await vi.waitFor(() => expect(client.reconnect).toHaveBeenCalledOnce());
+    client.emit("message", "still-stale", new Uint8Array([50]), packet);
+    client.emit("connect");
+    client.emit("message", "fresh", new Uint8Array([51]), packet);
+
+    expect(client.end).toHaveBeenCalledWith(true);
+    expect(messages).toEqual([
+      { topic: "fresh", payload: new Uint8Array([51]), packet },
+    ]);
+  });
+
+  it("does not hard-recover non-timeout errors", async () => {
+    const client = new FakeClient();
+    const statuses: SessionStatus[] = [];
+    open(client, statuses);
+
+    client.emit("error", new Error("bad credentials"));
+    await new Promise((resolve) => setTimeout(resolve));
+
+    expect(statuses).toEqual([{ state: "error", error: "bad credentials" }]);
+    expect(client.reconnect).not.toHaveBeenCalled();
   });
 });

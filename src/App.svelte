@@ -197,6 +197,7 @@
   });
 
   onMount(() => {
+    let lastWakeCheck = Date.now();
     const popstate = (event: PopStateEvent) => {
       const next = readRoute(location.search);
       if (connectionKey(next) !== connectionKey(route)) {
@@ -225,12 +226,45 @@
         restoreView(event.state);
       }
     };
+    const recoverConnection = () => {
+      lastWakeCheck = Date.now();
+      session?.recover();
+    };
+    const checkWake = () => {
+      const now = Date.now();
+      const slept = now - lastWakeCheck > 45_000;
+      lastWakeCheck = now;
+      if (slept && document.visibilityState === "visible") session?.recover();
+    };
+    const freeze = () => session?.suspend();
+    const resume = () => {
+      lastWakeCheck = Date.now();
+      session?.recover();
+    };
+    const pageHide = (event: PageTransitionEvent) => {
+      if (event.persisted) freeze();
+    };
+    const pageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) resume();
+    };
+    const wakeTimer = window.setInterval(checkWake, 5000);
     addEventListener("popstate", popstate);
     addEventListener("keydown", browserKeydown);
+    addEventListener("online", recoverConnection);
+    addEventListener("pagehide", pageHide);
+    addEventListener("pageshow", pageShow);
+    document.addEventListener("freeze", freeze);
+    document.addEventListener("resume", resume);
     if (route.broker) startConnection(route);
     return () => {
+      clearInterval(wakeTimer);
       removeEventListener("popstate", popstate);
       removeEventListener("keydown", browserKeydown);
+      removeEventListener("online", recoverConnection);
+      removeEventListener("pagehide", pageHide);
+      removeEventListener("pageshow", pageShow);
+      document.removeEventListener("freeze", freeze);
+      document.removeEventListener("resume", resume);
       if (renderFrame) cancelAnimationFrame(renderFrame);
       connectSerial += 1;
       session?.close();
