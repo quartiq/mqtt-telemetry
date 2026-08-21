@@ -15,7 +15,7 @@ Chrome may require Local Network Access permission when a public site connects t
 
 The connection form accepts one MQTT subscription filter per line and defaults to `#`. `$` topics are not matched by `#`; add a filter such as `$SYS/#` explicitly when needed.
 
-An initial connection attempt fails back to the connection form instead of retrying indefinitely. After a successful connection, MQTT.js keeps retrying transport failures and the browser resubscribes after reconnection. Transport timeouts remain retrying states rather than terminal errors. Changing connection explicitly stops the old session and its retries.
+An initial connection attempt fails back to the connection form instead of retrying indefinitely. After a successful connection, MQTT.js keeps retrying transport failures and the browser resubscribes after reconnection. MQTT errors remain visible while MQTT.js's offline and reconnect events describe the subsequent lifecycle. If resubscribing fails on an otherwise live connection, that unusable session closes instead of waiting indefinitely for another transport failure. Changing connection explicitly stops the old session and its retries.
 
 ## Browsing
 

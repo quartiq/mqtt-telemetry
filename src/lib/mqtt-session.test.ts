@@ -215,16 +215,11 @@ describe("MQTT session", () => {
     session.close();
   });
 
-  it("reports reconnect subscription failures and retries next time", async () => {
+  it("closes an established session when resubscribing fails", async () => {
     const client = new FakeClient();
     const statuses: SessionStatus[] = [];
-    const session = await establish(client, statuses);
-    client.subscribeAsync
-      .mockRejectedValueOnce(new Error("subscribe failed"))
-      .mockResolvedValueOnce([
-        { topic: "sensors/#", qos: 0 },
-        { topic: "alerts/+", qos: 0 },
-      ]);
+    await establish(client, statuses);
+    client.subscribeAsync.mockRejectedValueOnce(new Error("subscribe failed"));
 
     client.emit("connect");
     await vi.waitFor(() =>
@@ -233,13 +228,15 @@ describe("MQTT session", () => {
         error: "subscribe failed",
       }),
     );
+    expect(client.end).toHaveBeenCalledWith(true);
+
     client.emit("close");
     client.emit("connect");
-    await vi.waitFor(() =>
-      expect(statuses.at(-1)).toEqual({ state: "connected", rejected: [] }),
-    );
-
-    session.close();
+    expect(client.subscribeAsync).toHaveBeenCalledTimes(2);
+    expect(statuses.at(-1)).toEqual({
+      state: "error",
+      error: "subscribe failed",
+    });
   });
 
   it("reports filters rejected by SUBACK", async () => {
@@ -291,19 +288,15 @@ describe("MQTT session", () => {
     session.close();
   });
 
-  it("presents established transport timeouts as MQTT.js-owned retries", async () => {
+  it("reports established MQTT errors", async () => {
     const client = new FakeClient();
     const statuses: SessionStatus[] = [];
     const session = await establish(client, statuses);
     statuses.length = 0;
 
-    client.emit("error", new Error("Keepalive timeout"));
-    client.emit("error", new Error("connack timeout"));
+    client.emit("error", new Error("socket failed"));
 
-    expect(statuses).toEqual([
-      { state: "reconnecting" },
-      { state: "reconnecting" },
-    ]);
+    expect(statuses).toEqual([{ state: "error", error: "socket failed" }]);
     session.close();
   });
 });

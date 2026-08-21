@@ -50,7 +50,7 @@
           autocomplete="url"
           bind:value={broker}
           name="broker"
-          placeholder="ws://localhost:9001"
+          placeholder="wss://mqtt.example.com:443/path/to/socket"
           required
           title="Use MQTT over WebSocket. LAN brokers may require browser Local Network Access permission; TLS certificates must be browser-trusted."
           type="url"

@@ -4,6 +4,7 @@ import mqtt, {
   type MqttClient,
   type Packet,
 } from "mqtt";
+import { randomId } from "./random-id";
 import { isWebSocketBroker } from "./routes";
 
 export type SessionStatus =
@@ -24,19 +25,12 @@ export type SessionCallbacks = {
 
 export type SessionAuth = { username: string; password: string };
 
-function isTransportTimeout(error: Error): boolean {
-  const message = error.message.toLocaleLowerCase();
-  return (
-    message.includes("connack timeout") || message.includes("keepalive timeout")
-  );
-}
-
 export function clientOptions(auth?: Partial<SessionAuth>): IClientOptions {
   const username = auth?.username ?? "";
   const password = auth?.password ?? "";
   return {
     clean: true,
-    clientId: `mqtttelemetry${crypto.randomUUID().replaceAll("-", "").slice(0, 10)}`,
+    clientId: `mqtttelemetry${randomId().replaceAll("-", "").slice(0, 10)}`,
     connectTimeout: 15_000,
     keepalive: 30,
     protocolVersion: 4,
@@ -72,12 +66,8 @@ export class MqttSession {
     client.on("offline", () => this.noteOffline());
     client.on("close", () => this.noteOffline());
     client.on("error", (error: Error) => {
-      if (this.closing) return;
-      callbacks.status(
-        isTransportTimeout(error)
-          ? { state: "reconnecting" }
-          : { state: "error", error: error.message },
-      );
+      if (!this.closing)
+        callbacks.status({ state: "error", error: error.message });
     });
   }
 
@@ -105,6 +95,8 @@ export class MqttSession {
         this.client.connected &&
         !this.closing
       ) {
+        this.closing = true;
+        this.client.end(true);
         this.callbacks.status({
           state: "error",
           error: error instanceof Error ? error.message : String(error),

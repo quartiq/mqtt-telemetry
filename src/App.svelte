@@ -18,6 +18,7 @@
     type JsonPath,
   } from "./lib/model";
   import { MqttSession, type SessionStatus } from "./lib/mqtt-session";
+  import { randomId } from "./lib/random-id";
   import {
     connectionKey,
     isWebSocketBroker,
@@ -64,7 +65,7 @@
   let status = $state("Idle");
   let error = $state("");
   let connectSerial = 0;
-  let viewToken = crypto.randomUUID();
+  let viewToken = randomId();
   let lastReceivedAt = 0;
   let renderFrame = 0;
 
@@ -270,7 +271,7 @@
     topicSearch = "";
     jsonExpanded = new Set(["$"]);
     jsonExpandedByTopic.clear();
-    viewToken = crypto.randomUUID();
+    viewToken = randomId();
     lastReceivedAt = 0;
   }
 
