@@ -76,7 +76,7 @@ The production build is the single self-contained file `dist/index.html`. It is 
 python3 -m http.server --directory dist 8000
 ```
 
-Pushes to `main` are built, tested, and deployed to GitHub Pages by `.github/workflows/web-pages.yml`. The repository's Pages settings must use **GitHub Actions**, with `telemetry.quartiq.de` configured as the custom domain and HTTPS enforcement enabled. DNS should point the `telemetry` CNAME at `quartiq.github.io`.
+The CI/CD workflow checks formatting, tests, type-checks, builds, and validates the single-file artifact on every push and pull request. A successful `main` build is deployed to GitHub Pages. The repository's Pages settings must use **GitHub Actions**, with `telemetry.quartiq.de` configured as the custom domain and HTTPS enforcement enabled. DNS should point the `telemetry` CNAME at `quartiq.github.io`.
 
 ## Scope
 
