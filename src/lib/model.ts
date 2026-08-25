@@ -201,6 +201,21 @@ export function fieldLabel(path: JsonPath): string {
   }, "$");
 }
 
+export function telemetryPageTitle(topic: string, path?: JsonPath): string {
+  const topicName = topic.split("/").filter(Boolean).at(-1) ?? topic;
+  const field = path?.at(-1);
+  const fieldName =
+    typeof field === "number" ? `[${field}]` : field || (path ? "$" : "");
+  return [fieldName, topicName, "MQTT Telemetry"]
+    .filter(Boolean)
+    .map((part) => shortenTitle(part))
+    .join(" — ");
+}
+
+function shortenTitle(value: string): string {
+  return value.length > 28 ? `${value.slice(0, 27)}…` : value;
+}
+
 export function selectedMessageValue(
   message: TelemetryMessage,
   path: JsonPath,
@@ -241,6 +256,36 @@ export function plotSeries(
   return { points, retainedExcluded };
 }
 
+export function formatPlotNumber(value: number, resolution: number): string {
+  if (!Number.isFinite(value)) return String(value);
+  if (value === 0) return "0";
+
+  const absolute = Math.abs(value);
+  const safeResolution =
+    Number.isFinite(resolution) && resolution > 0 ? resolution : absolute;
+  const exponent = Math.floor(Math.log10(absolute));
+  const resolutionExponent = Math.floor(Math.log10(safeResolution));
+  const significantDigits = Math.max(
+    1,
+    Math.min(12, exponent - resolutionExponent + 2),
+  );
+
+  if (exponent <= -4 || exponent >= 7) {
+    return value
+      .toExponential(significantDigits - 1)
+      .replace("e+", "e")
+      .replace("e-", "e−")
+      .replace("-", "−");
+  }
+
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: Math.max(0, Math.min(12, -resolutionExponent + 1)),
+    useGrouping: false,
+  })
+    .format(value)
+    .replace("-", "−");
+}
+
 export function downsamplePlotPoints(
   points: PlotPoint[],
   limit: number,
@@ -273,6 +318,7 @@ export function messageFrequency(history: TelemetryMessage[]): string {
   const seconds =
     (live.at(-1)!.receivedAt - live[0].receivedAt) / (live.length - 1) / 1000;
   if (!(seconds > 0)) return "";
+  if (seconds < 0.001) return "burst (<1 ms apart)";
   if (seconds < 1)
     return `${(1 / seconds).toLocaleString(undefined, { maximumSignificantDigits: 3 })} msg/s`;
   return `every ${seconds.toLocaleString(undefined, { maximumSignificantDigits: 3 })} s`;
@@ -283,6 +329,7 @@ export function messageSpan(history: TelemetryMessage[]): string {
   if (live.length < 2) return "";
   const milliseconds = live.at(-1)!.receivedAt - live[0].receivedAt;
   if (!(milliseconds > 0)) return "";
+  if (milliseconds < 1) return "<1 ms span";
   if (milliseconds < 1000) return `${Math.round(milliseconds)} ms span`;
   const seconds = Math.round(milliseconds / 1000);
   if (seconds < 60) return `${seconds} s span`;

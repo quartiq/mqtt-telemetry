@@ -3,6 +3,7 @@ import {
   TelemetryStore,
   downsamplePlotPoints,
   fieldLabel,
+  formatPlotNumber,
   getJsonPath,
   jsonPointer,
   jsonTree,
@@ -11,6 +12,7 @@ import {
   messageSpan,
   parsePayload,
   plotSeries,
+  telemetryPageTitle,
   resolveJsonPointer,
   selectedMessageValue,
   type TelemetryMessage,
@@ -67,6 +69,14 @@ describe("payloads and JSON fields", () => {
     expect(resolveJsonPointer(root, pointer)).toEqual(path);
     expect(getJsonPath(root, path)).toBe(12);
     expect(fieldLabel(path)).toBe('$["a/b"][0]["0~x"]');
+  });
+
+  it("keeps the tab title short and puts the selected field first", () => {
+    expect(telemetryPageTitle("building/room", ["air", "temperature"])).toBe(
+      "temperature — room — MQTT Telemetry",
+    );
+    expect(telemetryPageTitle("building/room")).toBe("room — MQTT Telemetry");
+    expect(telemetryPageTitle("", undefined)).toBe("MQTT Telemetry");
   });
 
   it("builds a selectable, lexically ordered JSON tree", () => {
@@ -297,6 +307,13 @@ describe("topic history", () => {
 });
 
 describe("plot extraction", () => {
+  it("formats axis values at the tick resolution", () => {
+    expect(formatPlotNumber(1.000000002, 1e-9)).toBe("1.000000002");
+    expect(formatPlotNumber(103_403.8, 0.03)).toBe("103403.8");
+    expect(formatPlotNumber(103_403.95, 0.03)).toBe("103403.95");
+    expect(formatPlotNumber(0.16, 0.03)).toBe("0.16");
+  });
+
   it("uses finite numeric live values and skips retained or missing entries", () => {
     const history = [
       message(1, 1, '{"v":1}'),
@@ -332,6 +349,9 @@ describe("plot extraction", () => {
   });
 
   it("summarizes recent live-message frequency", () => {
+    expect(messageFrequency([message(1, 0, "1"), message(2, 0.5, "2")])).toBe(
+      "burst (<1 ms apart)",
+    );
     expect(messageFrequency([message(1, 0, "1"), message(2, 100, "2")])).toBe(
       "10 msg/s",
     );
@@ -341,6 +361,9 @@ describe("plot extraction", () => {
   });
 
   it("summarizes the live history span", () => {
+    expect(messageSpan([message(1, 0, "1"), message(2, 0.5, "2")])).toBe(
+      "<1 ms span",
+    );
     expect(messageSpan([message(1, 0, "1"), message(2, 100, "2")])).toBe(
       "100 ms span",
     );

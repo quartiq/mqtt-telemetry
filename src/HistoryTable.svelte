@@ -43,6 +43,12 @@
   });
   let frequency = $derived(messageFrequency(messages));
   let span = $derived(messageSpan(messages));
+  let retained = $derived(
+    messages.filter((message) => message.retained).length,
+  );
+  let duplicates = $derived(
+    messages.filter((message) => message.duplicate).length,
+  );
 
   function timestamp(value: number): string {
     return new Date(value).toLocaleTimeString(undefined, {
@@ -90,21 +96,27 @@
 </script>
 
 <section class="panel history-panel">
-  <header>
-    <h2>
-      Topic history
-      <span class="count">({messages.length.toLocaleString()})</span>
-    </h2>
-    <div class="summary meta">
-      {#if frequency}<span>{frequency} · </span>{/if}
-      {#if span}<span>{span} · </span>{/if}
-      <span title={fieldLabel ?? "Full payload summary"}
-        >{fieldLabel ? `field ${fieldLabel}` : "payload"}</span
-      >
-    </div>
+  <header class="panel-header">
+    <h2>Topic history</h2>
     <div class="controls">
       <button disabled={selectedId === null} type="button" onclick={onlatest}
         >Latest</button
+      >
+    </div>
+    <div class="panel-stats meta">
+      <span>{messages.length.toLocaleString()} messages</span>
+      {#if frequency}<span>{frequency}</span>{/if}
+      {#if span}<span>{span}</span>{/if}
+      {#if retained}<span>{retained.toLocaleString()} retained</span>{/if}
+      {#if duplicates}
+        <span
+          >{duplicates.toLocaleString()} possible {duplicates === 1
+            ? "redelivery"
+            : "redeliveries"}</span
+        >
+      {/if}
+      <span title={fieldLabel ?? "Full payload summary"}
+        >{fieldLabel ? `field ${fieldLabel}` : "payload"}</span
       >
     </div>
   </header>
@@ -162,29 +174,6 @@
     align-items: baseline;
     display: flex;
     gap: var(--space-tight);
-    white-space: nowrap;
-  }
-
-  .count {
-    color: var(--muted);
-    font-weight: 400;
-  }
-
-  .history-panel > header {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  h2 {
-    white-space: nowrap;
-  }
-
-  .summary {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
   }
 

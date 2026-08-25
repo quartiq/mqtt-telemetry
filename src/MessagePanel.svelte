@@ -32,6 +32,20 @@
   let fieldMissing = $derived(
     Boolean(selected && snapshot && !snapshot.nodes.has(selected)),
   );
+  let statistics = $derived.by(() => {
+    if (!message) return [];
+    const items = [
+      following ? "Following latest" : "Historical",
+      `received ${timestamp(message.receivedAt)}`,
+    ];
+    if (message.retained) items.push("retained");
+    if (message.duplicate) items.push("possible duplicate");
+    items.push(`QoS ${message.qos}`, `${message.bytes.toLocaleString()} bytes`);
+    if (snapshot)
+      items.push(`${snapshot.nodes.size.toLocaleString()} JSON nodes`);
+    if (message.unsafeIntegers) items.push("unsafe integer precision");
+    return items;
+  });
 
   function timestamp(value: number): string {
     return new Date(value).toLocaleString();
@@ -39,24 +53,19 @@
 </script>
 
 <section class="panel message-panel">
-  <header>
+  <header class="panel-header">
     <h2>Current value</h2>
-    {#if message}
-      <span class="meta">
-        {following ? "Following latest" : "Historical"} ·
-        {timestamp(message.receivedAt)} · {message.retained
-          ? "retained · "
-          : ""}{message.duplicate ? "possible duplicate · " : ""}QoS
-        {message.qos} · {message.bytes.toLocaleString()} bytes
-        {message.unsafeIntegers ? " · unsafe integer precision" : ""}
-      </span>
-      {#if fieldMissing}
-        <span
-          class="missing"
-          title={`${selectedLabel} is absent from this message`}
-          >field absent</span
-        >
-      {/if}
+    {#if fieldMissing}
+      <span
+        class="missing"
+        title={`${selectedLabel} is absent from this message`}
+        >field absent</span
+      >
+    {/if}
+    {#if statistics.length}
+      <div class="panel-stats meta">
+        {#each statistics as statistic}<span>{statistic}</span>{/each}
+      </div>
     {/if}
   </header>
   {#if message?.payload.kind === "json" && snapshot}
@@ -99,13 +108,6 @@
     color: var(--muted);
     flex: none;
     font-size: var(--text-small);
-  }
-
-  .message-panel > header .meta {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   @media (max-width: 800px) {

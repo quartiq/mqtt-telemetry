@@ -15,6 +15,7 @@
     jsonTree,
     plotSeries,
     resolveJsonPointer,
+    telemetryPageTitle,
     type JsonPath,
   } from "./lib/model";
   import { MqttSession, type SessionStatus } from "./lib/mqtt-session";
@@ -149,6 +150,10 @@
       .filter(Boolean)
       .join(" · "),
   );
+
+  $effect(() => {
+    document.title = telemetryPageTitle(selectedTopic, activeField);
+  });
 
   $effect(() => {
     const topic = selectedTopic;
@@ -599,15 +604,12 @@
   <main class="browser">
     <header class="app-header panel">
       <div class="identity">
-        <h1>{selectedTopic || "MQTT Telemetry"}</h1>
+        <h1>MQTT Telemetry</h1>
         <div class="breadcrumb" aria-label="Current browsing path">
           <span>{route.broker}</span>
           {#if selectedTopic}<span aria-hidden="true">›</span><span
               >{selectedTopic}</span
             >{/if}
-          {#if route.fieldPointer !== null}
-            <span aria-hidden="true">›</span><span>{selectedFieldLabel}</span>
-          {/if}
         </div>
       </div>
       <div class="connection-state">

@@ -110,6 +110,28 @@ pre {
   min-width: 0;
 }
 
+.panel > .panel-header {
+  display: grid;
+  gap: 0 var(--space);
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.panel-header h2 {
+  white-space: nowrap;
+}
+
+.panel-stats {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-stats > span + span::before {
+  content: " · ";
+}
+
 .meta,
 .breadcrumb {
   color: var(--muted);
