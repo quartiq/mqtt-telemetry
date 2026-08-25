@@ -4,6 +4,8 @@ A small, read-only web frontend for browsing MQTT JSON telemetry. It discovers t
 
 ## Run
 
+The hosted application is available at <https://telemetry.quartiq.de/>.
+
 ```sh
 npm install
 npm run dev
@@ -11,7 +13,17 @@ npm run dev
 
 Open the printed URL and enter an MQTT-over-WebSocket broker such as `ws://localhost:9001`. Browser applications cannot connect directly to ordinary `mqtt://` TCP ports. An HTTPS deployment must use a `wss://` broker because browsers block mixed content.
 
-Chrome may require Local Network Access permission when a public site connects to a private or loopback broker. Browser security behavior for WebSockets is evolving; the most portable deployments use a browser-trusted `wss://` broker or serve the app and broker endpoint through the same HTTPS reverse proxy. JavaScript cannot bypass an invalid or self-signed WebSocket certificate.
+Chrome may require Local Network Access permission when a public site connects to a private or loopback broker. Browser security behavior for WebSockets is evolving; JavaScript cannot bypass mixed-content blocking, a denied local-network permission, or an invalid WebSocket certificate.
+
+For an isolated local-network workflow with no local tooling, open <https://telemetry.quartiq.de/>, use **Save Page As** with the **Webpage, HTML Only** type, and open the saved file. The application is deliberately one self-contained HTML file, so the local copy has no runtime dependency on `telemetry.quartiq.de` and can connect directly to a LAN `ws://` broker. Broker credentials remain form input and are not saved in the page.
+
+| App origin                              | Broker                                      | Chromium                               | Firefox/Safari | Notes                                              |
+| --------------------------------------- | ------------------------------------------- | -------------------------------------- | -------------- | -------------------------------------------------- |
+| `http://localhost` or private `http://` | private `ws://`                             | Works                                  | Works          | Development or a local static server.              |
+| `file://` saved copy                    | private `ws://`                             | Works                                  | Works          | Supported isolated single-file workflow.           |
+| public `http://`                        | private `ws://`                             | Usually blocked or permission-gated    | Works today    | Chromium Local Network Access applies.             |
+| public `https://`                       | private `ws://`                             | Blocked                                | Blocked        | Mixed content; use the saved copy or `wss://`.     |
+| public `https://`                       | `wss://` with a browser-trusted certificate | Works, subject to Local Network Access | Works          | Suitable for direct or reverse-proxied deployment. |
 
 The connection form accepts one MQTT subscription filter per line and defaults to `#`. `$` topics are not matched by `#`; add a filter such as `$SYS/#` explicitly when needed.
 
@@ -58,13 +70,13 @@ npm test
 npm run build
 ```
 
-The production build is the single self-contained file `dist/index.html`. Serve it from any ordinary static web server, for example:
+The production build is the single self-contained file `dist/index.html`. It is also suitable for **Save Page As** and direct `file://` use. Serve it from any ordinary static web server, for example:
 
 ```sh
 python3 -m http.server --directory dist 8000
 ```
 
-Opening it directly as a `file://` URL is not a supported deployment: browser origin, storage, and local-network behavior for local files is inconsistent.
+Pushes to `main` are built, tested, and deployed to GitHub Pages by `.github/workflows/web-pages.yml`. The repository's Pages settings must use **GitHub Actions**, with `telemetry.quartiq.de` configured as the custom domain and HTTPS enforcement enabled. DNS should point the `telemetry` CNAME at `quartiq.github.io`.
 
 ## Scope
 

@@ -91,6 +91,9 @@ describe("route configuration", () => {
     expect(
       isWebSocketBroker("wss://broker.example/mqtt", "https:"),
     ).toBeUndefined();
+    expect(
+      isWebSocketBroker("ws://192.168.1.10:9001/mqtt", "file:"),
+    ).toBeUndefined();
     expect(isWebSocketBroker("mqtt://localhost:1883", "http:")).toContain(
       "WebSockets",
     );
