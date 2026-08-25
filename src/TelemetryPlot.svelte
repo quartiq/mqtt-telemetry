@@ -4,6 +4,9 @@
   import {
     downsamplePlotPoints,
     formatPlotNumber,
+    formatPlotTick,
+    nicePlotScale,
+    timeTickValues,
     type PlotPoint,
   } from "./lib/model";
 
@@ -35,39 +38,31 @@
     }
     const dataMin = yMin;
     const dataMax = yMax;
-    if (yMin === yMax) {
-      const padding = Math.abs(yMin) * 0.05 || 1;
-      yMin -= padding;
-      yMax += padding;
-    }
-    const step = (yMax - yMin) / 5;
+    const yScale = nicePlotScale(yMin, yMax);
     return {
       xMin,
       xMax: Math.max(xMax, xMin + 0.001),
       dataMin,
       dataMax,
-      yMin,
-      yMax,
-      step,
-      yTicks: Array.from({ length: 6 }, (_, index) => {
-        const ratio = index / 5;
-        const value = yMin + ratio * (yMax - yMin);
-        return { label: formatPlotNumber(value, step), ratio };
-      }),
+      yMin: yScale.min,
+      yMax: yScale.max,
+      step: yScale.step,
+      yTicks: yScale.ticks.map((value) => ({
+        value,
+        label: formatPlotTick(value, yScale.step),
+      })),
     };
   });
   let xTicks = $derived.by(() =>
     plot
-      ? Array.from({ length: 5 }, (_, index) => {
-          const ratio = index / 4;
-          return {
-            label: time(
-              plot.xMin + ratio * (plot.xMax - plot.xMin),
-              plot.xMax - plot.xMin,
-            ),
-            ratio,
-          };
-        })
+      ? (() => {
+          const values = timeTickValues(plot.xMin, plot.xMax);
+          const showMilliseconds = values.some((value) => value % 1_000 !== 0);
+          return values.map((value) => ({
+            value,
+            label: time(value, showMilliseconds),
+          }));
+        })()
       : [],
   );
   let line = $derived.by(() => {
@@ -103,13 +98,13 @@
     return items;
   });
 
-  function time(value: number, span: number): string {
+  function time(value: number, showMilliseconds: boolean): string {
     return new Date(value).toLocaleTimeString(undefined, {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
       hour12: false,
-      ...(span < 10_000 ? { fractionalSecondDigits: 3 } : {}),
+      ...(showMilliseconds ? { fractionalSecondDigits: 3 } : {}),
     });
   }
 </script>
@@ -131,12 +126,18 @@
       aria-label={`${label} over receipt time`}
     >
       {#each plot.yTicks as tick}
-        {@const y = top + (1 - tick.ratio) * (height - top - bottom)}
+        {@const y =
+          top +
+          ((plot.yMax - tick.value) / (plot.yMax - plot.yMin)) *
+            (height - top - bottom)}
         <line class="grid" x1={left} x2={width - right} y1={y} y2={y} />
         <text class="y-label" x={left - 7} {y}>{tick.label}</text>
       {/each}
       {#each xTicks as tick, index}
-        {@const x = left + tick.ratio * (width - left - right)}
+        {@const x =
+          left +
+          ((tick.value - plot.xMin) / (plot.xMax - plot.xMin)) *
+            (width - left - right)}
         <line
           class="tick"
           x1={x}

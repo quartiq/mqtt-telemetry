@@ -51,6 +51,12 @@ export type JsonSnapshot = {
 
 export type PlotPoint = { x: number; y: number };
 export type PlotSeries = { points: PlotPoint[]; retainedExcluded: number };
+export type PlotScale = {
+  min: number;
+  max: number;
+  step: number;
+  ticks: [number, number, number];
+};
 
 export type StoreLimits = {
   maxHistoryBytes: number;
@@ -284,6 +290,71 @@ export function formatPlotNumber(value: number, resolution: number): string {
   })
     .format(value)
     .replace("-", "−");
+}
+
+export function formatPlotTick(value: number, step: number): string {
+  const stepExponent = Math.floor(Math.log10(Math.abs(step)));
+  const valueExponent =
+    value === 0 ? 0 : Math.floor(Math.log10(Math.abs(value)));
+  if (valueExponent <= -4 || valueExponent >= 7)
+    return formatPlotNumber(value, step);
+
+  return value
+    .toFixed(Math.max(0, Math.min(12, -stepExponent)))
+    .replace("-", "−")
+    .replace(/^([−]?)0\./, "$1.");
+}
+
+export function nicePlotScale(dataMin: number, dataMax: number): PlotScale {
+  if (dataMin === dataMax) {
+    const padding = Math.abs(dataMin) * 0.05 || 1;
+    dataMin -= padding;
+    dataMax += padding;
+  }
+
+  let step = niceStep((dataMax - dataMin) / 2);
+  let first = alignedFloor(dataMin, step);
+  let last = first + 2 * step;
+  const tolerance = () =>
+    Math.max(Math.abs(last) * Number.EPSILON * 4, step * 1e-9);
+  if (last + tolerance() < dataMax) {
+    step = niceStep(step * (1 + 1e-10));
+    first = alignedFloor(dataMin, step);
+    last = first + 2 * step;
+  }
+
+  return { min: first, max: last, step, ticks: [first, first + step, last] };
+}
+
+const TIME_STEPS = [
+  1, 2, 5, 10, 20, 50, 100, 200, 500, 1_000, 2_000, 5_000, 10_000, 15_000,
+  30_000, 60_000, 120_000, 300_000, 600_000, 900_000, 1_800_000, 3_600_000,
+  7_200_000, 21_600_000, 43_200_000, 86_400_000,
+];
+
+export function timeTickValues(min: number, max: number): number[] {
+  const target = (max - min) / 4;
+  const step =
+    TIME_STEPS.find((candidate) => candidate >= target) ?? niceStep(target);
+  const first = Math.ceil(min / step) * step;
+  const ticks: number[] = [];
+  for (let value = first; value <= max; value += step) ticks.push(value);
+  return ticks;
+}
+
+function niceStep(value: number): number {
+  const exponent = Math.floor(Math.log10(value));
+  const magnitude = 10 ** exponent;
+  const fraction = value / magnitude;
+  const niceFraction =
+    fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
+  return niceFraction * magnitude;
+}
+
+function alignedFloor(value: number, step: number): number {
+  const quotient = value / step;
+  const tolerance = Math.abs(quotient) * Number.EPSILON * 4;
+  return Math.floor(quotient + tolerance) * step;
 }
 
 export function downsamplePlotPoints(

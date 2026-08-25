@@ -4,15 +4,18 @@ import {
   downsamplePlotPoints,
   fieldLabel,
   formatPlotNumber,
+  formatPlotTick,
   getJsonPath,
   jsonPointer,
   jsonTree,
   messagePayloadPreview,
   messageFrequency,
   messageSpan,
+  nicePlotScale,
   parsePayload,
   plotSeries,
   telemetryPageTitle,
+  timeTickValues,
   resolveJsonPointer,
   selectedMessageValue,
   type TelemetryMessage,
@@ -312,6 +315,38 @@ describe("plot extraction", () => {
     expect(formatPlotNumber(103_403.8, 0.03)).toBe("103403.8");
     expect(formatPlotNumber(103_403.95, 0.03)).toBe("103403.95");
     expect(formatPlotNumber(0.16, 0.03)).toBe("0.16");
+  });
+
+  it("places three readable ticks at their exact numeric values", () => {
+    const scale = nicePlotScale(0.383, 0.4);
+    expect(scale).toEqual({
+      min: 0.38,
+      max: 0.4,
+      step: 0.01,
+      ticks: [0.38, 0.39, 0.4],
+    });
+    expect(
+      scale.ticks.map((value) => formatPlotTick(value, scale.step)),
+    ).toEqual([".38", ".39", ".40"]);
+
+    const offset = nicePlotScale(103_403.8, 103_403.95);
+    expect(
+      offset.ticks.map((value) => formatPlotTick(value, offset.step)),
+    ).toEqual(["103403.8", "103403.9", "103404.0"]);
+
+    const precise = nicePlotScale(1 + 1e-9, 1 + 2e-9);
+    expect(
+      precise.ticks.map((value) => formatPlotTick(value, precise.step)),
+    ).toEqual(["1.0000000010", "1.0000000015", "1.0000000020"]);
+  });
+
+  it("anchors time ticks to real interval boundaries", () => {
+    const ticks = timeTickValues(1_700_000_000_123, 1_700_000_004_123);
+    expect(ticks).toEqual([
+      1_700_000_001_000, 1_700_000_002_000, 1_700_000_003_000,
+      1_700_000_004_000,
+    ]);
+    expect(ticks.every((value) => value % 1_000 === 0)).toBe(true);
   });
 
   it("uses finite numeric live values and skips retained or missing entries", () => {
