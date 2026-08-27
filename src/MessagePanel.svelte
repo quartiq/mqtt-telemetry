@@ -12,6 +12,7 @@
 
   type Props = {
     message?: TelemetryMessage;
+    topic: string;
     snapshot?: JsonSnapshot;
     selected: string;
     selectedLabel?: string;
@@ -30,6 +31,7 @@
 
   let {
     message,
+    topic,
     snapshot,
     selected,
     selectedLabel,
@@ -66,7 +68,7 @@
 
 <section class="panel message-panel">
   <header class="panel-header">
-    <h2>Current value</h2>
+    <h2 title={topic}>{topic || "No topic selected"}</h2>
     <div class="panel-controls">
       {#if fieldMissing}
         <span

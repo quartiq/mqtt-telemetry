@@ -122,7 +122,7 @@
 
 <section class="panel history-panel">
   <header class="panel-header">
-    <h2>Topic history</h2>
+    <h2>History</h2>
     <div class="controls">
       <button disabled={selectedId === null} type="button" onclick={onlatest}
         >Latest</button

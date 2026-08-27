@@ -3,6 +3,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import ConnectionForm from "./ConnectionForm.svelte";
+  import ConnectionFields from "./ConnectionFields.svelte";
   import HistoryLimit from "./HistoryLimit.svelte";
   import HistoryTable from "./HistoryTable.svelte";
   import MessagePanel from "./MessagePanel.svelte";
@@ -88,8 +89,11 @@
   let status = $state("Idle");
   let error = $state(inlineDashboard.error ?? "");
   let dashboardNotice = $state("");
+  let editingConnection = $state(false);
   let dashboardFileInput: HTMLInputElement;
   let connectSerial = 0;
+  let activeUsername = "";
+  let activePassword = "";
   let viewToken = randomId();
   let lastReceivedAt = 0;
   let renderFrame = 0;
@@ -298,6 +302,7 @@
 
   onMount(() => {
     const popstate = (event: PopStateEvent) => {
+      editingConnection = false;
       const next = routeFromViewState(event.state) ?? defaultRoute();
       if (connectionKey(next) !== connectionKey(route)) {
         route = next;
@@ -464,6 +469,7 @@
   }
 
   function applyDashboard(dashboard: Dashboard) {
+    editingConnection = false;
     const next = routeFromDashboard(dashboard);
     const sameConnection =
       Boolean(session) && connectionKey(next) === connectionKey(route);
@@ -601,6 +607,8 @@
 
   async function startConnection(nextRoute: AppRoute) {
     const serial = ++connectSerial;
+    const credentials =
+      username || password ? { username, password } : undefined;
     session?.close();
     session = undefined;
     resetData(nextRoute.historyLimit);
@@ -638,13 +646,15 @@
             if (serial === connectSerial) statusChanged(next);
           },
         },
-        username || password ? { username, password } : undefined,
+        credentials,
       );
       if (serial !== connectSerial) {
         nextSession.close();
         return;
       }
       session = nextSession;
+      activeUsername = credentials?.username ?? "";
+      activePassword = credentials?.password ?? "";
       restoreView(history.state);
     } catch (caught) {
       if (serial !== connectSerial) return;
@@ -672,22 +682,39 @@
       fieldPath: null,
       plots: [],
     };
+    if (
+      session &&
+      connectionKey(next) === connectionKey(route) &&
+      username === activeUsername &&
+      password === activePassword
+    ) {
+      editingConnection = false;
+      return;
+    }
+    editingConnection = false;
     writeRoute(next, null);
     void startConnection(next);
   }
 
-  function changeConnection() {
-    const previousBroker = route.broker;
-    const next = {
-      ...route,
-      broker: "",
-      selectedTopic: "",
-      fieldPath: null,
-      plots: [],
-    };
-    writeRoute(next, null);
-    stopConnection();
-    formBroker = previousBroker;
+  function editConnection() {
+    formBroker = route.broker;
+    formFilters = route.filters.join("\n");
+    username = activeUsername;
+    password = activePassword;
+    editingConnection = true;
+  }
+
+  function cancelConnectionEdit() {
+    formBroker = route.broker;
+    formFilters = route.filters.join("\n");
+    username = activeUsername;
+    password = activePassword;
+    editingConnection = false;
+  }
+
+  function submitConnectionEdit(event: SubmitEvent) {
+    event.preventDefault();
+    connectFromForm();
   }
 
   function changeTimeZone(event: Event) {
@@ -981,13 +1008,12 @@
   <main class="browser">
     <header class="app-header panel">
       <div class="identity">
-        <h1>MQTT Telemetry</h1>
-        <div class="breadcrumb" aria-label="Current browsing path">
-          <span>{route.broker}</span>
-          {#if selectedTopic}<span aria-hidden="true">›</span><span
-              >{selectedTopic}</span
-            >{/if}
-        </div>
+        <h1 title={route.broker}>{route.broker}</h1>
+        {#if selectedTopic}
+          <div class="breadcrumb" aria-label="Selected topic">
+            <span>{selectedTopic}</span>
+          </div>
+        {/if}
       </div>
       <div class="header-controls">
         <span aria-live="polite" class:problem={status !== "Connected"}
@@ -1010,8 +1036,11 @@
             <option value="utc">UTC</option>
           </select>
         </label>
-        <button type="button" onclick={changeConnection}
-          >Change connection</button
+        <button
+          aria-expanded={editingConnection}
+          type="button"
+          onclick={editingConnection ? cancelConnectionEdit : editConnection}
+          >Connection…</button
         >
       </div>
       {#if error}<strong class="header-error">{error}</strong>{/if}
@@ -1019,6 +1048,24 @@
         <span class="header-notice meta" aria-live="polite"
           >{dashboardNotice}</span
         >
+      {/if}
+      {#if editingConnection}
+        <form
+          autocomplete="on"
+          class="connection-editor"
+          onsubmit={submitConnectionEdit}
+        >
+          <ConnectionFields
+            bind:broker={formBroker}
+            bind:filters={formFilters}
+            bind:username
+            bind:password
+          />
+          <div class="connection-editor-actions">
+            <button type="submit">Apply</button>
+            <button type="button" onclick={cancelConnectionEdit}>Cancel</button>
+          </div>
+        </form>
       {/if}
     </header>
 
@@ -1066,6 +1113,11 @@
               disabled={!selectedTopicSubtreePlotCount}
               type="button"
               onclick={removeTopicSubtreePlots}>Remove subtree</button
+            >
+            <button
+              disabled={!route.plots.length}
+              type="button"
+              onclick={() => removePlots(() => true)}>Remove all</button
             >
           </div>
         </div>
@@ -1122,6 +1174,7 @@
     <section class="details">
       <MessagePanel
         message={currentMessage}
+        topic={selectedTopic}
         snapshot={jsonSnapshot}
         selected={selectedJsonId}
         selectedLabel={selectedFieldLabel}
@@ -1154,7 +1207,6 @@
         onfocus={focusPlot}
         onremove={(plot) =>
           removePlots((current) => plotKey(current) === plotKey(plot))}
-        onremoveall={() => removePlots(() => true)}
       />
     </section>
   </main>

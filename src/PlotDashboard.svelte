@@ -23,27 +23,14 @@
     timeZone: DisplayTimeZone;
     onfocus: (plot: PlotRef) => void;
     onremove: (plot: PlotRef) => void;
-    onremoveall: () => void;
   };
 
-  let { plots, now, ageMs, timeZone, onfocus, onremove, onremoveall }: Props =
-    $props();
+  let { plots, now, ageMs, timeZone, onfocus, onremove }: Props = $props();
   let domain = $derived(plotTimeDomain(plots, now, ageMs));
   let inspectTime = $state<number | undefined>();
 </script>
 
 <section class="plot-dashboard">
-  <header>
-    <div>
-      <h2>Plots</h2>
-      <span class="meta">
-        {plots.length.toLocaleString()} pinned · shared receipt-time axis
-      </span>
-    </div>
-    <button disabled={!plots.length} type="button" onclick={onremoveall}
-      >Remove all</button
-    >
-  </header>
   {#if plots.length}
     <div class:two-columns={plots.length > 4} class="plot-grid">
       {#each plots as plot (plot.key)}
@@ -63,9 +50,7 @@
       {/each}
     </div>
   {:else}
-    <p class="empty">
-      Pin numeric fields from Current value to compare them here.
-    </p>
+    <p class="empty">Pin numeric fields to compare them here.</p>
   {/if}
 </section>
 
@@ -75,26 +60,8 @@
     border-radius: var(--radius);
     display: grid;
     grid-column: 1 / -1;
-    grid-template-rows: auto minmax(0, 1fr);
     min-height: 0;
     overflow: hidden;
-  }
-
-  .plot-dashboard > header {
-    align-items: center;
-    background: var(--panel);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    padding: var(--space-tight) var(--space);
-  }
-
-  .plot-dashboard > header > div {
-    align-items: baseline;
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space);
-    min-width: 0;
   }
 
   .plot-grid {

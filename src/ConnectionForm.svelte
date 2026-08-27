@@ -2,6 +2,7 @@
 
 <script lang="ts">
   import HistoryLimit from "./HistoryLimit.svelte";
+  import ConnectionFields from "./ConnectionFields.svelte";
 
   type Props = {
     broker: string;
@@ -52,41 +53,7 @@
       <span class="meta">JSON topic browser</span>
     </header>
     <form autocomplete="on" onsubmit={submit}>
-      <label>
-        Broker
-        <input
-          autocomplete="url"
-          bind:value={broker}
-          name="broker"
-          placeholder="wss://mqtt.example.com:443/path/to/socket"
-          required
-          title="Use MQTT over WebSocket. LAN brokers may require browser Local Network Access permission; TLS certificates must be browser-trusted."
-          type="url"
-        />
-      </label>
-      <label>
-        Subscriptions <span class="hint">one MQTT filter per line</span>
-        <textarea bind:value={filters} rows="4"></textarea>
-      </label>
-      <div class="credentials">
-        <label>
-          Username
-          <input
-            autocomplete="username"
-            bind:value={username}
-            name="username"
-          />
-        </label>
-        <label>
-          Password
-          <input
-            autocomplete="current-password"
-            bind:value={password}
-            name="password"
-            type="password"
-          />
-        </label>
-      </div>
+      <ConnectionFields bind:broker bind:filters bind:username bind:password />
       <div class="actions">
         <button disabled={connecting} type="submit"
           >{connecting ? "Connecting…" : "Connect"}</button
@@ -121,20 +88,9 @@
     width: 100%;
   }
 
-  form,
-  label {
-    display: grid;
-    gap: var(--space-tight);
-  }
-
   form {
-    gap: var(--space);
-  }
-
-  .credentials {
     display: grid;
     gap: var(--space);
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .actions,
@@ -154,16 +110,5 @@
   .feedback strong {
     color: var(--error);
     font-weight: 500;
-  }
-
-  .hint {
-    color: var(--muted);
-    font-size: var(--text-small);
-  }
-
-  @media (max-width: 600px) {
-    .credentials {
-      grid-template-columns: 1fr;
-    }
   }
 </style>

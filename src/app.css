@@ -134,6 +134,8 @@ pre {
 }
 
 .panel-header h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -212,6 +214,19 @@ pre {
 
 .dashboard-file {
   display: none;
+}
+
+.connection-editor {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: var(--space);
+  grid-column: 1 / -1;
+  padding-top: var(--space);
+}
+
+.connection-editor-actions {
+  display: flex;
+  gap: var(--space-tight);
 }
 
 .problem,
