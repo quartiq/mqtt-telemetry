@@ -5,6 +5,7 @@
     downsamplePlotPoints,
     formatPlotNumber,
     formatPlotTick,
+    nearestPlotPoint,
     nicePlotScale,
     plotStatistics,
     timeTickValues,
@@ -18,6 +19,8 @@
     retainedExcluded: number;
     xMin: number;
     xMax: number;
+    inspectTime?: number;
+    oninspect: (position?: number) => void;
     onfocus: () => void;
     onremove: () => void;
   };
@@ -28,6 +31,8 @@
     retainedExcluded,
     xMin,
     xMax,
+    inspectTime,
+    oninspect,
     onfocus,
     onremove,
   }: Props = $props();
@@ -107,21 +112,51 @@
     }
     return count;
   });
+  let inspection = $derived(
+    inspectTime === undefined
+      ? undefined
+      : nearestPlotPoint(points, inspectTime),
+  );
+  let inspectionMarker = $derived.by(() => {
+    if (!plot || inspectTime === undefined || !inspection) return undefined;
+    const plotWidth = width - left - right;
+    const plotHeight = height - top - bottom;
+    return {
+      cursorX:
+        left +
+        ((inspectTime - plot.xMin) / (plot.xMax - plot.xMin)) * plotWidth,
+      pointX:
+        left +
+        ((inspection.x - plot.xMin) / (plot.xMax - plot.xMin)) * plotWidth,
+      pointY:
+        top +
+        ((plot.yMax - inspection.y) / (plot.yMax - plot.yMin)) * plotHeight,
+    };
+  });
   let statistics = $derived.by(() => {
     const items: string[] = [];
     if (plot) {
       const { latest, low, high, mean, standardDeviation } = plot.summary;
-      items.push(`latest ${formatPlotNumber(latest, plot.step)}`);
-      items.push(`mean ${formatPlotNumber(mean, plot.step)}`);
+      if (inspection) {
+        const showDate =
+          new Date(plot.xMin).toDateString() !==
+          new Date(plot.xMax).toDateString();
+        items.push(`x ${time(inspection.x, true, showDate)}`);
+        items.push(`y ${formatPlotNumber(inspection.y, plot.step)}`);
+      } else {
+        items.push(`latest ${formatPlotNumber(latest, plot.step)}`);
+      }
+      items.push(`μ ${formatPlotNumber(mean, plot.step)}`);
+      items.push(
+        `p–p ${formatPlotNumber(high - low, Math.min(plot.step, high - low || plot.step))}`,
+      );
       items.push(
         `σ ${formatPlotNumber(standardDeviation, Math.min(plot.step, standardDeviation || plot.step))}`,
       );
+      items.push(`n ${points.length.toLocaleString()}`);
       items.push(`low ${formatPlotNumber(low, plot.step)}`);
       items.push(`high ${formatPlotNumber(high, plot.step)}`);
     }
-    items.push(
-      `${points.length.toLocaleString()} ${points.length === 1 ? "live sample" : "live samples"}`,
-    );
     if (retainedExcluded)
       items.push(`${retainedExcluded.toLocaleString()} retained excluded`);
     if (gaps)
@@ -130,6 +165,27 @@
       );
     return items;
   });
+
+  function inspect(event: PointerEvent) {
+    if (!plot || event.pointerType !== "mouse") return;
+    const svg = event.currentTarget as SVGSVGElement;
+    const matrix = svg.getScreenCTM();
+    if (!matrix) return;
+    const cursor = svg.createSVGPoint();
+    cursor.x = event.clientX;
+    cursor.y = event.clientY;
+    const position = cursor.matrixTransform(matrix.inverse());
+    if (
+      position.x < left ||
+      position.x > width - right ||
+      position.y < top ||
+      position.y > height - bottom
+    ) {
+      oninspect(undefined);
+      return;
+    }
+    oninspect((position.x - left) / (width - left - right));
+  }
 
   function time(
     value: number,
@@ -160,7 +216,10 @@
       type="button"
       onclick={onremove}>×</button
     >
-    <div class="panel-stats meta">
+    <div
+      class="panel-stats meta"
+      title="Statistics use plotted live samples; σ is the population standard deviation."
+    >
       {#each statistics as statistic}<span>{statistic}</span>{/each}
     </div>
   </header>
@@ -169,6 +228,8 @@
       role="img"
       viewBox={`0 0 ${width} ${height}`}
       aria-label={`${label} on ${topic} over receipt time`}
+      onpointermove={inspect}
+      onpointerleave={() => oninspect(undefined)}
     >
       {#each plot.yTicks as tick}
         {@const y =
@@ -220,6 +281,21 @@
           />
         {/if}
       {/each}
+      {#if inspectionMarker}
+        <line
+          class="inspection-time"
+          x1={inspectionMarker.cursorX}
+          x2={inspectionMarker.cursorX}
+          y1={top}
+          y2={height - bottom}
+        />
+        <circle
+          class="inspection-point"
+          cx={inspectionMarker.pointX}
+          cy={inspectionMarker.pointY}
+          r="3"
+        />
+      {/if}
     </svg>
   {:else}
     <p class="empty">
@@ -269,6 +345,7 @@
 
   svg {
     color: var(--muted);
+    cursor: crosshair;
     display: block;
     height: 100%;
     min-height: 0;
@@ -296,6 +373,20 @@
 
   .series-point {
     fill: var(--fg);
+  }
+
+  .inspection-time {
+    stroke: var(--fg);
+    stroke-dasharray: 2 3;
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .inspection-point {
+    fill: var(--bg);
+    stroke: var(--fg);
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
   }
 
   text {

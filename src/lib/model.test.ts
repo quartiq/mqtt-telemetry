@@ -11,6 +11,7 @@ import {
   messagePayloadPreview,
   messageFrequency,
   messageSpan,
+  nearestPlotPoint,
   nicePlotScale,
   parsePayload,
   parseJsonPath,
@@ -421,6 +422,19 @@ describe("plot extraction", () => {
       mean: 100_000.25,
     });
     expect(plotStatistics(points)?.standardDeviation).toBeCloseTo(0.15, 10);
+  });
+
+  it("finds the nearest full-resolution plot sample", () => {
+    const points = [
+      { x: 10, y: 1, segment: 0 },
+      { x: 20, y: 2, segment: 0 },
+      { x: 40, y: 4, segment: 1 },
+    ];
+    expect(nearestPlotPoint(points, 4)).toBe(points[0]);
+    expect(nearestPlotPoint(points, 16)).toBe(points[1]);
+    expect(nearestPlotPoint(points, 30)).toBe(points[1]);
+    expect(nearestPlotPoint(points, 100)).toBe(points[2]);
+    expect(nearestPlotPoint([], 10)).toBeUndefined();
   });
 
   it("keeps every plot on a shared domain ending at now", () => {

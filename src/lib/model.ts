@@ -408,6 +408,24 @@ export function plotStatistics(
   };
 }
 
+export function nearestPlotPoint(
+  points: readonly PlotPoint[],
+  time: number,
+): PlotPoint | undefined {
+  if (!points.length) return undefined;
+  let low = 0;
+  let high = points.length - 1;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (points[middle].x < time) low = middle + 1;
+    else high = middle;
+  }
+  if (!low) return points[0];
+  const before = points[low - 1];
+  const after = points[low];
+  return time - before.x <= after.x - time ? before : after;
+}
+
 export function plotTimeDomain(
   series: Iterable<PlotSeries>,
   now: number,

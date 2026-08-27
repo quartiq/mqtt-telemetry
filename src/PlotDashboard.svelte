@@ -23,6 +23,12 @@
 
   let { plots, now, ageMs, onfocus, onremove, onremoveall }: Props = $props();
   let domain = $derived(plotTimeDomain(plots, now, ageMs));
+  let inspectPosition = $state<number | undefined>();
+  let inspectTime = $derived(
+    inspectPosition === undefined
+      ? undefined
+      : domain.min + inspectPosition * (domain.max - domain.min),
+  );
 </script>
 
 <section class="plot-dashboard">
@@ -47,6 +53,8 @@
           retainedExcluded={plot.retainedExcluded}
           xMin={domain.min}
           xMax={domain.max}
+          {inspectTime}
+          oninspect={(position) => (inspectPosition = position)}
           onfocus={() => onfocus(plot)}
           onremove={() => onremove(plot)}
         />
