@@ -4,12 +4,15 @@
   import TreeView from "./TreeView.svelte";
   import {
     formatPayload,
+    formatTelemetryTime,
+    type DisplayTimeZone,
     type JsonSnapshot,
     type TelemetryMessage,
   } from "./lib/model";
 
   type Props = {
     message?: TelemetryMessage;
+    topic: string;
     snapshot?: JsonSnapshot;
     selected: string;
     selectedLabel?: string;
@@ -19,6 +22,7 @@
     checked: Set<string>;
     checkDisabled: boolean;
     subtreePlotCount: number;
+    timeZone: DisplayTimeZone;
     onselect: (id: string) => void;
     ontoggle: (id: string, open: boolean) => void;
     oncheck: (id: string) => void;
@@ -27,6 +31,7 @@
 
   let {
     message,
+    topic,
     snapshot,
     selected,
     selectedLabel,
@@ -36,6 +41,7 @@
     checked,
     checkDisabled,
     subtreePlotCount,
+    timeZone,
     onselect,
     ontoggle,
     oncheck,
@@ -48,7 +54,7 @@
     if (!message) return [];
     const items = [
       following ? "Following latest" : "Historical",
-      `received ${timestamp(message.receivedAt)}`,
+      `received ${formatTelemetryTime(message.receivedAt, { timeZone, date: true, milliseconds: true })}`,
     ];
     if (message.retained) items.push("retained");
     if (message.duplicate) items.push("possible duplicate");
@@ -58,15 +64,11 @@
     if (message.unsafeIntegers) items.push("unsafe integer precision");
     return items;
   });
-
-  function timestamp(value: number): string {
-    return new Date(value).toLocaleString();
-  }
 </script>
 
 <section class="panel message-panel">
   <header class="panel-header">
-    <h2>Current value</h2>
+    <h2 title={topic}>{topic || "No topic selected"}</h2>
     <div class="panel-controls">
       {#if fieldMissing}
         <span

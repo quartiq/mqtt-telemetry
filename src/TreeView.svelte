@@ -33,7 +33,7 @@
     revision = 0,
     selected,
     expanded,
-    activity = new Map(),
+    activity,
     checkable = new Set(),
     checked = new Set(),
     checkDisabled = false,
@@ -42,6 +42,7 @@
     ontoggle,
     oncheck,
   }: Props = $props();
+  const emptyActivity = new Map<string, TreeActivity>();
   let focusId = $state("");
   const actions: TreeActions = {
     select: (id) => onselect(id),
@@ -60,7 +61,8 @@
     selected,
     tabStop,
     expanded,
-    activity,
+    activity: activity ?? emptyActivity,
+    showActivity: activity !== undefined,
     checkable,
     checked,
     checkDisabled,

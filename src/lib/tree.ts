@@ -2,6 +2,7 @@ export type TreeNodeView = {
   id: string;
   label: string;
   value?: string;
+  suffix?: string;
   parent?: string;
   children: string[];
   title?: string;
@@ -35,6 +36,7 @@ export type TreeContext = {
   tabStop: string;
   expanded: Set<string>;
   activity: Map<string, TreeActivity>;
+  showActivity: boolean;
   checkable: Set<string>;
   checked: Set<string>;
   checkDisabled: boolean;
@@ -69,6 +71,7 @@ export type TreeFilter = {
   nodes: Map<string, TreeNodeView>;
   matches: string[];
   expanded: Set<string>;
+  error?: string;
 };
 
 export function filterTree(
@@ -79,10 +82,69 @@ export function filterTree(
   const needle = query.trim().toLocaleLowerCase();
   if (!needle) return { roots, nodes, matches: [], expanded: new Set() };
 
+  return filterTreeBy(roots, nodes, (node) =>
+    (node.title ?? node.label).toLocaleLowerCase().includes(needle),
+  );
+}
+
+export function filterTopicTree(
+  roots: string[],
+  nodes: Map<string, TreeNodeView>,
+  query: string,
+): TreeFilter {
+  const value = query.trim();
+  if (!value) return { roots, nodes, matches: [], expanded: new Set() };
+  if (!/[+#]/.test(value)) return filterTree(roots, nodes, value);
+  const error = mqttFilterError(value);
+  if (error)
+    return {
+      roots: [],
+      nodes: new Map(),
+      matches: [],
+      expanded: new Set(),
+      error,
+    };
+  return filterTreeBy(roots, nodes, (node) =>
+    topicMatchesFilter((node.title ?? node.label).split("\n", 1)[0], value),
+  );
+}
+
+export function topicMatchesFilter(topic: string, filter: string): boolean {
+  if (mqttFilterError(filter)) return false;
+  const topicLevels = topic.split("/");
+  const filterLevels = filter.split("/");
+  if (
+    topic.startsWith("$") &&
+    (filterLevels[0] === "+" || filterLevels[0] === "#")
+  )
+    return false;
+  for (let index = 0; index < filterLevels.length; index += 1) {
+    const level = filterLevels[index];
+    if (level === "#") return true;
+    if (index >= topicLevels.length) return false;
+    if (level !== "+" && level !== topicLevels[index]) return false;
+  }
+  return topicLevels.length === filterLevels.length;
+}
+
+function mqttFilterError(filter: string): string | undefined {
+  const levels = filter.split("/");
+  for (const [index, level] of levels.entries()) {
+    if (level.includes("+") && level !== "+")
+      return "+ must occupy a complete topic level.";
+    if (level.includes("#") && (level !== "#" || index !== levels.length - 1))
+      return "# must occupy the final complete topic level.";
+  }
+  return undefined;
+}
+
+function filterTreeBy(
+  roots: string[],
+  nodes: Map<string, TreeNodeView>,
+  matchesNode: (node: TreeNodeView) => boolean,
+): TreeFilter {
   const matches = [...nodes.values()]
-    .filter((node) =>
-      (node.title ?? node.label).toLocaleLowerCase().includes(needle),
-    )
+    .filter(matchesNode)
     .map((node) => node.id);
   const included = new Set(matches);
   for (const id of matches)

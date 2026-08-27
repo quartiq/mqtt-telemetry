@@ -28,26 +28,22 @@
     return context.activity.get(node.id);
   });
 
-  const flashFrames = [
-    { background: "var(--flash)" },
-    { background: "var(--flash-end)" },
-  ];
-
-  function flash(node: HTMLElement, initial?: typeof activity) {
-    let animation: Animation | undefined;
+  function indicateActivity(node: HTMLElement, initial?: typeof activity) {
+    let timer = 0;
     const run = (next?: typeof activity) => {
-      if (!next || performance.now() - next.at > 1000) return;
-      animation?.cancel();
-      animation = node.animate(flashFrames, {
-        duration: 1000,
-        easing: "ease-out",
-      });
+      clearTimeout(timer);
+      const remaining = next ? 1000 - (performance.now() - next.at) : 0;
+      node.style.opacity = remaining > 0 ? "1" : "0";
+      if (remaining > 0)
+        timer = window.setTimeout(() => {
+          node.style.opacity = "0";
+        }, remaining);
     };
     run(initial);
     return {
       update: run,
       destroy() {
-        animation?.cancel();
+        clearTimeout(timer);
       },
     };
   }
@@ -119,7 +115,6 @@
     onclick={select}
     ondblclick={activate}
     onkeydown={keydown}
-    use:flash={activity}
   >
     {#if internal}
       <button
@@ -131,6 +126,11 @@
       >
     {:else}
       <span aria-hidden="true" class="spacer"></span>
+    {/if}
+    {#if context.showActivity}
+      <span aria-hidden="true" class="activity-slot">
+        <span class="activity-dot" use:indicateActivity={activity}></span>
+      </span>
     {/if}
     {#if checkable}
       <button
@@ -149,8 +149,11 @@
       >
     {/if}
     <span class="label">{node.label}</span>
+    {#if node.suffix !== undefined}
+      <span class="suffix">{node.suffix}</span>
+    {/if}
     {#if node.value !== undefined}
-      <span class="separator"> = </span><span class="value">{node.value}</span>
+      <span class="separator">=</span><span class="value">{node.value}</span>
     {/if}
   </div>
 
@@ -190,7 +193,6 @@
     min-width: 0;
     overflow: hidden;
     padding-right: var(--space-tight);
-    --flash-end: transparent;
   }
 
   [role="treeitem"]:focus-visible {
@@ -201,7 +203,23 @@
   .active {
     background: var(--selected);
     box-shadow: inset 2px 0 0 var(--selected-mark);
-    --flash-end: var(--selected);
+  }
+
+  .activity-slot {
+    align-items: center;
+    align-self: stretch;
+    display: flex;
+    flex: 0 0 0.55rem;
+    justify-content: center;
+    width: 0.55rem;
+  }
+
+  .activity-dot {
+    background: currentColor;
+    border-radius: 50%;
+    height: 0.3rem;
+    opacity: 0;
+    width: 0.3rem;
   }
 
   .caret,
@@ -234,6 +252,13 @@
   .separator {
     color: var(--muted);
     flex: none;
+    margin-inline: 0.25em;
+  }
+
+  .suffix {
+    color: var(--muted);
+    flex: none;
+    margin-left: 0.3em;
     white-space: pre;
   }
 
@@ -263,8 +288,8 @@
   }
 
   .plot-toggle[aria-pressed="true"] {
-    background: var(--plot);
-    border-color: var(--plot);
-    color: Canvas;
+    background: var(--fg);
+    border-color: var(--fg);
+    color: var(--bg);
   }
 </style>

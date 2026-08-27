@@ -3,6 +3,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import ConnectionForm from "./ConnectionForm.svelte";
+  import ConnectionFields from "./ConnectionFields.svelte";
   import HistoryLimit from "./HistoryLimit.svelte";
   import HistoryTable from "./HistoryTable.svelte";
   import MessagePanel from "./MessagePanel.svelte";
@@ -12,27 +13,38 @@
     TelemetryStore,
     fieldLabel,
     getJsonPath,
-    jsonPointer,
+    jsonPath,
     jsonTree,
-    plotSeriesPointer,
-    resolveJsonPointer,
+    parseJsonPath,
+    plotSeriesPath,
+    resolveJsonPath,
     telemetryPageTitle,
+    type DisplayTimeZone,
     type JsonPath,
   } from "./lib/model";
   import { MqttSession, type SessionStatus } from "./lib/mqtt-session";
   import { randomId } from "./lib/random-id";
   import {
+    DASHBOARD_FRAGMENT,
+    dashboardFromRoute,
+    dashboardJson,
+    dashboardShareUrl,
+    parseDashboard,
+    parseDashboardJson,
+    routeFromDashboard,
+    type Dashboard,
+  } from "./lib/dashboard";
+  import {
     connectionKey,
+    defaultRoute,
     isWebSocketBroker,
     MAX_PLOTS,
-    readRoute,
-    routeSearch,
     uniqueFilters,
     type AppRoute,
     type PlotRef,
   } from "./lib/routes";
   import {
-    filterTree,
+    filterTopicTree,
     selectionAfterCollapse,
     treeAncestorIds,
     type TreeActivity,
@@ -42,9 +54,16 @@
     app: "mqtt-telemetry";
     token: string;
     messageId: number | null;
+    dashboard: Dashboard;
+    selectedTopic: string;
+    fieldPath: string | null;
   };
 
-  const initialRoute = readRoute(location.search);
+  const inlineDashboard = readInlineDashboard(location.hash);
+  const storedRoute = routeFromViewState(history.state);
+  const initialRoute = inlineDashboard.dashboard
+    ? routeFromDashboard(inlineDashboard.dashboard)
+    : (storedRoute ?? defaultRoute());
   let route = $state(initialRoute);
   let formBroker = $state(initialRoute.broker);
   let formFilters = $state(initialRoute.filters.join("\n"));
@@ -68,19 +87,27 @@
   let jsonExpanded = $state(new Set<string>(["$"]));
   const jsonExpandedByTopic = new Map<string, Set<string>>();
   let status = $state("Idle");
-  let error = $state("");
+  let error = $state(inlineDashboard.error ?? "");
+  let dashboardNotice = $state("");
+  let editingConnection = $state(false);
+  let dashboardFileInput: HTMLInputElement;
   let connectSerial = 0;
+  let activeUsername = "";
+  let activePassword = "";
   let viewToken = randomId();
   let lastReceivedAt = 0;
   let renderFrame = 0;
   let plotNow = $state(Date.now());
+
+  if (location.search || location.hash || !storedRoute)
+    history.replaceState(historyState(null), "", cleanUrl());
 
   let topicSnapshot = $derived.by(() => {
     revision;
     return store.snapshot();
   });
   let topicFilter = $derived(
-    filterTree(topicSnapshot.roots, topicSnapshot.nodes, topicSearch),
+    filterTopicTree(topicSnapshot.roots, topicSnapshot.nodes, topicSearch),
   );
   let visibleTopics = $derived(
     topicSearch.trim() ? topicFilter : topicSnapshot,
@@ -113,17 +140,17 @@
       : undefined,
   );
   let activeField = $derived.by(() => {
-    if (route.fieldPointer === null || !selectedField) return undefined;
-    return jsonPointer(selectedField) === route.fieldPointer
+    if (route.fieldPath === null || !selectedField) return undefined;
+    return jsonPath(selectedField) === route.fieldPath
       ? selectedField
       : undefined;
   });
   let selectedJsonId = $derived(
-    route.fieldPointer === null
+    route.fieldPath === null
       ? ""
       : activeField
-        ? jsonPointer(activeField) || "$"
-        : route.fieldPointer || "$",
+        ? jsonPath(activeField)
+        : route.fieldPath,
   );
   let checkableJson = $derived.by(() => {
     const ids = new Set<string>();
@@ -138,16 +165,15 @@
     new Set(
       route.plots
         .filter((plot) => plot.topic === selectedTopic)
-        .map((plot) => plot.pointer || "$"),
+        .map((plot) => plot.path),
     ),
   );
   let plotLimitReached = $derived(route.plots.length >= MAX_PLOTS);
   let selectedValuePlotCount = $derived.by(() => {
     if (!jsonSnapshot?.nodes.get(selectedJsonId)?.children.length) return 0;
-    const pointer = selectedJsonId === "$" ? "" : selectedJsonId;
+    const path = selectedJsonId;
     return route.plots.filter(
-      (plot) =>
-        plot.topic === selectedTopic && pointerContains(pointer, plot.pointer),
+      (plot) => plot.topic === selectedTopic && pathContains(path, plot.path),
     ).length;
   });
   let selectedTopicPlotCount = $derived(
@@ -166,14 +192,14 @@
     return route.plots.map<DashboardPlot>((plot) => {
       const nodeId = store.nodeId(plot.topic);
       const history = nodeId ? store.history(nodeId) : [];
-      const series = plotSeriesPointer(history, plot.pointer);
-      let label = plot.pointer || "$";
+      const series = plotSeriesPath(history, plot.path);
+      let label = plot.path;
       for (let index = history.length - 1; index >= 0; index -= 1) {
         const payload = history[index].payload;
         if (payload.kind !== "json") continue;
-        const path = resolveJsonPointer(payload.value, plot.pointer);
-        if (path) {
-          label = fieldLabel(path);
+        const resolved = resolveJsonPath(payload.value, plot.path);
+        if (resolved) {
+          label = fieldLabel(resolved);
           break;
         }
       }
@@ -186,11 +212,11 @@
     });
   });
   let selectedFieldLabel = $derived(
-    route.fieldPointer === null
+    route.fieldPath === null
       ? undefined
       : activeField
         ? fieldLabel(activeField)
-        : route.fieldPointer || "$",
+        : route.fieldPath,
   );
   let topicWarning = $derived(
     [
@@ -218,12 +244,12 @@
       selectedField = undefined;
       return;
     }
-    const pointer =
+    const path =
       route.selectedTopic === topic
-        ? route.fieldPointer
+        ? route.fieldPath
         : (fieldByTopic.get(topic) ?? null);
-    fieldByTopic.set(topic, pointer);
-    if (pointer === null) {
+    fieldByTopic.set(topic, path);
+    if (path === null) {
       selectedField = undefined;
       return;
     }
@@ -231,17 +257,14 @@
     for (let index = currentHistory.length - 1; index >= 0; index -= 1) {
       const payload = currentHistory[index].payload;
       if (payload.kind !== "json") continue;
-      resolved = resolveJsonPointer(payload.value, pointer);
+      resolved = resolveJsonPath(payload.value, path);
       if (resolved) break;
     }
     if (resolved) {
-      if (
-        !selectedField ||
-        jsonPointer(resolved) !== jsonPointer(selectedField)
-      )
+      if (!selectedField || jsonPath(resolved) !== jsonPath(selectedField))
         selectedField = resolved;
-      const id = jsonPointer(resolved) || "$";
-      const revealKey = `${topic}\0${pointer}`;
+      const id = jsonPath(resolved);
+      const revealKey = `${topic}\0${path}`;
       if (jsonSnapshot?.nodes.has(id) && revealedFieldKey !== revealKey) {
         revealedFieldKey = revealKey;
         revealJson(id);
@@ -279,7 +302,8 @@
 
   onMount(() => {
     const popstate = (event: PopStateEvent) => {
-      const next = readRoute(location.search);
+      editingConnection = false;
+      const next = routeFromViewState(event.state) ?? defaultRoute();
       if (connectionKey(next) !== connectionKey(route)) {
         route = next;
         formFilters = next.filters.join("\n");
@@ -298,6 +322,7 @@
         }
       } else {
         const historyLimitChanged = next.historyLimit !== route.historyLimit;
+        const historyAgeChanged = next.historyAgeMs !== route.historyAgeMs;
         route = next;
         formHistoryLimit = next.historyLimit;
         formHistoryAgeMs = next.historyAgeMs;
@@ -305,12 +330,22 @@
           store.setHistoryLimit(next.historyLimit);
           revision += 1;
         }
+        if (
+          historyAgeChanged &&
+          next.historyAgeMs !== null &&
+          store.expireBefore(Date.now() - next.historyAgeMs)
+        )
+          revision += 1;
         restoreView(event.state);
       }
     };
     addEventListener("popstate", popstate);
     addEventListener("keydown", browserKeydown);
-    if (route.broker) void startConnection(route);
+    const brokerError = route.broker
+      ? isWebSocketBroker(route.broker)
+      : undefined;
+    if (brokerError) error = brokerError;
+    else if (route.broker) void startConnection(route);
     return () => {
       removeEventListener("popstate", popstate);
       removeEventListener("keydown", browserKeydown);
@@ -320,8 +355,82 @@
     };
   });
 
-  function historyState(messageId = selectedMessageId): ViewState {
-    return { app: "mqtt-telemetry", token: viewToken, messageId };
+  function cleanUrl(): string {
+    const url = new URL(location.href);
+    url.search = "";
+    url.hash = "";
+    return url.href;
+  }
+
+  function readInlineDashboard(hash: string): {
+    present: boolean;
+    dashboard?: Dashboard;
+    error?: string;
+  } {
+    const parameters = new URLSearchParams(hash.replace(/^#/, ""));
+    if (!parameters.has(DASHBOARD_FRAGMENT)) return { present: false };
+    try {
+      return {
+        present: true,
+        dashboard: parseDashboardJson(
+          parameters.get(DASHBOARD_FRAGMENT) as string,
+        ),
+      };
+    } catch (caught) {
+      return {
+        present: true,
+        error: caught instanceof Error ? caught.message : String(caught),
+      };
+    }
+  }
+
+  function routeFromViewState(state: unknown): AppRoute | undefined {
+    if (
+      typeof state !== "object" ||
+      state === null ||
+      !("app" in state) ||
+      state.app !== "mqtt-telemetry" ||
+      !("dashboard" in state)
+    )
+      return undefined;
+    try {
+      const dashboard = parseDashboard(state.dashboard);
+      const base = routeFromDashboard(dashboard);
+      const selectedTopic =
+        "selectedTopic" in state && typeof state.selectedTopic === "string"
+          ? state.selectedTopic
+          : base.selectedTopic;
+      const parsedField =
+        "fieldPath" in state && typeof state.fieldPath === "string"
+          ? parseJsonPath(state.fieldPath)
+          : undefined;
+      return {
+        ...base,
+        selectedTopic,
+        fieldPath:
+          "fieldPath" in state && state.fieldPath === null
+            ? null
+            : parsedField
+              ? jsonPath(parsedField)
+              : base.fieldPath,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  function historyState(
+    messageId = selectedMessageId,
+    nextRoute = route,
+  ): ViewState {
+    return {
+      app: "mqtt-telemetry",
+      token: viewToken,
+      messageId,
+      dashboard: dashboardFromRoute(nextRoute),
+      selectedTopic: nextRoute.selectedTopic,
+      fieldPath: nextRoute.fieldPath,
+    };
   }
 
   function writeRoute(
@@ -331,11 +440,105 @@
   ) {
     route = next;
     const method = replace ? "replaceState" : "pushState";
-    history[method](historyState(messageId), "", routeSearch(next));
+    history[method](historyState(messageId, next), "", cleanUrl());
   }
 
   function replaceRoute(next: AppRoute, messageId: number | null) {
     writeRoute(next, messageId, true);
+  }
+
+  function openDashboardFile() {
+    dashboardFileInput.click();
+  }
+
+  async function loadDashboardFile(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    if (file.size > 1024 * 1024) {
+      error = "Dashboard file is too large.";
+      return;
+    }
+    try {
+      applyDashboard(parseDashboardJson(await file.text()));
+      dashboardNotice = `Loaded ${file.name}`;
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : String(caught);
+    }
+  }
+
+  function applyDashboard(dashboard: Dashboard) {
+    editingConnection = false;
+    const next = routeFromDashboard(dashboard);
+    const sameConnection =
+      Boolean(session) && connectionKey(next) === connectionKey(route);
+    if (next.broker !== authBroker) {
+      username = "";
+      password = "";
+      authBroker = next.broker;
+    }
+    formBroker = next.broker;
+    formFilters = next.filters.join("\n");
+    formHistoryLimit = next.historyLimit;
+    formHistoryAgeMs = next.historyAgeMs;
+    writeRoute(next, null);
+    const brokerError = isWebSocketBroker(next.broker);
+    if (brokerError) {
+      stopConnection();
+      error = brokerError;
+    } else if (sameConnection) {
+      store.setHistoryLimit(next.historyLimit);
+      if (next.historyAgeMs !== null)
+        store.expireBefore(Date.now() - next.historyAgeMs);
+      revision += 1;
+      restoreView(history.state);
+    } else {
+      void startConnection(next);
+    }
+  }
+
+  function saveDashboard() {
+    const blob = new Blob([dashboardJson(route)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "mqtt-telemetry-dashboard.json";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url));
+    dashboardNotice = "Dashboard saved";
+  }
+
+  async function copyDashboardLink() {
+    const url = dashboardShareUrl(route, location);
+    try {
+      let copied = false;
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(url);
+          copied = true;
+        } catch {
+          // The fallback also works for local files and restricted clipboards.
+        }
+      }
+      if (!copied) {
+        const textarea = document.createElement("textarea");
+        textarea.value = url;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.append(textarea);
+        try {
+          textarea.select();
+          if (!document.execCommand("copy")) throw new Error();
+        } finally {
+          textarea.remove();
+        }
+      }
+      dashboardNotice = "Share link copied";
+    } catch {
+      dashboardNotice =
+        "Clipboard unavailable; save the dashboard JSON instead.";
+    }
   }
 
   function resetData(historyLimit: number) {
@@ -404,6 +607,8 @@
 
   async function startConnection(nextRoute: AppRoute) {
     const serial = ++connectSerial;
+    const credentials =
+      username || password ? { username, password } : undefined;
     session?.close();
     session = undefined;
     resetData(nextRoute.historyLimit);
@@ -441,13 +646,15 @@
             if (serial === connectSerial) statusChanged(next);
           },
         },
-        username || password ? { username, password } : undefined,
+        credentials,
       );
       if (serial !== connectSerial) {
         nextSession.close();
         return;
       }
       session = nextSession;
+      activeUsername = credentials?.username ?? "";
+      activePassword = credentials?.password ?? "";
       restoreView(history.state);
     } catch (caught) {
       if (serial !== connectSerial) return;
@@ -470,26 +677,51 @@
       filters,
       historyLimit: formHistoryLimit,
       historyAgeMs: formHistoryAgeMs,
+      timeZone: route.timeZone,
       selectedTopic: "",
-      fieldPointer: null,
+      fieldPath: null,
       plots: [],
     };
+    if (
+      session &&
+      connectionKey(next) === connectionKey(route) &&
+      username === activeUsername &&
+      password === activePassword
+    ) {
+      editingConnection = false;
+      return;
+    }
+    editingConnection = false;
     writeRoute(next, null);
     void startConnection(next);
   }
 
-  function changeConnection() {
-    const previousBroker = route.broker;
-    const next = {
-      ...route,
-      broker: "",
-      selectedTopic: "",
-      fieldPointer: null,
-      plots: [],
-    };
-    writeRoute(next, null);
-    stopConnection();
-    formBroker = previousBroker;
+  function editConnection() {
+    formBroker = route.broker;
+    formFilters = route.filters.join("\n");
+    username = activeUsername;
+    password = activePassword;
+    editingConnection = true;
+  }
+
+  function cancelConnectionEdit() {
+    formBroker = route.broker;
+    formFilters = route.filters.join("\n");
+    username = activeUsername;
+    password = activePassword;
+    editingConnection = false;
+  }
+
+  function submitConnectionEdit(event: SubmitEvent) {
+    event.preventDefault();
+    connectFromForm();
+  }
+
+  function changeTimeZone(event: Event) {
+    const timeZone = (event.currentTarget as HTMLSelectElement)
+      .value as DisplayTimeZone;
+    if (timeZone !== "local" && timeZone !== "utc") return;
+    writeRoute({ ...route, timeZone }, selectedMessageId);
   }
 
   function selectLoadedTopic(id: string, reset: boolean) {
@@ -513,24 +745,21 @@
   function selectTopic(id: string) {
     const topic = store.topic(id);
     if (topic === undefined) return;
-    let pointer: string | null;
+    let path: string | null;
     if (fieldByTopic.has(topic))
-      pointer = fieldByTopic.get(topic) as string | null;
+      path = fieldByTopic.get(topic) as string | null;
     else if (fieldByTopic.has(selectedTopic))
-      pointer = fieldByTopic.get(selectedTopic) as string | null;
-    else pointer = route.fieldPointer;
+      path = fieldByTopic.get(selectedTopic) as string | null;
+    else path = route.fieldPath;
     const unchanged =
       id === selectedTopicId &&
       selectedMessageId === null &&
       route.selectedTopic === topic &&
-      route.fieldPointer === pointer;
-    fieldByTopic.set(topic, pointer);
+      route.fieldPath === path;
+    fieldByTopic.set(topic, path);
     selectLoadedTopic(id, true);
     if (!unchanged)
-      writeRoute(
-        { ...route, selectedTopic: topic, fieldPointer: pointer },
-        null,
-      );
+      writeRoute({ ...route, selectedTopic: topic, fieldPath: path }, null);
   }
 
   function toggleTopic(id: string, open: boolean) {
@@ -551,13 +780,13 @@
   function selectJson(id: string) {
     const path = jsonSnapshot?.paths.get(id);
     if (!path) return;
-    const pointer = jsonPointer(path);
+    const fieldPath = jsonPath(path);
     selectedField = path;
-    fieldByTopic.set(selectedTopic, pointer);
-    revealedFieldKey = `${selectedTopic}\0${pointer}`;
+    fieldByTopic.set(selectedTopic, fieldPath);
+    revealedFieldKey = `${selectedTopic}\0${fieldPath}`;
     revealJson(id);
-    if (route.fieldPointer !== pointer)
-      writeRoute({ ...route, fieldPointer: pointer }, selectedMessageId);
+    if (route.fieldPath !== fieldPath)
+      writeRoute({ ...route, fieldPath }, selectedMessageId);
   }
 
   function revealJson(id: string) {
@@ -622,12 +851,17 @@
   }
 
   function plotKey(plot: PlotRef): string {
-    return JSON.stringify([plot.topic, plot.pointer]);
+    return JSON.stringify([plot.topic, plot.path]);
   }
 
-  function pointerContains(parent: string, candidate: string): boolean {
-    return (
-      !parent || candidate === parent || candidate.startsWith(`${parent}/`)
+  function pathContains(parent: string, candidate: string): boolean {
+    const parentPath = parseJsonPath(parent);
+    const candidatePath = parseJsonPath(candidate);
+    return Boolean(
+      parentPath &&
+      candidatePath &&
+      parentPath.length <= candidatePath.length &&
+      parentPath.every((segment, index) => candidatePath[index] === segment),
     );
   }
 
@@ -638,7 +872,7 @@
   function togglePlot(id: string) {
     const path = jsonSnapshot?.paths.get(id);
     if (!path || !selectedTopic) return;
-    const plot = { topic: selectedTopic, pointer: jsonPointer(path) };
+    const plot = { topic: selectedTopic, path: jsonPath(path) };
     const key = plotKey(plot);
     const pinned = route.plots.some((current) => plotKey(current) === key);
     if (!pinned && route.plots.length >= MAX_PLOTS) return;
@@ -654,11 +888,21 @@
       writeRoute({ ...route, plots }, selectedMessageId);
   }
 
+  function movePlot(plot: PlotRef, offset: -1 | 1) {
+    const index = route.plots.findIndex(
+      (current) => plotKey(current) === plotKey(plot),
+    );
+    const target = index + offset;
+    if (index < 0 || target < 0 || target >= route.plots.length) return;
+    const plots = [...route.plots];
+    [plots[index], plots[target]] = [plots[target], plots[index]];
+    writeRoute({ ...route, plots }, selectedMessageId);
+  }
+
   function removeSelectedValuePlots() {
-    const pointer = selectedJsonId === "$" ? "" : selectedJsonId;
+    const path = selectedJsonId;
     removePlots(
-      (plot) =>
-        plot.topic === selectedTopic && pointerContains(pointer, plot.pointer),
+      (plot) => plot.topic === selectedTopic && pathContains(path, plot.path),
     );
   }
 
@@ -676,12 +920,12 @@
     const id = store.nodeId(plot.topic);
     if (id) selectLoadedTopic(id, true);
     else selectedTopicId = "";
-    fieldByTopic.set(plot.topic, plot.pointer);
+    fieldByTopic.set(plot.topic, plot.path);
     writeRoute(
       {
         ...route,
         selectedTopic: plot.topic,
-        fieldPointer: plot.pointer,
+        fieldPath: plot.path,
       },
       null,
     );
@@ -749,6 +993,14 @@
   }
 </script>
 
+<input
+  accept="application/json,.json"
+  bind:this={dashboardFileInput}
+  class="dashboard-file"
+  type="file"
+  onchange={loadDashboardFile}
+/>
+
 {#if !session}
   <ConnectionForm
     bind:broker={formBroker}
@@ -761,28 +1013,71 @@
     {error}
     connecting={status === "Connecting"}
     onconnect={connectFromForm}
+    onload={openDashboardFile}
   />
 {:else}
   <main class="browser">
     <header class="app-header panel">
       <div class="identity">
-        <h1>MQTT Telemetry</h1>
-        <div class="breadcrumb" aria-label="Current browsing path">
-          <span>{route.broker}</span>
-          {#if selectedTopic}<span aria-hidden="true">›</span><span
-              >{selectedTopic}</span
-            >{/if}
-        </div>
+        <h1 title={route.broker}>{route.broker}</h1>
+        {#if selectedTopic}
+          <div class="breadcrumb" aria-label="Selected topic">
+            <span>{selectedTopic}</span>
+          </div>
+        {/if}
       </div>
-      <div class="connection-state">
+      <div class="header-controls">
         <span aria-live="polite" class:problem={status !== "Connected"}
           >{status}</span
         >
-        <button type="button" onclick={changeConnection}
-          >Change connection</button
+        <div class="dashboard-actions" aria-label="Dashboard">
+          <button type="button" onclick={saveDashboard}>Save</button>
+          <button type="button" onclick={openDashboardFile}>Load…</button>
+          <button type="button" onclick={copyDashboardLink}>Copy link</button>
+        </div>
+        <label class="time-zone">
+          <span class="meta">Time</span>
+          <select
+            aria-label="Displayed time zone"
+            title="Display receipt times in the browser time zone or UTC"
+            value={route.timeZone}
+            onchange={changeTimeZone}
+          >
+            <option value="local">Local</option>
+            <option value="utc">UTC</option>
+          </select>
+        </label>
+        <button
+          aria-expanded={editingConnection}
+          type="button"
+          onclick={editingConnection ? cancelConnectionEdit : editConnection}
+          >Connection…</button
         >
       </div>
       {#if error}<strong class="header-error">{error}</strong>{/if}
+      {#if dashboardNotice}
+        <span class="header-notice meta" aria-live="polite"
+          >{dashboardNotice}</span
+        >
+      {/if}
+      {#if editingConnection}
+        <form
+          autocomplete="on"
+          class="connection-editor"
+          onsubmit={submitConnectionEdit}
+        >
+          <ConnectionFields
+            bind:broker={formBroker}
+            bind:filters={formFilters}
+            bind:username
+            bind:password
+          />
+          <div class="connection-editor-actions">
+            <button type="submit">Apply</button>
+            <button type="button" onclick={cancelConnectionEdit}>Cancel</button>
+          </div>
+        </form>
+      {/if}
     </header>
 
     <aside class="topics panel">
@@ -830,6 +1125,11 @@
               type="button"
               onclick={removeTopicSubtreePlots}>Remove subtree</button
             >
+            <button
+              disabled={!route.plots.length}
+              type="button"
+              onclick={() => removePlots(() => true)}>Remove all</button
+            >
           </div>
         </div>
         <HistoryLimit
@@ -844,15 +1144,21 @@
           aria-label="Search topic paths"
           id="topic-search"
           onkeydown={topicSearchKeydown}
-          placeholder="Search topics  /"
+          placeholder="Search or MQTT filter  /"
           type="search"
           bind:value={topicSearch}
         />
         {#if topicSearch.trim()}
-          <span class="meta">
-            {topicFilter.matches.length.toLocaleString()}
-            {topicFilter.matches.length === 1 ? "match" : "matches"}
-          </span>
+          {#if topicFilter.error}
+            <span class="meta problem" title={topicFilter.error}
+              >Invalid filter</span
+            >
+          {:else}
+            <span class="meta">
+              {topicFilter.matches.length.toLocaleString()}
+              {topicFilter.matches.length === 1 ? "match" : "matches"}
+            </span>
+          {/if}
         {/if}
       </div>
       <div class="topic-tree">
@@ -879,6 +1185,7 @@
     <section class="details">
       <MessagePanel
         message={currentMessage}
+        topic={selectedTopic}
         snapshot={jsonSnapshot}
         selected={selectedJsonId}
         selectedLabel={selectedFieldLabel}
@@ -888,6 +1195,7 @@
         checked={checkedJson}
         checkDisabled={plotLimitReached}
         subtreePlotCount={selectedValuePlotCount}
+        timeZone={route.timeZone}
         onselect={selectJson}
         ontoggle={toggleJson}
         oncheck={togglePlot}
@@ -898,6 +1206,7 @@
         selectedId={selectedMessageId}
         field={activeField}
         fieldLabel={selectedFieldLabel}
+        timeZone={route.timeZone}
         onselect={selectHistory}
         onlatest={selectLatest}
       />
@@ -905,10 +1214,11 @@
         plots={dashboardPlots}
         now={plotNow}
         ageMs={route.historyAgeMs}
+        timeZone={route.timeZone}
         onfocus={focusPlot}
+        onmove={movePlot}
         onremove={(plot) =>
           removePlots((current) => plotKey(current) === plotKey(plot))}
-        onremoveall={() => removePlots(() => true)}
       />
     </section>
   </main>

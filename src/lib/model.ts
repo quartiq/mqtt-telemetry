@@ -4,6 +4,7 @@ export type JsonValue =
   null | boolean | number | string | JsonValue[] | JsonObject;
 export type JsonObject = { [key: string]: JsonValue };
 export type JsonPath = (string | number)[];
+export type DisplayTimeZone = "local" | "utc";
 
 export type Payload =
   | { kind: "json"; value: JsonValue }
@@ -59,6 +60,13 @@ export type PlotScale = {
   step: number;
   ticks: [number, number, number];
 };
+export type PlotStatistics = {
+  latest: number;
+  low: number;
+  high: number;
+  mean: number;
+  standardDeviation: number;
+};
 
 export type StoreLimits = {
   maxHistoryBytes: number;
@@ -85,6 +93,50 @@ export const DEFAULT_JSON_TREE_LIMITS: JsonTreeLimits = {
 };
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
+
+export function formatTelemetryTime(
+  value: number,
+  options: {
+    timeZone: DisplayTimeZone;
+    date?: boolean;
+    milliseconds?: boolean;
+  },
+): string {
+  const parts = new Intl.DateTimeFormat("en", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+    ...(options.milliseconds ? { fractionalSecondDigits: 3 } : {}),
+    ...(options.timeZone === "utc" ? { timeZone: "UTC" } : {}),
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+  const date = options.date
+    ? `${part("year")}-${part("month")}-${part("day")} `
+    : "";
+  const milliseconds = options.milliseconds
+    ? `.${part("fractionalSecond")}`
+    : "";
+  return `${date}${part("hour")}:${part("minute")}:${part("second")}${milliseconds}`;
+}
+
+export function displayDatesDiffer(
+  left: number,
+  right: number,
+  timeZone: DisplayTimeZone,
+): boolean {
+  const formatter = new Intl.DateTimeFormat("en", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    ...(timeZone === "utc" ? { timeZone: "UTC" } : {}),
+  });
+  return formatter.format(left) !== formatter.format(right);
+}
 
 function topicId(parts: string[]): string {
   return JSON.stringify(parts);
@@ -162,41 +214,140 @@ export function getJsonPath(
   return value;
 }
 
-export function jsonPointer(path: JsonPath): string {
-  return path
-    .map((segment) =>
-      String(segment).replaceAll("~", "~0").replaceAll("/", "~1"),
-    )
-    .map((segment) => `/${segment}`)
-    .join("");
+// A deterministic singular JSONPath subset: dot notation where it is clear,
+// bracket notation for other member names, and numeric array indices.
+export function jsonPath(path: JsonPath): string {
+  return path.reduce<string>(
+    (result, segment) =>
+      typeof segment === "number"
+        ? `${result}[${segment}]`
+        : /^[A-Za-z_][A-Za-z0-9_]*$/.test(segment)
+          ? `${result}.${segment}`
+          : `${result}['${escapeJsonPathName(segment)}']`,
+    "$",
+  );
 }
 
-export function resolveJsonPointer(
-  root: JsonValue,
-  pointer: string,
-): JsonPath | undefined {
-  if (!pointer) return [];
-  if (!pointer.startsWith("/")) return undefined;
-  const tokens = pointer
-    .slice(1)
-    .split("/")
-    .map((token) => token.replaceAll("~1", "/").replaceAll("~0", "~"));
+export function parseJsonPath(value: string): JsonPath | undefined {
+  if (!value.startsWith("$")) return undefined;
   const path: JsonPath = [];
-  let value = root;
-  for (const token of tokens) {
-    if (Array.isArray(value) && /^(0|[1-9]\d*)$/.test(token)) {
-      const index = Number(token);
-      if (index >= value.length) return undefined;
-      path.push(index);
-      value = value[index];
-    } else if (isJsonObject(value) && token in value) {
-      path.push(token);
-      value = value[token];
+  let index = 1;
+  while (index < value.length) {
+    if (value[index] === ".") {
+      const match = /^[A-Za-z_][A-Za-z0-9_]*/.exec(value.slice(index + 1));
+      if (!match) return undefined;
+      path.push(match[0]);
+      index += match[0].length + 1;
+      continue;
+    }
+    if (value[index] !== "[") return undefined;
+    index += 1;
+    if (value[index] === "'" || value[index] === '"') {
+      const quote = value[index];
+      const parsed = parseJsonPathName(value, index + 1, quote);
+      if (!parsed) return undefined;
+      path.push(parsed.name);
+      index = parsed.next;
     } else {
-      return undefined;
+      const end = value.indexOf("]", index);
+      if (end < 0) return undefined;
+      const token = value.slice(index, end);
+      if (!/^(0|[1-9]\d*)$/.test(token)) return undefined;
+      const arrayIndex = Number(token);
+      if (!Number.isSafeInteger(arrayIndex)) return undefined;
+      path.push(arrayIndex);
+      index = end + 1;
     }
   }
   return path;
+}
+
+export function resolveJsonPath(
+  root: JsonValue,
+  singularPath: string,
+): JsonPath | undefined {
+  const path = parseJsonPath(singularPath);
+  if (!path) return undefined;
+  return getJsonPath(root, path) === undefined ? undefined : path;
+}
+
+function escapeJsonPathName(value: string): string {
+  let escaped = "";
+  for (const character of value) {
+    switch (character) {
+      case "'":
+        escaped += "\\'";
+        break;
+      case "\\":
+        escaped += "\\\\";
+        break;
+      case "\b":
+        escaped += "\\b";
+        break;
+      case "\f":
+        escaped += "\\f";
+        break;
+      case "\n":
+        escaped += "\\n";
+        break;
+      case "\r":
+        escaped += "\\r";
+        break;
+      case "\t":
+        escaped += "\\t";
+        break;
+      default: {
+        const codePoint = character.codePointAt(0) as number;
+        escaped +=
+          codePoint < 0x20
+            ? `\\u${codePoint.toString(16).toUpperCase().padStart(4, "0")}`
+            : character;
+      }
+    }
+  }
+  return escaped;
+}
+
+function parseJsonPathName(
+  value: string,
+  start: number,
+  quote: string,
+): { name: string; next: number } | undefined {
+  let name = "";
+  let index = start;
+  while (index < value.length) {
+    const character = value[index];
+    if (character === quote)
+      return value[index + 1] === "]" ? { name, next: index + 2 } : undefined;
+    if (character !== "\\") {
+      if (character.codePointAt(0)! < 0x20) return undefined;
+      name += character;
+      index += 1;
+      continue;
+    }
+    const escape = value[index + 1];
+    const simple: Record<string, string> = {
+      [quote]: quote,
+      "\\": "\\",
+      "/": "/",
+      b: "\b",
+      f: "\f",
+      n: "\n",
+      r: "\r",
+      t: "\t",
+    };
+    if (escape in simple) {
+      name += simple[escape];
+      index += 2;
+      continue;
+    }
+    if (escape !== "u") return undefined;
+    const hex = value.slice(index + 2, index + 6);
+    if (!/^[0-9A-Fa-f]{4}$/.test(hex)) return undefined;
+    name += String.fromCharCode(Number.parseInt(hex, 16));
+    index += 6;
+  }
+  return undefined;
 }
 
 export function fieldLabel(path: JsonPath): string {
@@ -252,18 +403,18 @@ export function plotSeries(
   history: TelemetryMessage[],
   path: JsonPath,
 ): PlotSeries {
-  return plotSeriesPointer(history, jsonPointer(path));
+  return plotSeriesPath(history, jsonPath(path));
 }
 
-export function plotSeriesPointer(
+export function plotSeriesPath(
   history: TelemetryMessage[],
-  pointer: string,
+  singularPath: string,
 ): PlotSeries {
   const points: PlotPoint[] = [];
   let retainedExcluded = 0;
   for (const message of history) {
     if (message.payload.kind !== "json") continue;
-    const path = resolveJsonPointer(message.payload.value, pointer);
+    const path = resolveJsonPath(message.payload.value, singularPath);
     if (!path) continue;
     const value = getJsonPath(message.payload.value, path);
     if (typeof value !== "number" || !Number.isFinite(value)) continue;
@@ -276,6 +427,48 @@ export function plotSeriesPointer(
       });
   }
   return { points, retainedExcluded };
+}
+
+export function plotStatistics(
+  points: readonly PlotPoint[],
+): PlotStatistics | undefined {
+  if (!points.length) return undefined;
+  let mean = 0;
+  let sumSquaredDifference = 0;
+  let low = points[0].y;
+  let high = low;
+  for (const [index, point] of points.entries()) {
+    low = Math.min(low, point.y);
+    high = Math.max(high, point.y);
+    const difference = point.y - mean;
+    mean += difference / (index + 1);
+    sumSquaredDifference += difference * (point.y - mean);
+  }
+  return {
+    latest: points.at(-1)!.y,
+    low,
+    high,
+    mean,
+    standardDeviation: Math.sqrt(sumSquaredDifference / points.length),
+  };
+}
+
+export function nearestPlotPoint(
+  points: readonly PlotPoint[],
+  time: number,
+): PlotPoint | undefined {
+  if (!points.length) return undefined;
+  let low = 0;
+  let high = points.length - 1;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (points[middle].x < time) low = middle + 1;
+    else high = middle;
+  }
+  if (!low) return points[0];
+  const before = points[low - 1];
+  const after = points[low];
+  return time - before.x <= after.x - time ? before : after;
 }
 
 export function plotTimeDomain(
@@ -474,7 +667,7 @@ export function jsonTree(
     depth: number,
     parent?: string,
   ): string => {
-    const id = jsonPointer(path) || "$";
+    const id = jsonPath(path);
     paths.set(id, path);
     nodes.set(id, {
       id,
@@ -753,7 +946,7 @@ export class TelemetryStore {
       label: node.label,
       ...(node.parent ? { parent: node.parent } : {}),
       children: node.children,
-      value: `${node.messageCount.toLocaleString()} ${node.messageCount === 1 ? "msg" : "msgs"}`,
+      suffix: `(${node.messageCount.toLocaleString()})`,
       title: node.children.length
         ? `${node.topic}\n${direct.toLocaleString()} direct; ${node.messageCount.toLocaleString()} total`
         : node.topic,

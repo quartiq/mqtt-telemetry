@@ -2,23 +2,28 @@ import { describe, expect, it } from "vitest";
 import {
   TelemetryStore,
   downsamplePlotPoints,
+  displayDatesDiffer,
   fieldLabel,
   formatPlotNumber,
   formatPlotTick,
+  formatTelemetryTime,
   getJsonPath,
-  jsonPointer,
+  jsonPath,
   jsonTree,
   messagePayloadPreview,
   messageFrequency,
   messageSpan,
+  nearestPlotPoint,
   nicePlotScale,
   parsePayload,
+  parseJsonPath,
   plotSeries,
-  plotSeriesPointer,
+  plotSeriesPath,
+  plotStatistics,
   plotTimeDomain,
   telemetryPageTitle,
   timeTickValues,
-  resolveJsonPointer,
+  resolveJsonPath,
   selectedMessageValue,
   type TelemetryMessage,
 } from "./model";
@@ -46,6 +51,23 @@ function message(
 }
 
 describe("payloads and JSON fields", () => {
+  it("formats every telemetry clock in 24-hour time", () => {
+    const value = Date.UTC(2026, 7, 27, 13, 4, 5, 6);
+    const formatted = formatTelemetryTime(value, {
+      timeZone: "utc",
+      date: true,
+      milliseconds: true,
+    });
+    expect(formatted).toBe("2026-08-27 13:04:05.006");
+    expect(
+      displayDatesDiffer(
+        Date.UTC(2026, 7, 27, 23),
+        Date.UTC(2026, 7, 28, 0),
+        "utc",
+      ),
+    ).toBe(true);
+  });
+
   it("distinguishes JSON, text, empty, and binary payloads", () => {
     expect(parsePayload(encode('{"value":1}')).kind).toBe("json");
     expect(parsePayload(encode("online"))).toEqual({
@@ -68,12 +90,15 @@ describe("payloads and JSON fields", () => {
     expect(added?.message.duplicate).toBe(true);
   });
 
-  it("round-trips object keys, array indexes, slashes, and tildes", () => {
+  it("round-trips compact singular JSONPaths and unusual member names", () => {
     const root = { "a/b": [{ "0~x": 12 }] };
     const path = ["a/b", 0, "0~x"];
-    const pointer = jsonPointer(path);
-    expect(pointer).toBe("/a~1b/0/0~0x");
-    expect(resolveJsonPointer(root, pointer)).toEqual(path);
+    const encoded = jsonPath(path);
+    expect(encoded).toBe("$['a/b'][0]['0~x']");
+    expect(resolveJsonPath(root, encoded)).toEqual(path);
+    expect(jsonPath(["temperature"])).toBe("$.temperature");
+    expect(parseJsonPath("$['temperature']")).toEqual(["temperature"]);
+    expect(parseJsonPath('$["field.with.dots"]')).toEqual(["field.with.dots"]);
     expect(getJsonPath(root, path)).toBe(12);
     expect(fieldLabel(path)).toBe('$["a/b"][0]["0~x"]');
   });
@@ -88,8 +113,8 @@ describe("payloads and JSON fields", () => {
 
   it("builds a selectable, lexically ordered JSON tree", () => {
     const snapshot = jsonTree({ z: 1, a: [true] });
-    expect(snapshot.nodes.get("$")?.children).toEqual(["/a", "/z"]);
-    expect(snapshot.paths.get("/a/0")).toEqual(["a", 0]);
+    expect(snapshot.nodes.get("$")?.children).toEqual(["$.a", "$.z"]);
+    expect(snapshot.paths.get("$.a[0]")).toEqual(["a", 0]);
   });
 
   it("bounds JSON tree depth and node count", () => {
@@ -100,8 +125,8 @@ describe("payloads and JSON fields", () => {
         maxNodes: 100,
       },
     );
-    expect(depth.nodes.has("/a/b")).toBe(false);
-    expect(depth.nodes.get("/a")?.value).toContain("depth limit");
+    expect(depth.nodes.has("$.a.b")).toBe(false);
+    expect(depth.nodes.get("$.a")?.value).toContain("depth limit");
 
     const count = jsonTree(
       { a: 1, b: 2, c: 3 },
@@ -207,9 +232,9 @@ describe("topic history", () => {
       expect(store.history(store.nodeId(topic) as string)).toEqual([]);
     expect(store.history(store.nodeId("other") as string)).toHaveLength(1);
     expect(store.subtreeMessageCount(store.nodeId("a") as string)).toBe(0);
-    expect(store.snapshot().nodes.get(store.nodeId("a") as string)?.value).toBe(
-      "0 msgs",
-    );
+    expect(
+      store.snapshot().nodes.get(store.nodeId("a") as string)?.suffix,
+    ).toBe("(0)");
   });
 
   it("evicts the globally oldest history within the shared byte budget", () => {
@@ -278,7 +303,7 @@ describe("topic history", () => {
     expect(after.nodes).toBe(before.nodes);
     expect(after.revision).toBeGreaterThan(before.revision);
     expect(after.topicCount).toBe(1);
-    expect(after.nodes.get(leaf)?.value).toBe("0 msgs");
+    expect(after.nodes.get(leaf)?.suffix).toBe("(0)");
   });
 
   it("represents topics that are also branches and preserves empty levels", () => {
@@ -290,10 +315,10 @@ describe("topic history", () => {
     const a = store.nodeId("a") as string;
     expect(store.history(a)).toHaveLength(1);
     expect(snapshot.nodes.get(a)?.children).toHaveLength(1);
-    expect(snapshot.nodes.get(a)?.value).toBe("2 msgs");
+    expect(snapshot.nodes.get(a)?.suffix).toBe("(2)");
     expect(snapshot.nodes.get(a)?.title).toContain("1 direct; 2 total");
-    expect(snapshot.nodes.get(store.nodeId("a/b") as string)?.value).toBe(
-      "1 msg",
+    expect(snapshot.nodes.get(store.nodeId("a/b") as string)?.suffix).toBe(
+      "(1)",
     );
     expect(snapshot.roots.map((id) => snapshot.nodes.get(id)?.label)).toEqual([
       "(empty)",
@@ -394,11 +419,41 @@ describe("plot extraction", () => {
     ).toEqual([1, 3]);
   });
 
-  it("resolves a pinned pointer independently in each payload", () => {
+  it("resolves a pinned path independently in each payload", () => {
     const history = [message(1, 1, "[1]"), message(2, 2, '{"0":2}')];
-    expect(plotSeriesPointer(history, "/0").points.map(({ y }) => y)).toEqual([
-      1, 2,
+    expect(plotSeriesPath(history, "$[0]").points.map(({ y }) => y)).toEqual([
+      1,
     ]);
+    expect(plotSeriesPath(history, "$['0']").points.map(({ y }) => y)).toEqual([
+      2,
+    ]);
+  });
+
+  it("computes stable population statistics", () => {
+    const points = [
+      { x: 1, y: 100_000.1, segment: 0 },
+      { x: 2, y: 100_000.4, segment: 0 },
+    ];
+    expect(plotStatistics(points)).toMatchObject({
+      latest: 100_000.4,
+      low: 100_000.1,
+      high: 100_000.4,
+      mean: 100_000.25,
+    });
+    expect(plotStatistics(points)?.standardDeviation).toBeCloseTo(0.15, 10);
+  });
+
+  it("finds the nearest full-resolution plot sample", () => {
+    const points = [
+      { x: 10, y: 1, segment: 0 },
+      { x: 20, y: 2, segment: 0 },
+      { x: 40, y: 4, segment: 1 },
+    ];
+    expect(nearestPlotPoint(points, 4)).toBe(points[0]);
+    expect(nearestPlotPoint(points, 16)).toBe(points[1]);
+    expect(nearestPlotPoint(points, 30)).toBe(points[1]);
+    expect(nearestPlotPoint(points, 100)).toBe(points[2]);
+    expect(nearestPlotPoint([], 10)).toBeUndefined();
   });
 
   it("keeps every plot on a shared domain ending at now", () => {

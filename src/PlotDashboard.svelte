@@ -2,7 +2,11 @@
 
 <script lang="ts">
   import TelemetryPlot from "./TelemetryPlot.svelte";
-  import { plotTimeDomain, type PlotPoint } from "./lib/model";
+  import {
+    plotTimeDomain,
+    type DisplayTimeZone,
+    type PlotPoint,
+  } from "./lib/model";
   import type { PlotRef } from "./lib/routes";
 
   export type DashboardPlot = PlotRef & {
@@ -16,30 +20,22 @@
     plots: DashboardPlot[];
     now: number;
     ageMs: number | null;
+    timeZone: DisplayTimeZone;
     onfocus: (plot: PlotRef) => void;
+    onmove: (plot: PlotRef, offset: -1 | 1) => void;
     onremove: (plot: PlotRef) => void;
-    onremoveall: () => void;
   };
 
-  let { plots, now, ageMs, onfocus, onremove, onremoveall }: Props = $props();
+  let { plots, now, ageMs, timeZone, onfocus, onmove, onremove }: Props =
+    $props();
   let domain = $derived(plotTimeDomain(plots, now, ageMs));
+  let inspectTime = $state<number | undefined>();
 </script>
 
 <section class="plot-dashboard">
-  <header>
-    <div>
-      <h2>Plots</h2>
-      <span class="meta">
-        {plots.length.toLocaleString()} pinned · shared receipt-time axis
-      </span>
-    </div>
-    <button disabled={!plots.length} type="button" onclick={onremoveall}
-      >Remove all</button
-    >
-  </header>
   {#if plots.length}
     <div class:two-columns={plots.length > 4} class="plot-grid">
-      {#each plots as plot (plot.key)}
+      {#each plots as plot, index (plot.key)}
         <TelemetryPlot
           points={plot.points}
           topic={plot.topic}
@@ -47,15 +43,20 @@
           retainedExcluded={plot.retainedExcluded}
           xMin={domain.min}
           xMax={domain.max}
+          {timeZone}
+          {inspectTime}
+          oninspect={(time) => (inspectTime = time)}
           onfocus={() => onfocus(plot)}
+          canMoveEarlier={index > 0}
+          canMoveLater={index < plots.length - 1}
+          onmoveearlier={() => onmove(plot, -1)}
+          onmovelater={() => onmove(plot, 1)}
           onremove={() => onremove(plot)}
         />
       {/each}
     </div>
   {:else}
-    <p class="empty">
-      Pin numeric fields from Current value to compare them here.
-    </p>
+    <p class="empty">Pin numeric fields to compare them here.</p>
   {/if}
 </section>
 
@@ -65,26 +66,8 @@
     border-radius: var(--radius);
     display: grid;
     grid-column: 1 / -1;
-    grid-template-rows: auto minmax(0, 1fr);
     min-height: 0;
     overflow: hidden;
-  }
-
-  .plot-dashboard > header {
-    align-items: center;
-    background: var(--panel);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    padding: var(--space-tight) var(--space);
-  }
-
-  .plot-dashboard > header > div {
-    align-items: baseline;
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space);
-    min-width: 0;
   }
 
   .plot-grid {

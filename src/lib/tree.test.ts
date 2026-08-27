@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { TreeNodeView } from "./tree";
 import {
   filterTree,
+  filterTopicTree,
   moveTreeSelection,
   selectionAfterCollapse,
   treeAncestorIds,
   treeTabStopId,
+  topicMatchesFilter,
   visibleTreeIds,
 } from "./tree";
 
@@ -60,5 +62,19 @@ describe("tree navigation", () => {
       ["a", { ...nodes.get("a"), children: ["a/2"] }],
     ]);
     expect(filtered.expanded).toEqual(new Set(["a"]));
+  });
+
+  it("uses MQTT wildcards only when the query contains one", () => {
+    expect(topicMatchesFilter("a/room/value", "a/+/value")).toBe(true);
+    expect(topicMatchesFilter("a/room/value", "a/#")).toBe(true);
+    expect(topicMatchesFilter("a", "a/#")).toBe(true);
+    expect(topicMatchesFilter("$SYS/load", "#")).toBe(false);
+    expect(topicMatchesFilter("$SYS/load", "$SYS/#")).toBe(true);
+
+    expect(filterTopicTree(["a", "b"], nodes, "a/+").matches).toEqual([
+      "a/1",
+      "a/2",
+    ]);
+    expect(filterTopicTree(["a", "b"], nodes, "a+2").error).toContain("+");
   });
 });

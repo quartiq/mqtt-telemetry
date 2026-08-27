@@ -3,11 +3,16 @@
 <script lang="ts">
   import {
     downsamplePlotPoints,
+    displayDatesDiffer,
     formatPlotNumber,
     formatPlotTick,
+    formatTelemetryTime,
+    nearestPlotPoint,
     nicePlotScale,
+    plotStatistics,
     timeTickValues,
     type PlotPoint,
+    type DisplayTimeZone,
   } from "./lib/model";
 
   type Props = {
@@ -17,7 +22,14 @@
     retainedExcluded: number;
     xMin: number;
     xMax: number;
+    timeZone: DisplayTimeZone;
+    inspectTime?: number;
+    oninspect: (time?: number) => void;
     onfocus: () => void;
+    canMoveEarlier: boolean;
+    canMoveLater: boolean;
+    onmoveearlier: () => void;
+    onmovelater: () => void;
     onremove: () => void;
   };
   let {
@@ -27,7 +39,14 @@
     retainedExcluded,
     xMin,
     xMax,
+    timeZone,
+    inspectTime,
+    oninspect,
     onfocus,
+    canMoveEarlier,
+    canMoveLater,
+    onmoveearlier,
+    onmovelater,
     onremove,
   }: Props = $props();
 
@@ -42,20 +61,12 @@
   );
   let plot = $derived.by(() => {
     if (!points.length) return undefined;
-    let yMin = points[0].y;
-    let yMax = yMin;
-    for (const point of points) {
-      yMin = Math.min(yMin, point.y);
-      yMax = Math.max(yMax, point.y);
-    }
-    const dataMin = yMin;
-    const dataMax = yMax;
-    const yScale = nicePlotScale(yMin, yMax);
+    const summary = plotStatistics(points)!;
+    const yScale = nicePlotScale(summary.low, summary.high);
     return {
       xMin,
       xMax: Math.max(xMax, xMin + 0.001),
-      dataMin,
-      dataMax,
+      summary,
       yMin: yScale.min,
       yMax: yScale.max,
       step: yScale.step,
@@ -70,12 +81,14 @@
       ? (() => {
           const values = timeTickValues(plot.xMin, plot.xMax);
           const showMilliseconds = values.some((value) => value % 1_000 !== 0);
-          const showDate =
-            new Date(plot.xMin).toDateString() !==
-            new Date(plot.xMax).toDateString();
+          const showDate = displayDatesDiffer(plot.xMin, plot.xMax, timeZone);
           return values.map((value) => ({
             value,
-            label: time(value, showMilliseconds, showDate),
+            label: formatTelemetryTime(value, {
+              timeZone,
+              date: showDate,
+              milliseconds: showMilliseconds,
+            }),
           }));
         })()
       : [],
@@ -114,21 +127,56 @@
     }
     return count;
   });
+  let inspection = $derived(
+    !plot ||
+      inspectTime === undefined ||
+      inspectTime < plot.xMin ||
+      inspectTime > plot.xMax
+      ? undefined
+      : nearestPlotPoint(points, inspectTime),
+  );
+  let inspectionMarker = $derived.by(() => {
+    if (!plot || inspectTime === undefined || !inspection) return undefined;
+    const plotWidth = width - left - right;
+    const plotHeight = height - top - bottom;
+    return {
+      cursorX:
+        left +
+        ((inspectTime - plot.xMin) / (plot.xMax - plot.xMin)) * plotWidth,
+      pointX:
+        left +
+        ((inspection.x - plot.xMin) / (plot.xMax - plot.xMin)) * plotWidth,
+      pointY:
+        top +
+        ((plot.yMax - inspection.y) / (plot.yMax - plot.yMin)) * plotHeight,
+    };
+  });
   let statistics = $derived.by(() => {
     const items: string[] = [];
     if (plot) {
-      const latest = points.at(-1)!.y;
-      const latestLabel = formatPlotNumber(latest, plot.step);
-      items.push(`latest ${latestLabel}`);
-      items.push(`low ${formatPlotNumber(plot.dataMin, plot.step)}`);
-      items.push(`high ${formatPlotNumber(plot.dataMax, plot.step)}`);
+      const { latest, low, high, mean, standardDeviation } = plot.summary;
+      if (inspection) {
+        const showDate = displayDatesDiffer(plot.xMin, plot.xMax, timeZone);
+        items.push(
+          `x ${formatTelemetryTime(inspection.x, {
+            timeZone,
+            date: showDate,
+            milliseconds: true,
+          })}`,
+        );
+        items.push(`y ${formatPlotNumber(inspection.y, plot.step)}`);
+      } else {
+        items.push(`latest ${formatPlotNumber(latest, plot.step)}`);
+      }
+      items.push(`μ ${formatPlotNumber(mean, plot.step)}`);
       items.push(
-        `range ${formatPlotNumber(plot.dataMax - plot.dataMin, plot.step)}`,
+        `p–p ${formatPlotNumber(high - low, Math.min(plot.step, high - low || plot.step))}`,
       );
+      items.push(
+        `σ ${formatPlotNumber(standardDeviation, Math.min(plot.step, standardDeviation || plot.step))}`,
+      );
+      items.push(`n ${points.length.toLocaleString()}`);
     }
-    items.push(
-      `${points.length.toLocaleString()} ${points.length === 1 ? "live sample" : "live samples"}`,
-    );
     if (retainedExcluded)
       items.push(`${retainedExcluded.toLocaleString()} retained excluded`);
     if (gaps)
@@ -138,19 +186,29 @@
     return items;
   });
 
-  function time(
-    value: number,
-    showMilliseconds: boolean,
-    showDate: boolean,
-  ): string {
-    return new Date(value).toLocaleString(undefined, {
-      ...(showDate ? { month: "2-digit", day: "2-digit" } : {}),
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-      ...(showMilliseconds ? { fractionalSecondDigits: 3 } : {}),
-    });
+  function inspect(event: PointerEvent) {
+    if (!plot || event.pointerType !== "mouse") return;
+    const svg = event.currentTarget as SVGSVGElement;
+    const matrix = svg.getScreenCTM();
+    if (!matrix) return;
+    const cursor = svg.createSVGPoint();
+    cursor.x = event.clientX;
+    cursor.y = event.clientY;
+    const position = cursor.matrixTransform(matrix.inverse());
+    if (
+      position.x < left ||
+      position.x > width - right ||
+      position.y < top ||
+      position.y > height - bottom
+    ) {
+      oninspect(undefined);
+      return;
+    }
+    oninspect(
+      plot.xMin +
+        ((position.x - left) / (width - left - right)) *
+          (plot.xMax - plot.xMin),
+    );
   }
 </script>
 
@@ -160,14 +218,37 @@
       <strong>{label}</strong>
       <span>{topic}</span>
     </button>
-    <button
-      aria-label={`Remove plot of ${label} on ${topic}`}
-      class="close"
-      title="Remove plot"
-      type="button"
-      onclick={onremove}>×</button
+    <div class="plot-actions">
+      {#if canMoveEarlier || canMoveLater}
+        <button
+          aria-label={`Move plot of ${label} on ${topic} earlier`}
+          class="plot-action"
+          disabled={!canMoveEarlier}
+          title="Move plot earlier"
+          type="button"
+          onclick={onmoveearlier}>‹</button
+        >
+        <button
+          aria-label={`Move plot of ${label} on ${topic} later`}
+          class="plot-action"
+          disabled={!canMoveLater}
+          title="Move plot later"
+          type="button"
+          onclick={onmovelater}>›</button
+        >
+      {/if}
+      <button
+        aria-label={`Remove plot of ${label} on ${topic}`}
+        class="plot-action"
+        title="Remove plot"
+        type="button"
+        onclick={onremove}>×</button
+      >
+    </div>
+    <div
+      class="panel-stats meta"
+      title="Statistics use plotted live samples; σ is the population standard deviation."
     >
-    <div class="panel-stats meta">
       {#each statistics as statistic}<span>{statistic}</span>{/each}
     </div>
   </header>
@@ -176,6 +257,8 @@
       role="img"
       viewBox={`0 0 ${width} ${height}`}
       aria-label={`${label} on ${topic} over receipt time`}
+      onpointermove={inspect}
+      onpointerleave={() => oninspect(undefined)}
     >
       {#each plot.yTicks as tick}
         {@const y =
@@ -227,6 +310,21 @@
           />
         {/if}
       {/each}
+      {#if inspectionMarker}
+        <line
+          class="inspection-time"
+          x1={inspectionMarker.cursorX}
+          x2={inspectionMarker.cursorX}
+          y1={top}
+          y2={height - bottom}
+        />
+        <circle
+          class="inspection-point"
+          cx={inspectionMarker.pointX}
+          cy={inspectionMarker.pointY}
+          r="3"
+        />
+      {/if}
     </svg>
   {:else}
     <p class="empty">
@@ -266,7 +364,11 @@
     font-weight: 400;
   }
 
-  .close {
+  .plot-actions {
+    display: flex;
+  }
+
+  .plot-action {
     background: transparent;
     border: 0;
     color: var(--muted);
@@ -274,8 +376,13 @@
     padding: 0 var(--space-tight);
   }
 
+  .plot-action:disabled {
+    opacity: 0.3;
+  }
+
   svg {
     color: var(--muted);
+    cursor: crosshair;
     display: block;
     height: 100%;
     min-height: 0;
@@ -295,14 +402,28 @@
   }
 
   .series {
-    stroke: var(--plot);
+    stroke: var(--fg);
     stroke-linejoin: round;
     stroke-width: 2;
     vector-effect: non-scaling-stroke;
   }
 
   .series-point {
-    fill: var(--plot);
+    fill: var(--fg);
+  }
+
+  .inspection-time {
+    stroke: var(--fg);
+    stroke-dasharray: 2 3;
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .inspection-point {
+    fill: var(--bg);
+    stroke: var(--fg);
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
   }
 
   text {
