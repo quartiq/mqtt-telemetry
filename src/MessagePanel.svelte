@@ -15,8 +15,14 @@
     selectedLabel?: string;
     following: boolean;
     expanded: Set<string>;
+    checkable: Set<string>;
+    checked: Set<string>;
+    checkDisabled: boolean;
+    subtreePlotCount: number;
     onselect: (id: string) => void;
     ontoggle: (id: string, open: boolean) => void;
+    oncheck: (id: string) => void;
+    onremoveplots: () => void;
   };
 
   let {
@@ -26,8 +32,14 @@
     selectedLabel,
     following,
     expanded,
+    checkable,
+    checked,
+    checkDisabled,
+    subtreePlotCount,
     onselect,
     ontoggle,
+    oncheck,
+    onremoveplots,
   }: Props = $props();
   let fieldMissing = $derived(
     Boolean(selected && snapshot && !snapshot.nodes.has(selected)),
@@ -55,13 +67,25 @@
 <section class="panel message-panel">
   <header class="panel-header">
     <h2>Current value</h2>
-    {#if fieldMissing}
-      <span
-        class="missing"
-        title={`${selectedLabel} is absent from this message`}
-        >field absent</span
-      >
-    {/if}
+    <div class="panel-controls">
+      {#if fieldMissing}
+        <span
+          class="missing"
+          title={`${selectedLabel} is absent from this message`}
+          >field absent</span
+        >
+      {/if}
+      {#if subtreePlotCount}
+        <button
+          class="remove-plots"
+          type="button"
+          title="Remove plots for numeric fields in the selected JSON value"
+          onclick={onremoveplots}
+          >Remove {subtreePlotCount}
+          {subtreePlotCount === 1 ? "plot" : "plots"}</button
+        >
+      {/if}
+    </div>
     {#if statistics.length}
       <div class="panel-stats meta">
         {#each statistics as statistic}<span>{statistic}</span>{/each}
@@ -76,8 +100,12 @@
         {selected}
         {expanded}
         label="JSON fields"
+        {checkable}
+        {checked}
+        {checkDisabled}
         {onselect}
         {ontoggle}
+        {oncheck}
       />
     </div>
   {:else if message}
@@ -110,9 +138,19 @@
     font-size: var(--text-small);
   }
 
+  .remove-plots {
+    white-space: nowrap;
+  }
+
+  .panel-controls {
+    align-items: baseline;
+    display: flex;
+    gap: var(--space-tight);
+  }
+
   @media (max-width: 800px) {
     .message-panel {
-      min-height: 12rem;
+      height: clamp(16rem, 40svh, 24rem);
     }
   }
 </style>

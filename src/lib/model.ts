@@ -52,6 +52,7 @@ export type JsonSnapshot = {
 
 export type PlotPoint = { x: number; y: number; segment: number };
 export type PlotSeries = { points: PlotPoint[]; retainedExcluded: number };
+export type PlotTimeDomain = { min: number; max: number };
 export type PlotScale = {
   min: number;
   max: number;
@@ -251,10 +252,19 @@ export function plotSeries(
   history: TelemetryMessage[],
   path: JsonPath,
 ): PlotSeries {
+  return plotSeriesPointer(history, jsonPointer(path));
+}
+
+export function plotSeriesPointer(
+  history: TelemetryMessage[],
+  pointer: string,
+): PlotSeries {
   const points: PlotPoint[] = [];
   let retainedExcluded = 0;
   for (const message of history) {
     if (message.payload.kind !== "json") continue;
+    const path = resolveJsonPointer(message.payload.value, pointer);
+    if (!path) continue;
     const value = getJsonPath(message.payload.value, path);
     if (typeof value !== "number" || !Number.isFinite(value)) continue;
     if (message.retained) retainedExcluded += 1;
@@ -266,6 +276,23 @@ export function plotSeries(
       });
   }
   return { points, retainedExcluded };
+}
+
+export function plotTimeDomain(
+  series: Iterable<PlotSeries>,
+  now: number,
+  ageMs: number | null,
+): PlotTimeDomain {
+  if (ageMs !== null) return { min: now - ageMs, max: now };
+  let earliest = Number.POSITIVE_INFINITY;
+  for (const plot of series)
+    if (plot.points.length) earliest = Math.min(earliest, plot.points[0].x);
+  return {
+    min: Number.isFinite(earliest)
+      ? Math.min(earliest, now - 1000)
+      : now - 60_000,
+    max: now,
+  };
 }
 
 export function formatPlotNumber(value: number, resolution: number): string {
@@ -524,7 +551,7 @@ export class TelemetryStore {
   // Map insertion order is arrival order; its first remaining value is oldest.
   private readonly retained = new Map<
     number,
-    { nodeId: string; cost: number }
+    { nodeId: string; cost: number; receivedAt: number }
   >();
   private historyBytes = 0;
   private sequence = 0;
@@ -617,7 +644,11 @@ export class TelemetryStore {
         ? Math.max(256, parsed.value.length * 2)
         : Math.max(256, payload.byteLength * 4);
     node.history.push(message);
-    this.retained.set(message.id, { nodeId, cost });
+    this.retained.set(message.id, {
+      nodeId,
+      cost,
+      receivedAt: message.receivedAt,
+    });
     this.historyBytes += cost;
     this.adjustSubtree(nodeId, 1);
     const excess = node.history.length - this.historyLimit;
@@ -651,6 +682,18 @@ export class TelemetryStore {
       if (excess > 0) this.dropOldest(node.id, excess, false);
     }
     this.revision += 1;
+  }
+
+  expireBefore(cutoff: number): number {
+    let removed = 0;
+    while (true) {
+      const oldest = this.retained.values().next().value;
+      if (!oldest || oldest.receivedAt >= cutoff) break;
+      this.dropOldest(oldest.nodeId, 1, false);
+      removed += 1;
+    }
+    if (removed) this.revision += 1;
+    return removed;
   }
 
   clearHistory(id: string): void {

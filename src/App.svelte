@@ -6,14 +6,15 @@
   import HistoryLimit from "./HistoryLimit.svelte";
   import HistoryTable from "./HistoryTable.svelte";
   import MessagePanel from "./MessagePanel.svelte";
-  import TelemetryPlot from "./TelemetryPlot.svelte";
+  import PlotDashboard, { type DashboardPlot } from "./PlotDashboard.svelte";
   import TreeView from "./TreeView.svelte";
   import {
     TelemetryStore,
     fieldLabel,
+    getJsonPath,
     jsonPointer,
     jsonTree,
-    plotSeries,
+    plotSeriesPointer,
     resolveJsonPointer,
     telemetryPageTitle,
     type JsonPath,
@@ -23,10 +24,12 @@
   import {
     connectionKey,
     isWebSocketBroker,
+    MAX_PLOTS,
     readRoute,
     routeSearch,
     uniqueFilters,
     type AppRoute,
+    type PlotRef,
   } from "./lib/routes";
   import {
     filterTree,
@@ -46,6 +49,7 @@
   let formBroker = $state(initialRoute.broker);
   let formFilters = $state(initialRoute.filters.join("\n"));
   let formHistoryLimit = $state(initialRoute.historyLimit);
+  let formHistoryAgeMs = $state(initialRoute.historyAgeMs);
   let username = $state("");
   let password = $state("");
   let authBroker = initialRoute.broker;
@@ -69,6 +73,7 @@
   let viewToken = randomId();
   let lastReceivedAt = 0;
   let renderFrame = 0;
+  let plotNow = $state(Date.now());
 
   let topicSnapshot = $derived.by(() => {
     revision;
@@ -94,9 +99,6 @@
     revision;
     return selectedTopicId ? store.history(selectedTopicId) : [];
   });
-  let selectedDescendantCount = $derived(
-    Math.max(0, selectedSubtreeCount - currentHistory.length),
-  );
   let currentMessage = $derived.by(() => {
     if (!currentHistory.length) return undefined;
     if (selectedMessageId === null) return currentHistory.at(-1);
@@ -123,11 +125,66 @@
         ? jsonPointer(activeField) || "$"
         : route.fieldPointer || "$",
   );
-  let series = $derived(
-    activeField
-      ? plotSeries(currentHistory, activeField)
-      : { points: [], retainedExcluded: 0 },
+  let checkableJson = $derived.by(() => {
+    const ids = new Set<string>();
+    if (currentMessage?.payload.kind !== "json" || !jsonSnapshot) return ids;
+    for (const [id, path] of jsonSnapshot.paths) {
+      const value = getJsonPath(currentMessage.payload.value, path);
+      if (typeof value === "number" && Number.isFinite(value)) ids.add(id);
+    }
+    return ids;
+  });
+  let checkedJson = $derived(
+    new Set(
+      route.plots
+        .filter((plot) => plot.topic === selectedTopic)
+        .map((plot) => plot.pointer || "$"),
+    ),
   );
+  let plotLimitReached = $derived(route.plots.length >= MAX_PLOTS);
+  let selectedValuePlotCount = $derived.by(() => {
+    if (!jsonSnapshot?.nodes.get(selectedJsonId)?.children.length) return 0;
+    const pointer = selectedJsonId === "$" ? "" : selectedJsonId;
+    return route.plots.filter(
+      (plot) =>
+        plot.topic === selectedTopic && pointerContains(pointer, plot.pointer),
+    ).length;
+  });
+  let selectedTopicPlotCount = $derived(
+    selectedTopicId
+      ? route.plots.filter((plot) => plot.topic === selectedTopic).length
+      : 0,
+  );
+  let selectedTopicSubtreePlotCount = $derived(
+    selectedTopicId
+      ? route.plots.filter((plot) => topicContains(selectedTopic, plot.topic))
+          .length
+      : 0,
+  );
+  let dashboardPlots = $derived.by(() => {
+    revision;
+    return route.plots.map<DashboardPlot>((plot) => {
+      const nodeId = store.nodeId(plot.topic);
+      const history = nodeId ? store.history(nodeId) : [];
+      const series = plotSeriesPointer(history, plot.pointer);
+      let label = plot.pointer || "$";
+      for (let index = history.length - 1; index >= 0; index -= 1) {
+        const payload = history[index].payload;
+        if (payload.kind !== "json") continue;
+        const path = resolveJsonPointer(payload.value, plot.pointer);
+        if (path) {
+          label = fieldLabel(path);
+          break;
+        }
+      }
+      return {
+        ...plot,
+        key: plotKey(plot),
+        label,
+        ...series,
+      };
+    });
+  });
   let selectedFieldLabel = $derived(
     route.fieldPointer === null
       ? undefined
@@ -202,6 +259,24 @@
     }
   });
 
+  $effect(() => {
+    const clockNeeded = route.historyAgeMs !== null || route.plots.length > 0;
+    if (!clockNeeded) return;
+    let timer = 0;
+    const tick = () => {
+      const now = Date.now();
+      plotNow = now;
+      if (
+        route.historyAgeMs !== null &&
+        store.expireBefore(now - route.historyAgeMs)
+      )
+        revision += 1;
+      timer = window.setTimeout(tick, Math.max(50, 1000 - (now % 1000)));
+    };
+    tick();
+    return () => clearTimeout(timer);
+  });
+
   onMount(() => {
     const popstate = (event: PopStateEvent) => {
       const next = readRoute(location.search);
@@ -209,6 +284,7 @@
         route = next;
         formFilters = next.filters.join("\n");
         formHistoryLimit = next.historyLimit;
+        formHistoryAgeMs = next.historyAgeMs;
         if (next.broker !== authBroker) {
           username = "";
           password = "";
@@ -224,6 +300,7 @@
         const historyLimitChanged = next.historyLimit !== route.historyLimit;
         route = next;
         formHistoryLimit = next.historyLimit;
+        formHistoryAgeMs = next.historyAgeMs;
         if (historyLimitChanged) {
           store.setHistoryLimit(next.historyLimit);
           revision += 1;
@@ -278,6 +355,7 @@
     jsonExpandedByTopic.clear();
     viewToken = randomId();
     lastReceivedAt = 0;
+    plotNow = Date.now();
   }
 
   function stopConnection() {
@@ -338,13 +416,17 @@
         {
           message: ({ topic, payload, packet, segment }) => {
             if (serial !== connectSerial || packet.cmd !== "publish") return;
+            const receivedAt = receiptTime();
             const added = store.add(topic, payload, {
-              receivedAt: receiptTime(),
+              receivedAt,
               segment,
               retained: packet.retain,
               duplicate: packet.dup,
               qos: packet.qos,
             });
+            if (route.historyAgeMs !== null)
+              store.expireBefore(receivedAt - route.historyAgeMs);
+            plotNow = Date.now();
             scheduleRender();
             if (!added) return;
             const activity = {
@@ -387,8 +469,10 @@
       broker,
       filters,
       historyLimit: formHistoryLimit,
+      historyAgeMs: formHistoryAgeMs,
       selectedTopic: "",
       fieldPointer: null,
+      plots: [],
     };
     writeRoute(next, null);
     void startConnection(next);
@@ -401,6 +485,7 @@
       broker: "",
       selectedTopic: "",
       fieldPointer: null,
+      plots: [],
     };
     writeRoute(next, null);
     stopConnection();
@@ -527,6 +612,81 @@
     return true;
   }
 
+  function changeHistoryAge(ageMs: number | null): boolean {
+    if (ageMs === route.historyAgeMs) return true;
+    formHistoryAgeMs = ageMs;
+    plotNow = Date.now();
+    if (ageMs !== null && store.expireBefore(plotNow - ageMs)) revision += 1;
+    writeRoute({ ...route, historyAgeMs: ageMs }, selectedMessageId);
+    return true;
+  }
+
+  function plotKey(plot: PlotRef): string {
+    return JSON.stringify([plot.topic, plot.pointer]);
+  }
+
+  function pointerContains(parent: string, candidate: string): boolean {
+    return (
+      !parent || candidate === parent || candidate.startsWith(`${parent}/`)
+    );
+  }
+
+  function topicContains(parent: string, candidate: string): boolean {
+    return candidate === parent || candidate.startsWith(`${parent}/`);
+  }
+
+  function togglePlot(id: string) {
+    const path = jsonSnapshot?.paths.get(id);
+    if (!path || !selectedTopic) return;
+    const plot = { topic: selectedTopic, pointer: jsonPointer(path) };
+    const key = plotKey(plot);
+    const pinned = route.plots.some((current) => plotKey(current) === key);
+    if (!pinned && route.plots.length >= MAX_PLOTS) return;
+    const plots = pinned
+      ? route.plots.filter((current) => plotKey(current) !== key)
+      : [...route.plots, plot];
+    writeRoute({ ...route, plots }, selectedMessageId);
+  }
+
+  function removePlots(predicate: (plot: PlotRef) => boolean) {
+    const plots = route.plots.filter((plot) => !predicate(plot));
+    if (plots.length !== route.plots.length)
+      writeRoute({ ...route, plots }, selectedMessageId);
+  }
+
+  function removeSelectedValuePlots() {
+    const pointer = selectedJsonId === "$" ? "" : selectedJsonId;
+    removePlots(
+      (plot) =>
+        plot.topic === selectedTopic && pointerContains(pointer, plot.pointer),
+    );
+  }
+
+  function removeTopicPlots() {
+    if (!selectedTopicId) return;
+    removePlots((plot) => plot.topic === selectedTopic);
+  }
+
+  function removeTopicSubtreePlots() {
+    if (!selectedTopicId) return;
+    removePlots((plot) => topicContains(selectedTopic, plot.topic));
+  }
+
+  function focusPlot(plot: PlotRef) {
+    const id = store.nodeId(plot.topic);
+    if (id) selectLoadedTopic(id, true);
+    else selectedTopicId = "";
+    fieldByTopic.set(plot.topic, plot.pointer);
+    writeRoute(
+      {
+        ...route,
+        selectedTopic: plot.topic,
+        fieldPointer: plot.pointer,
+      },
+      null,
+    );
+  }
+
   function clearTopicSubtree() {
     if (!selectedTopicId) return;
     store.clearSubtree(selectedTopicId);
@@ -596,6 +756,7 @@
     bind:username
     bind:password
     bind:historyLimit={formHistoryLimit}
+    bind:historyAgeMs={formHistoryAgeMs}
     {status}
     {error}
     connecting={status === "Connecting"}
@@ -641,23 +802,41 @@
         {/if}
       </header>
       <div class="topic-policy">
-        <div class="topic-actions">
-          <button
-            disabled={!currentHistory.length}
-            title="Clear local history for the selected topic only. Broker-retained messages are unchanged."
-            type="button"
-            onclick={clearTopicHistory}>Clear</button
-          >
-          <button
-            disabled={!selectedDescendantCount}
-            title="Clear local history for the selected topic and its subtopics. Broker-retained messages are unchanged."
-            type="button"
-            onclick={clearTopicSubtree}>Clear subtree</button
-          >
+        <div class="topic-action-groups">
+          <div class="topic-actions">
+            <span class="meta">History</span>
+            <button
+              disabled={!currentHistory.length}
+              title="Clear local history for the selected topic only. Broker-retained messages are unchanged."
+              type="button"
+              onclick={clearTopicHistory}>Clear topic</button
+            >
+            <button
+              disabled={!selectedSubtreeCount}
+              title="Clear local history for the selected topic and its subtopics. Broker-retained messages are unchanged."
+              type="button"
+              onclick={clearTopicSubtree}>Clear subtree</button
+            >
+          </div>
+          <div class="topic-actions">
+            <span class="meta">Plots</span>
+            <button
+              disabled={!selectedTopicPlotCount}
+              type="button"
+              onclick={removeTopicPlots}>Remove topic</button
+            >
+            <button
+              disabled={!selectedTopicSubtreePlotCount}
+              type="button"
+              onclick={removeTopicSubtreePlots}>Remove subtree</button
+            >
+          </div>
         </div>
         <HistoryLimit
           value={route.historyLimit}
           onchange={changeHistoryLimit}
+          ageMs={route.historyAgeMs}
+          onagechange={changeHistoryAge}
         />
       </div>
       <div class="topic-search">
@@ -705,8 +884,14 @@
         selectedLabel={selectedFieldLabel}
         following={selectedMessageId === null}
         expanded={jsonExpanded}
+        checkable={checkableJson}
+        checked={checkedJson}
+        checkDisabled={plotLimitReached}
+        subtreePlotCount={selectedValuePlotCount}
         onselect={selectJson}
         ontoggle={toggleJson}
+        oncheck={togglePlot}
+        onremoveplots={removeSelectedValuePlots}
       />
       <HistoryTable
         messages={currentHistory}
@@ -716,10 +901,14 @@
         onselect={selectHistory}
         onlatest={selectLatest}
       />
-      <TelemetryPlot
-        points={series.points}
-        label={selectedFieldLabel}
-        retainedExcluded={series.retainedExcluded}
+      <PlotDashboard
+        plots={dashboardPlots}
+        now={plotNow}
+        ageMs={route.historyAgeMs}
+        onfocus={focusPlot}
+        onremove={(plot) =>
+          removePlots((current) => plotKey(current) === plotKey(plot))}
+        onremoveall={() => removePlots(() => true)}
       />
     </section>
   </main>

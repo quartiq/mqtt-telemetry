@@ -12,10 +12,24 @@
 
   type Props = {
     points: PlotPoint[];
-    label?: string;
+    topic: string;
+    label: string;
     retainedExcluded: number;
+    xMin: number;
+    xMax: number;
+    onfocus: () => void;
+    onremove: () => void;
   };
-  let { points, label, retainedExcluded }: Props = $props();
+  let {
+    points,
+    topic,
+    label,
+    retainedExcluded,
+    xMin,
+    xMax,
+    onfocus,
+    onremove,
+  }: Props = $props();
 
   const width = 640;
   const height = 220;
@@ -27,9 +41,7 @@
     downsamplePlotPoints(points, width - left - right),
   );
   let plot = $derived.by(() => {
-    if (points.length < 2) return undefined;
-    const xMin = points[0].x;
-    const xMax = points.at(-1)?.x ?? xMin;
+    if (!points.length) return undefined;
     let yMin = points[0].y;
     let yMax = yMin;
     for (const point of points) {
@@ -104,11 +116,12 @@
   });
   let statistics = $derived.by(() => {
     const items: string[] = [];
-    if (label) items.push(`field ${label}`);
     if (plot) {
       const latest = points.at(-1)!.y;
       const latestLabel = formatPlotNumber(latest, plot.step);
       items.push(`latest ${latestLabel}`);
+      items.push(`low ${formatPlotNumber(plot.dataMin, plot.step)}`);
+      items.push(`high ${formatPlotNumber(plot.dataMax, plot.step)}`);
       items.push(
         `range ${formatPlotNumber(plot.dataMax - plot.dataMin, plot.step)}`,
       );
@@ -141,12 +154,19 @@
   }
 </script>
 
-<section
-  class="panel plot-panel"
-  aria-label={label ? `Plot of ${label}` : "Plot"}
->
+<section class="panel plot-panel" aria-label={`Plot of ${label} on ${topic}`}>
   <header class="panel-header">
-    <h2>Plot</h2>
+    <button class="plot-title" type="button" onclick={onfocus}>
+      <strong>{label}</strong>
+      <span>{topic}</span>
+    </button>
+    <button
+      aria-label={`Remove plot of ${label} on ${topic}`}
+      class="close"
+      title="Remove plot"
+      type="button"
+      onclick={onremove}>×</button
+    >
     <div class="panel-stats meta">
       {#each statistics as statistic}<span>{statistic}</span>{/each}
     </div>
@@ -155,7 +175,7 @@
     <svg
       role="img"
       viewBox={`0 0 ${width} ${height}`}
-      aria-label={`${label} over receipt time`}
+      aria-label={`${label} on ${topic} over receipt time`}
     >
       {#each plot.yTicks as tick}
         {@const y =
@@ -210,9 +230,8 @@
     </svg>
   {:else}
     <p class="empty">
-      {label
-        ? "This field needs at least two live numeric samples."
-        : "Select a numeric JSON field to plot it."}
+      Waiting for live numeric samples. The plot will resume when this field
+      appears.
     </p>
   {/if}
 </section>
@@ -222,6 +241,37 @@
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     min-height: 0;
+  }
+
+  .plot-title {
+    background: transparent;
+    border: 0;
+    color: inherit;
+    display: grid;
+    min-width: 0;
+    padding: 0;
+    text-align: left;
+  }
+
+  .plot-title strong,
+  .plot-title span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .plot-title span {
+    color: var(--muted);
+    font-size: var(--text-small);
+    font-weight: 400;
+  }
+
+  .close {
+    background: transparent;
+    border: 0;
+    color: var(--muted);
+    font-size: 1.2rem;
+    padding: 0 var(--space-tight);
   }
 
   svg {
@@ -268,7 +318,7 @@
 
   @media (max-width: 800px) {
     .plot-panel {
-      min-height: 12rem;
+      height: clamp(16rem, 46svh, 22rem);
     }
   }
 </style>

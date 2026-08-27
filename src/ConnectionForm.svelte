@@ -9,6 +9,7 @@
     username: string;
     password: string;
     historyLimit: number;
+    historyAgeMs: number | null;
     status: string;
     error: string;
     connecting: boolean;
@@ -21,6 +22,7 @@
     username = $bindable(),
     password = $bindable(),
     historyLimit = $bindable(),
+    historyAgeMs = $bindable(),
     status,
     error,
     connecting,
@@ -34,6 +36,10 @@
 
   function changeHistoryLimit(value: number) {
     historyLimit = value;
+  }
+
+  function changeHistoryAge(value: number | null) {
+    historyAgeMs = value;
   }
 </script>
 
@@ -83,7 +89,12 @@
         <button disabled={connecting} type="submit"
           >{connecting ? "Connecting…" : "Connect"}</button
         >
-        <HistoryLimit value={historyLimit} onchange={changeHistoryLimit} />
+        <HistoryLimit
+          value={historyLimit}
+          onchange={changeHistoryLimit}
+          ageMs={historyAgeMs}
+          onagechange={changeHistoryAge}
+        />
       </div>
     </form>
     <div aria-live="polite" class="feedback">

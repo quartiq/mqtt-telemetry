@@ -21,6 +21,7 @@ export type TreeActions = {
   select: (id: string) => void;
   toggle: (id: string, open: boolean) => void;
   move: (id: string, direction: TreeDirection) => void;
+  check?: (id: string) => void;
 };
 
 export type TreeActivity = {
@@ -34,6 +35,9 @@ export type TreeContext = {
   tabStop: string;
   expanded: Set<string>;
   activity: Map<string, TreeActivity>;
+  checkable: Set<string>;
+  checked: Set<string>;
+  checkDisabled: boolean;
   actions: TreeActions;
 };
 

@@ -20,6 +20,9 @@
   let internal = $derived(node.children.length > 0);
   let open = $derived(context.expanded.has(node.id));
   let active = $derived(context.selected === node.id);
+  let checkable = $derived(context.checkable.has(node.id));
+  let checked = $derived(context.checked.has(node.id));
+  let checkBlocked = $derived(checkable && !checked && context.checkDisabled);
   let activity = $derived.by(() => {
     context.revision;
     return context.activity.get(node.id);
@@ -59,6 +62,11 @@
     context.actions.select(node.id);
   }
 
+  function toggleCheck(event: MouseEvent) {
+    event.stopPropagation();
+    if (!checkBlocked) context.actions.check?.(node.id);
+  }
+
   function activate() {
     context.actions.select(node.id);
     if (internal) context.actions.toggle(node.id, !open);
@@ -82,6 +90,9 @@
     } else if (event.key === "Enter") {
       event.preventDefault();
       activate();
+    } else if (event.key === " " && checkable) {
+      event.preventDefault();
+      if (!checkBlocked) context.actions.check?.(node.id);
     } else if (event.key === " " && internal) {
       event.preventDefault();
       context.actions.toggle(node.id, !open);
@@ -92,6 +103,7 @@
 <li>
   <div
     aria-expanded={internal ? open : undefined}
+    aria-checked={checkable ? checked : undefined}
     aria-level={depth + 1}
     aria-posinset={index}
     aria-selected={active}
@@ -119,6 +131,22 @@
       >
     {:else}
       <span aria-hidden="true" class="spacer"></span>
+    {/if}
+    {#if checkable}
+      <button
+        aria-label={checked ? "Remove plot" : "Add plot"}
+        aria-pressed={checked}
+        class="plot-toggle"
+        disabled={checkBlocked}
+        tabindex="-1"
+        title={checkBlocked
+          ? "The eight-plot limit is reached"
+          : checked
+            ? "Remove plot"
+            : "Add plot"}
+        type="button"
+        onclick={toggleCheck}>{checked ? "✓" : ""}</button
+      >
     {/if}
     <span class="label">{node.label}</span>
     {#if node.value !== undefined}
@@ -216,5 +244,27 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .plot-toggle {
+    align-self: center;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 0.2rem;
+    color: var(--fg);
+    flex: 0 0 1rem;
+    font-size: 0.75rem;
+    height: 1rem;
+    line-height: 0.8rem;
+    margin-right: var(--space-tight);
+    min-height: 1rem;
+    padding: 0;
+    width: 1rem;
+  }
+
+  .plot-toggle[aria-pressed="true"] {
+    background: var(--plot);
+    border-color: var(--plot);
+    color: Canvas;
   }
 </style>

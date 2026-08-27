@@ -6,6 +6,8 @@ A read-only browser for MQTT JSON telemetry, with topic discovery, bounded histo
 
 Open <https://telemetry.quartiq.de/> and enter an MQTT-over-WebSocket URL. Use one subscription filter per line; the default is `#`. MQTT excludes `$` topics from `#`, so subscribe to filters such as `$SYS/#` explicitly.
 
+Browse one JSON field at a time; use the square marker on numeric fields to pin up to eight independent plots with a shared receipt-time axis. History can be bounded by both messages per topic and age. Clearing history, removing plots, and changing the active field are independent actions.
+
 Browsers require `ws://` or `wss://`; ordinary `mqtt://` TCP endpoints do not work. The hosted HTTPS page requires `wss://` with a browser-trusted certificate. Chromium may additionally request Local Network Access permission for a private or loopback broker.
 
 For a LAN broker that only provides `ws://`, open the hosted application, choose **Save Page As** with the **Webpage, HTML Only** type, then open the saved file. The file is the complete application, works without `telemetry.quartiq.de`, and may connect directly to private `ws://` endpoints.
@@ -16,7 +18,7 @@ History exists only in the current tab. It defaults to 1,000 messages per topic 
 
 After a connection has been established, transport failures are retried and subscriptions are restored before the application reports connected. These are clean MQTT sessions: live QoS 0 traffic sent while disconnected is not recoverable. History marks reconnect gaps and plots do not join across them. An initial connection failure or a failed resubscription requires explicit user action.
 
-The address bar records the broker, filters, history limit, selected topic, and selected field, making that view shareable. Message history and credentials are not included. Credentials use normal browser autocomplete and are not stored by the application.
+The address bar records the connection, retention settings, active field, and pinned plots, making that view shareable. Message history and credentials are not included. Credentials use normal browser autocomplete and are not stored by the application.
 
 ## Develop
 

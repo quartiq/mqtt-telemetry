@@ -14,6 +14,8 @@ import {
   nicePlotScale,
   parsePayload,
   plotSeries,
+  plotSeriesPointer,
+  plotTimeDomain,
   telemetryPageTitle,
   timeTickValues,
   resolveJsonPointer,
@@ -160,6 +162,20 @@ describe("topic history", () => {
     store.setHistoryLimit(2);
     expect(store.history(a).map((entry) => entry.id)).toEqual([2, 3]);
     expect(store.history(b)).toHaveLength(1);
+  });
+
+  it("expires messages across topics by receipt time", () => {
+    const store = new TelemetryStore(10);
+    store.add("a", encode("1"), { receivedAt: 1000, retained: false, qos: 0 });
+    store.add("b", encode("2"), { receivedAt: 2000, retained: false, qos: 0 });
+    store.add("a", encode("3"), { receivedAt: 3000, retained: false, qos: 0 });
+
+    expect(store.expireBefore(2500)).toBe(2);
+    expect(
+      store.history(store.nodeId("a") as string).map(({ id }) => id),
+    ).toEqual([3]);
+    expect(store.history(store.nodeId("b") as string)).toEqual([]);
+    expect(store.subtreeMessageCount(store.nodeId("a") as string)).toBe(1);
   });
 
   it("clears one topic without clearing descendants", () => {
@@ -376,6 +392,32 @@ describe("plot extraction", () => {
     expect(
       plotSeries(history, ["v"]).points.map(({ segment }) => segment),
     ).toEqual([1, 3]);
+  });
+
+  it("resolves a pinned pointer independently in each payload", () => {
+    const history = [message(1, 1, "[1]"), message(2, 2, '{"0":2}')];
+    expect(plotSeriesPointer(history, "/0").points.map(({ y }) => y)).toEqual([
+      1, 2,
+    ]);
+  });
+
+  it("keeps every plot on a shared domain ending at now", () => {
+    const series = [
+      { points: [{ x: 7000, y: 1, segment: 0 }], retainedExcluded: 0 },
+      { points: [{ x: 8000, y: 2, segment: 0 }], retainedExcluded: 0 },
+    ];
+    expect(plotTimeDomain(series, 10_000, null)).toEqual({
+      min: 7000,
+      max: 10_000,
+    });
+    expect(plotTimeDomain(series, 10_000, 2000)).toEqual({
+      min: 8000,
+      max: 10_000,
+    });
+    expect(plotTimeDomain([], 10_000, null)).toEqual({
+      min: -50_000,
+      max: 10_000,
+    });
   });
 
   it("downsamples in time order while preserving bucket extrema", () => {
