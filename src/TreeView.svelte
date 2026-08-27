@@ -18,9 +18,13 @@
     selected: string;
     expanded: Set<string>;
     activity?: Map<string, TreeActivity>;
+    checkable?: Set<string>;
+    checked?: Set<string>;
+    checkDisabled?: boolean;
     label: string;
     onselect: (id: string) => void;
     ontoggle: (id: string, open: boolean) => void;
+    oncheck?: (id: string) => void;
   };
 
   let {
@@ -30,15 +34,20 @@
     selected,
     expanded,
     activity = new Map(),
+    checkable = new Set(),
+    checked = new Set(),
+    checkDisabled = false,
     label,
     onselect,
     ontoggle,
+    oncheck,
   }: Props = $props();
   let focusId = $state("");
   const actions: TreeActions = {
     select: (id) => onselect(id),
     toggle: (id, open) => ontoggle(id, open),
     move,
+    check: (id) => oncheck?.(id),
   };
   let visible = $derived.by(() => {
     revision;
@@ -52,6 +61,9 @@
     tabStop,
     expanded,
     activity,
+    checkable,
+    checked,
+    checkDisabled,
     actions,
   });
 

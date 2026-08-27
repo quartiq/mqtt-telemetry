@@ -236,6 +236,13 @@
     white-space: nowrap;
   }
 
+  th {
+    background: var(--panel);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
   th:first-child,
   td:first-child {
     width: 8.5rem;
@@ -277,7 +284,7 @@
 
   @media (max-width: 800px) {
     .history-panel {
-      min-height: 14rem;
+      height: clamp(16rem, 40svh, 24rem);
     }
   }
 </style>

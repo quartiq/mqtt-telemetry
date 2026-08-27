@@ -4,6 +4,7 @@ import {
   MAX_HISTORY_LIMIT,
   connectionKey,
   isWebSocketBroker,
+  parseHistoryAge,
   parseHistoryLimit,
   readRoute,
   routeSearch,
@@ -16,8 +17,10 @@ describe("route configuration", () => {
       broker: "",
       filters: ["#"],
       historyLimit: DEFAULT_HISTORY_LIMIT,
+      historyAgeMs: null,
       selectedTopic: "",
       fieldPointer: null,
+      plots: [],
     });
   });
 
@@ -26,12 +29,14 @@ describe("route configuration", () => {
       broker: "wss://broker.example/mqtt?token=public",
       filters: ["sensors/#", "alerts/+", " room/temperature "],
       historyLimit: 42,
+      historyAgeMs: 600_000,
       selectedTopic: "sensors/room/temperature",
       fieldPointer: "/environment/temperature",
+      plots: [{ topic: "sensors/room/temperature", pointer: "/temperature" }],
     };
     const search = routeSearch(expected);
     expect(search).toBe(
-      "?broker=wss://broker.example/mqtt?token=public&topic=sensors/%23&topic=alerts/%2B&topic=%20room/temperature%20&history=42&selected=sensors/room/temperature&field=/environment/temperature",
+      "?broker=wss://broker.example/mqtt?token=public&topic=sensors/%23&topic=alerts/%2B&topic=%20room/temperature%20&history=42&age=600&selected=sensors/room/temperature&field=/environment/temperature&plot=%5B%22sensors/room/temperature%22%2C%22/temperature%22%5D",
     );
     expect(readRoute(search)).toEqual(expected);
   });
@@ -62,6 +67,12 @@ describe("route configuration", () => {
     expect(connectionKey({ ...route, historyLimit: 12 })).toBe(
       connectionKey({ ...route, historyLimit: 34 }),
     );
+    expect(connectionKey({ ...route, historyAgeMs: 60_000 })).toBe(
+      connectionKey({
+        ...route,
+        plots: [{ topic: "a", pointer: "/value" }],
+      }),
+    );
   });
 
   it("removes only exact duplicate and empty filters", () => {
@@ -82,6 +93,21 @@ describe("route configuration", () => {
     }
     expect(parseHistoryLimit("1")).toBe(1);
     expect(parseHistoryLimit("100000")).toBe(MAX_HISTORY_LIMIT);
+  });
+
+  it("parses an optional bounded age cutoff", () => {
+    expect(parseHistoryAge(null)).toBeNull();
+    expect(parseHistoryAge("0")).toBeNull();
+    expect(parseHistoryAge("60")).toBe(60_000);
+    expect(parseHistoryAge("999999999")).toBe(365 * 24 * 60 * 60 * 1000);
+  });
+
+  it("ignores malformed and duplicate plot references", () => {
+    const valid = encodeURIComponent(JSON.stringify(["a/b", "/v"]));
+    const route = readRoute(
+      `?plot=${valid}&plot=${valid}&plot=broken&plot=${encodeURIComponent(JSON.stringify([1, "/v"]))}`,
+    );
+    expect(route.plots).toEqual([{ topic: "a/b", pointer: "/v" }]);
   });
 
   it("accepts WebSockets and explains browser transport constraints", () => {

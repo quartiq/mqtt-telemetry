@@ -147,7 +147,7 @@ pre {
   display: grid;
   gap: var(--space);
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-template-rows: auto minmax(0, 2fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100dvh;
   padding: max(var(--space), env(safe-area-inset-top))
     max(var(--space), env(safe-area-inset-right))
@@ -200,16 +200,20 @@ pre {
 
 .topics {
   display: grid;
-  grid-row: 2 / -1;
+  grid-row: 2;
   grid-template-rows: auto auto auto minmax(0, 1fr);
   min-height: 0;
 }
 
 .topic-policy {
-  align-items: baseline;
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  gap: var(--space-tight);
   margin-bottom: var(--space-tight);
+}
+
+.topic-action-groups {
+  display: grid;
+  gap: var(--space-tight);
 }
 
 .topic-search {
@@ -243,8 +247,15 @@ pre {
 }
 
 .topic-actions {
+  align-items: baseline;
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-tight);
+}
+
+.topic-actions > .meta {
+  flex: 0 0 3.4rem;
+  margin-left: 0;
 }
 
 .count {
@@ -258,12 +269,12 @@ pre {
   grid-column: 2 / -1;
   grid-row: 2 / -1;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: minmax(0, 2fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 2fr);
   min-height: 0;
   overflow: hidden;
 }
 
-.details > .plot-panel {
+.details > .plot-dashboard {
   grid-column: 1 / -1;
 }
 
