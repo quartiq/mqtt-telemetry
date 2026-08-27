@@ -155,7 +155,7 @@
     {/if}
     <span class="label">{node.label}</span>
     {#if node.suffix !== undefined}
-      <span class="suffix"> {node.suffix}</span>
+      <span class="suffix">{node.suffix}</span>
     {/if}
     {#if node.value !== undefined}
       <span class="separator"> = </span><span class="value">{node.value}</span>
@@ -258,6 +258,7 @@
   .suffix {
     color: var(--muted);
     flex: none;
+    margin-left: 0.3em;
     white-space: pre;
   }
 

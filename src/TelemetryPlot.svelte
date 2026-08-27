@@ -78,7 +78,7 @@
             value,
             label: formatTelemetryTime(value, {
               timeZone,
-              date: showDate ? "day" : undefined,
+              date: showDate,
               milliseconds: showMilliseconds,
             }),
           }));
@@ -152,7 +152,7 @@
         items.push(
           `x ${formatTelemetryTime(inspection.x, {
             timeZone,
-            date: showDate ? "day" : undefined,
+            date: showDate,
             milliseconds: true,
           })}`,
         );

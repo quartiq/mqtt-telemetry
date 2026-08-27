@@ -52,7 +52,7 @@
     if (!message) return [];
     const items = [
       following ? "Following latest" : "Historical",
-      `received ${formatTelemetryTime(message.receivedAt, { timeZone, date: "full", milliseconds: true })}`,
+      `received ${formatTelemetryTime(message.receivedAt, { timeZone, date: true, milliseconds: true })}`,
     ];
     if (message.retained) items.push("retained");
     if (message.duplicate) items.push("possible duplicate");

@@ -98,25 +98,30 @@ export function formatTelemetryTime(
   value: number,
   options: {
     timeZone: DisplayTimeZone;
-    date?: "day" | "full";
+    date?: boolean;
     milliseconds?: boolean;
   },
 ): string {
-  return new Date(value).toLocaleString(undefined, {
-    ...(options.date
-      ? {
-          month: "2-digit" as const,
-          day: "2-digit" as const,
-          ...(options.date === "full" ? { year: "numeric" as const } : {}),
-        }
-      : {}),
+  const parts = new Intl.DateTimeFormat("en", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
     hourCycle: "h23",
     ...(options.milliseconds ? { fractionalSecondDigits: 3 } : {}),
     ...(options.timeZone === "utc" ? { timeZone: "UTC" } : {}),
-  });
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+  const date = options.date
+    ? `${part("year")}-${part("month")}-${part("day")} `
+    : "";
+  const milliseconds = options.milliseconds
+    ? `.${part("fractionalSecond")}`
+    : "";
+  return `${date}${part("hour")}:${part("minute")}:${part("second")}${milliseconds}`;
 }
 
 export function displayDatesDiffer(

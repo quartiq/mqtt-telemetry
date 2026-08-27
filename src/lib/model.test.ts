@@ -55,11 +55,10 @@ describe("payloads and JSON fields", () => {
     const value = Date.UTC(2026, 7, 27, 13, 4, 5, 6);
     const formatted = formatTelemetryTime(value, {
       timeZone: "utc",
-      date: "full",
+      date: true,
       milliseconds: true,
     });
-    expect(formatted).toContain("13:04:05.006");
-    expect(formatted).not.toMatch(/AM|PM/i);
+    expect(formatted).toBe("2026-08-27 13:04:05.006");
     expect(
       displayDatesDiffer(
         Date.UTC(2026, 7, 27, 23),

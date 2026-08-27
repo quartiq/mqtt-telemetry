@@ -80,7 +80,7 @@
   function timestamp(value: number): string {
     return formatTelemetryTime(value, {
       timeZone,
-      date: showDate ? "day" : undefined,
+      date: showDate,
       milliseconds: true,
     });
   }
