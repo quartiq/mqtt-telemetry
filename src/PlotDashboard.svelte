@@ -22,10 +22,12 @@
     ageMs: number | null;
     timeZone: DisplayTimeZone;
     onfocus: (plot: PlotRef) => void;
+    onmove: (plot: PlotRef, offset: -1 | 1) => void;
     onremove: (plot: PlotRef) => void;
   };
 
-  let { plots, now, ageMs, timeZone, onfocus, onremove }: Props = $props();
+  let { plots, now, ageMs, timeZone, onfocus, onmove, onremove }: Props =
+    $props();
   let domain = $derived(plotTimeDomain(plots, now, ageMs));
   let inspectTime = $state<number | undefined>();
 </script>
@@ -33,7 +35,7 @@
 <section class="plot-dashboard">
   {#if plots.length}
     <div class:two-columns={plots.length > 4} class="plot-grid">
-      {#each plots as plot (plot.key)}
+      {#each plots as plot, index (plot.key)}
         <TelemetryPlot
           points={plot.points}
           topic={plot.topic}
@@ -45,6 +47,10 @@
           {inspectTime}
           oninspect={(time) => (inspectTime = time)}
           onfocus={() => onfocus(plot)}
+          canMoveEarlier={index > 0}
+          canMoveLater={index < plots.length - 1}
+          onmoveearlier={() => onmove(plot, -1)}
+          onmovelater={() => onmove(plot, 1)}
           onremove={() => onremove(plot)}
         />
       {/each}

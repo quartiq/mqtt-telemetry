@@ -26,6 +26,10 @@
     inspectTime?: number;
     oninspect: (time?: number) => void;
     onfocus: () => void;
+    canMoveEarlier: boolean;
+    canMoveLater: boolean;
+    onmoveearlier: () => void;
+    onmovelater: () => void;
     onremove: () => void;
   };
   let {
@@ -39,6 +43,10 @@
     inspectTime,
     oninspect,
     onfocus,
+    canMoveEarlier,
+    canMoveLater,
+    onmoveearlier,
+    onmovelater,
     onremove,
   }: Props = $props();
 
@@ -210,13 +218,33 @@
       <strong>{label}</strong>
       <span>{topic}</span>
     </button>
-    <button
-      aria-label={`Remove plot of ${label} on ${topic}`}
-      class="close"
-      title="Remove plot"
-      type="button"
-      onclick={onremove}>×</button
-    >
+    <div class="plot-actions">
+      {#if canMoveEarlier || canMoveLater}
+        <button
+          aria-label={`Move plot of ${label} on ${topic} earlier`}
+          class="plot-action"
+          disabled={!canMoveEarlier}
+          title="Move plot earlier"
+          type="button"
+          onclick={onmoveearlier}>‹</button
+        >
+        <button
+          aria-label={`Move plot of ${label} on ${topic} later`}
+          class="plot-action"
+          disabled={!canMoveLater}
+          title="Move plot later"
+          type="button"
+          onclick={onmovelater}>›</button
+        >
+      {/if}
+      <button
+        aria-label={`Remove plot of ${label} on ${topic}`}
+        class="plot-action"
+        title="Remove plot"
+        type="button"
+        onclick={onremove}>×</button
+      >
+    </div>
     <div
       class="panel-stats meta"
       title="Statistics use plotted live samples; σ is the population standard deviation."
@@ -336,12 +364,20 @@
     font-weight: 400;
   }
 
-  .close {
+  .plot-actions {
+    display: flex;
+  }
+
+  .plot-action {
     background: transparent;
     border: 0;
     color: var(--muted);
     font-size: 1.2rem;
     padding: 0 var(--space-tight);
+  }
+
+  .plot-action:disabled {
+    opacity: 0.3;
   }
 
   svg {

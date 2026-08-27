@@ -888,6 +888,17 @@
       writeRoute({ ...route, plots }, selectedMessageId);
   }
 
+  function movePlot(plot: PlotRef, offset: -1 | 1) {
+    const index = route.plots.findIndex(
+      (current) => plotKey(current) === plotKey(plot),
+    );
+    const target = index + offset;
+    if (index < 0 || target < 0 || target >= route.plots.length) return;
+    const plots = [...route.plots];
+    [plots[index], plots[target]] = [plots[target], plots[index]];
+    writeRoute({ ...route, plots }, selectedMessageId);
+  }
+
   function removeSelectedValuePlots() {
     const path = selectedJsonId;
     removePlots(
@@ -1205,6 +1216,7 @@
         ageMs={route.historyAgeMs}
         timeZone={route.timeZone}
         onfocus={focusPlot}
+        onmove={movePlot}
         onremove={(plot) =>
           removePlots((current) => plotKey(current) === plotKey(plot))}
       />

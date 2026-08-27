@@ -17,7 +17,10 @@ const route: AppRoute = {
   timeZone: "utc",
   selectedTopic: "unshared/selection",
   fieldPath: "$.unshared",
-  plots: [{ topic: "sensors/room", path: "$.temperature" }],
+  plots: [
+    { topic: "sensors/room", path: "$.temperature" },
+    { topic: "sensors/outside", path: "$.humidity" },
+  ],
 };
 
 describe("dashboard files", () => {
