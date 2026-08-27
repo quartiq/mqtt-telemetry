@@ -28,26 +28,22 @@
     return context.activity.get(node.id);
   });
 
-  const flashFrames = [
-    { opacity: 0.9, transform: "scaleY(1)" },
-    { opacity: 0, transform: "scaleY(0.35)" },
-  ];
-
-  function flash(node: HTMLElement, initial?: typeof activity) {
-    let animation: Animation | undefined;
+  function indicateActivity(node: HTMLElement, initial?: typeof activity) {
+    let timer = 0;
     const run = (next?: typeof activity) => {
-      if (!next || performance.now() - next.at > 1000) return;
-      animation?.cancel();
-      animation = node.animate(flashFrames, {
-        duration: 1000,
-        easing: "ease-out",
-      });
+      clearTimeout(timer);
+      const remaining = next ? 1000 - (performance.now() - next.at) : 0;
+      node.style.opacity = remaining > 0 ? "1" : "0";
+      if (remaining > 0)
+        timer = window.setTimeout(() => {
+          node.style.opacity = "0";
+        }, remaining);
     };
     run(initial);
     return {
       update: run,
       destroy() {
-        animation?.cancel();
+        clearTimeout(timer);
       },
     };
   }
@@ -120,12 +116,6 @@
     ondblclick={activate}
     onkeydown={keydown}
   >
-    <span
-      aria-hidden="true"
-      class="activity-mark"
-      style:left={`calc(${depth}rem + 0.1rem)`}
-      use:flash={activity}
-    ></span>
     {#if internal}
       <button
         aria-label={open ? "Collapse" : "Expand"}
@@ -136,6 +126,11 @@
       >
     {:else}
       <span aria-hidden="true" class="spacer"></span>
+    {/if}
+    {#if context.showActivity}
+      <span aria-hidden="true" class="activity-slot">
+        <span class="activity-dot" use:indicateActivity={activity}></span>
+      </span>
     {/if}
     {#if checkable}
       <button
@@ -198,7 +193,6 @@
     min-width: 0;
     overflow: hidden;
     padding-right: var(--space-tight);
-    position: relative;
   }
 
   [role="treeitem"]:focus-visible {
@@ -211,15 +205,21 @@
     box-shadow: inset 2px 0 0 var(--selected-mark);
   }
 
-  .activity-mark {
+  .activity-slot {
+    align-items: center;
+    align-self: stretch;
+    display: flex;
+    flex: 0 0 0.55rem;
+    justify-content: center;
+    width: 0.55rem;
+  }
+
+  .activity-dot {
     background: currentColor;
-    border-radius: 1px;
-    height: 60%;
+    border-radius: 50%;
+    height: 0.3rem;
     opacity: 0;
-    position: absolute;
-    top: 20%;
-    transform-origin: center;
-    width: 2px;
+    width: 0.3rem;
   }
 
   .caret,

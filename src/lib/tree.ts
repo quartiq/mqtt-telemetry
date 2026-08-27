@@ -36,6 +36,7 @@ export type TreeContext = {
   tabStop: string;
   expanded: Set<string>;
   activity: Map<string, TreeActivity>;
+  showActivity: boolean;
   checkable: Set<string>;
   checked: Set<string>;
   checkDisabled: boolean;
