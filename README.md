@@ -1,24 +1,24 @@
 # MQTT Telemetry
 
-A read-only browser for MQTT JSON telemetry, with topic discovery, bounded history, field inspection, and plotting.
+A read-only MQTT JSON telemetry browser with bounded history and up to eight live plots.
 
 ## Use
 
-Open <https://telemetry.quartiq.de/> and enter an MQTT-over-WebSocket URL. Use one subscription filter per line; the default is `#`. MQTT excludes `$` topics from `#`, so subscribe to filters such as `$SYS/#` explicitly.
+Open <https://telemetry.quartiq.de/> and enter an MQTT-over-WebSocket URL. Use one subscription filter per line. MQTT excludes `$` topics from `#`; subscribe to `$SYS/#` explicitly when needed.
 
-Browse one JSON field at a time; use the square marker on numeric fields to pin up to eight independent plots with a shared receipt-time axis. History can be bounded by both messages per topic and age. Clearing history, removing plots, and changing the active field are independent actions.
+Select a value to inspect its history. Toggle the square beside a numeric field to plot it. Topic search is a case-insensitive substring search unless it contains MQTT `+` or `#` wildcards.
+
+Save a dashboard to keep its broker, subscriptions, retention limits, and plots as JSON; credentials and message history are never included. Load that file to restore it. **Copy link** creates an explicit self-contained bookmark/share link; opening it imports the dashboard and immediately removes the embedded JSON from the address bar.
 
 Browsers require `ws://` or `wss://`; ordinary `mqtt://` TCP endpoints do not work. The hosted HTTPS page requires `wss://` with a browser-trusted certificate. Chromium may additionally request Local Network Access permission for a private or loopback broker.
 
-For a LAN broker that only provides `ws://`, open the hosted application, choose **Save Page As** with the **Webpage, HTML Only** type, then open the saved file. The file is the complete application, works without `telemetry.quartiq.de`, and may connect directly to private `ws://` endpoints.
+For a LAN broker that only provides `ws://`, save the hosted page as **Webpage, HTML Only**, then open that file. It is a complete offline application and can connect directly to a private `ws://` endpoint.
 
 ### Data and reconnect behavior
 
-History exists only in the current tab. It defaults to 1,000 messages per topic and is bounded globally; payloads over 1 MiB are omitted. Retained publications appear in history but not in plots because their original publication time is unknown. Local clear actions never modify retained broker data.
+History exists only in the current tab. It defaults to 1,000 messages per topic and is also globally bounded; payloads over 1 MiB are omitted. Retained publications appear in history but not plots because their original publication time is unknown. Clear actions affect only this tab.
 
 After a connection has been established, transport failures are retried and subscriptions are restored before the application reports connected. These are clean MQTT sessions: live QoS 0 traffic sent while disconnected is not recoverable. History marks reconnect gaps and plots do not join across them. An initial connection failure or a failed resubscription requires explicit user action.
-
-The address bar records the connection, retention settings, active field, and pinned plots, making that view shareable. Message history and credentials are not included. Credentials use normal browser autocomplete and are not stored by the application.
 
 ## Develop
 
@@ -27,18 +27,14 @@ npm ci
 npm run dev
 ```
 
-Before committing:
-
 ```sh
 npm run format:check
 npm test
 npm run build
 ```
 
-`npm run build` type-checks the application and produces the self-contained `dist/index.html` used both by GitHub Pages and the local-file workflow.
+`npm run build` type-checks and produces the self-contained `dist/index.html` used for both deployment and the local-file workflow.
 
 ## Deploy
 
-The CI/CD workflow verifies every push and pull request. A successful `main` build is deployed to GitHub Pages.
-
-The repository must use **GitHub Actions** as its Pages source, configure `telemetry.quartiq.de` as the custom domain, and enforce HTTPS. DNS must point the `telemetry` CNAME to `quartiq.github.io`.
+GitHub Actions verifies pushes and pull requests, then deploys successful `main` builds to GitHub Pages. Pages must use GitHub Actions as its source, with `telemetry.quartiq.de` configured as the HTTPS custom domain and the `telemetry` DNS CNAME pointing to `quartiq.github.io`.

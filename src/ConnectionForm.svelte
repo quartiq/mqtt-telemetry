@@ -14,6 +14,7 @@
     error: string;
     connecting: boolean;
     onconnect: () => void;
+    onload: () => void;
   };
 
   let {
@@ -27,6 +28,7 @@
     error,
     connecting,
     onconnect,
+    onload,
   }: Props = $props();
 
   function submit(event: SubmitEvent) {
@@ -89,6 +91,7 @@
         <button disabled={connecting} type="submit"
           >{connecting ? "Connecting…" : "Connect"}</button
         >
+        <button type="button" onclick={onload}>Load dashboard…</button>
         <HistoryLimit
           value={historyLimit}
           onchange={changeHistoryLimit}

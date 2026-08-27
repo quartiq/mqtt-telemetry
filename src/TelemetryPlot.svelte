@@ -6,6 +6,7 @@
     formatPlotNumber,
     formatPlotTick,
     nicePlotScale,
+    plotStatistics,
     timeTickValues,
     type PlotPoint,
   } from "./lib/model";
@@ -42,20 +43,12 @@
   );
   let plot = $derived.by(() => {
     if (!points.length) return undefined;
-    let yMin = points[0].y;
-    let yMax = yMin;
-    for (const point of points) {
-      yMin = Math.min(yMin, point.y);
-      yMax = Math.max(yMax, point.y);
-    }
-    const dataMin = yMin;
-    const dataMax = yMax;
-    const yScale = nicePlotScale(yMin, yMax);
+    const summary = plotStatistics(points)!;
+    const yScale = nicePlotScale(summary.low, summary.high);
     return {
       xMin,
       xMax: Math.max(xMax, xMin + 0.001),
-      dataMin,
-      dataMax,
+      summary,
       yMin: yScale.min,
       yMax: yScale.max,
       step: yScale.step,
@@ -117,14 +110,14 @@
   let statistics = $derived.by(() => {
     const items: string[] = [];
     if (plot) {
-      const latest = points.at(-1)!.y;
-      const latestLabel = formatPlotNumber(latest, plot.step);
-      items.push(`latest ${latestLabel}`);
-      items.push(`low ${formatPlotNumber(plot.dataMin, plot.step)}`);
-      items.push(`high ${formatPlotNumber(plot.dataMax, plot.step)}`);
+      const { latest, low, high, mean, standardDeviation } = plot.summary;
+      items.push(`latest ${formatPlotNumber(latest, plot.step)}`);
+      items.push(`mean ${formatPlotNumber(mean, plot.step)}`);
       items.push(
-        `range ${formatPlotNumber(plot.dataMax - plot.dataMin, plot.step)}`,
+        `σ ${formatPlotNumber(standardDeviation, Math.min(plot.step, standardDeviation || plot.step))}`,
       );
+      items.push(`low ${formatPlotNumber(low, plot.step)}`);
+      items.push(`high ${formatPlotNumber(high, plot.step)}`);
     }
     items.push(
       `${points.length.toLocaleString()} ${points.length === 1 ? "live sample" : "live samples"}`,
@@ -295,14 +288,14 @@
   }
 
   .series {
-    stroke: var(--plot);
+    stroke: var(--fg);
     stroke-linejoin: round;
     stroke-width: 2;
     vector-effect: non-scaling-stroke;
   }
 
   .series-point {
-    fill: var(--plot);
+    fill: var(--fg);
   }
 
   text {

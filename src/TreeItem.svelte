@@ -29,8 +29,8 @@
   });
 
   const flashFrames = [
-    { background: "var(--flash)" },
-    { background: "var(--flash-end)" },
+    { opacity: 0.9, transform: "scaleY(1)" },
+    { opacity: 0, transform: "scaleY(0.35)" },
   ];
 
   function flash(node: HTMLElement, initial?: typeof activity) {
@@ -119,8 +119,13 @@
     onclick={select}
     ondblclick={activate}
     onkeydown={keydown}
-    use:flash={activity}
   >
+    <span
+      aria-hidden="true"
+      class="activity-mark"
+      style:left={`calc(${depth}rem + 0.1rem)`}
+      use:flash={activity}
+    ></span>
     {#if internal}
       <button
         aria-label={open ? "Collapse" : "Expand"}
@@ -190,7 +195,7 @@
     min-width: 0;
     overflow: hidden;
     padding-right: var(--space-tight);
-    --flash-end: transparent;
+    position: relative;
   }
 
   [role="treeitem"]:focus-visible {
@@ -201,7 +206,17 @@
   .active {
     background: var(--selected);
     box-shadow: inset 2px 0 0 var(--selected-mark);
-    --flash-end: var(--selected);
+  }
+
+  .activity-mark {
+    background: currentColor;
+    border-radius: 1px;
+    height: 60%;
+    opacity: 0;
+    position: absolute;
+    top: 20%;
+    transform-origin: center;
+    width: 2px;
   }
 
   .caret,
@@ -263,8 +278,8 @@
   }
 
   .plot-toggle[aria-pressed="true"] {
-    background: var(--plot);
-    border-color: var(--plot);
-    color: Canvas;
+    background: var(--fg);
+    border-color: var(--fg);
+    color: var(--bg);
   }
 </style>

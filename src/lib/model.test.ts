@@ -6,19 +6,21 @@ import {
   formatPlotNumber,
   formatPlotTick,
   getJsonPath,
-  jsonPointer,
+  jsonPath,
   jsonTree,
   messagePayloadPreview,
   messageFrequency,
   messageSpan,
   nicePlotScale,
   parsePayload,
+  parseJsonPath,
   plotSeries,
-  plotSeriesPointer,
+  plotSeriesPath,
+  plotStatistics,
   plotTimeDomain,
   telemetryPageTitle,
   timeTickValues,
-  resolveJsonPointer,
+  resolveJsonPath,
   selectedMessageValue,
   type TelemetryMessage,
 } from "./model";
@@ -68,12 +70,15 @@ describe("payloads and JSON fields", () => {
     expect(added?.message.duplicate).toBe(true);
   });
 
-  it("round-trips object keys, array indexes, slashes, and tildes", () => {
+  it("round-trips compact singular JSONPaths and unusual member names", () => {
     const root = { "a/b": [{ "0~x": 12 }] };
     const path = ["a/b", 0, "0~x"];
-    const pointer = jsonPointer(path);
-    expect(pointer).toBe("/a~1b/0/0~0x");
-    expect(resolveJsonPointer(root, pointer)).toEqual(path);
+    const encoded = jsonPath(path);
+    expect(encoded).toBe("$['a/b'][0]['0~x']");
+    expect(resolveJsonPath(root, encoded)).toEqual(path);
+    expect(jsonPath(["temperature"])).toBe("$.temperature");
+    expect(parseJsonPath("$['temperature']")).toEqual(["temperature"]);
+    expect(parseJsonPath('$["field.with.dots"]')).toEqual(["field.with.dots"]);
     expect(getJsonPath(root, path)).toBe(12);
     expect(fieldLabel(path)).toBe('$["a/b"][0]["0~x"]');
   });
@@ -88,8 +93,8 @@ describe("payloads and JSON fields", () => {
 
   it("builds a selectable, lexically ordered JSON tree", () => {
     const snapshot = jsonTree({ z: 1, a: [true] });
-    expect(snapshot.nodes.get("$")?.children).toEqual(["/a", "/z"]);
-    expect(snapshot.paths.get("/a/0")).toEqual(["a", 0]);
+    expect(snapshot.nodes.get("$")?.children).toEqual(["$.a", "$.z"]);
+    expect(snapshot.paths.get("$.a[0]")).toEqual(["a", 0]);
   });
 
   it("bounds JSON tree depth and node count", () => {
@@ -100,8 +105,8 @@ describe("payloads and JSON fields", () => {
         maxNodes: 100,
       },
     );
-    expect(depth.nodes.has("/a/b")).toBe(false);
-    expect(depth.nodes.get("/a")?.value).toContain("depth limit");
+    expect(depth.nodes.has("$.a.b")).toBe(false);
+    expect(depth.nodes.get("$.a")?.value).toContain("depth limit");
 
     const count = jsonTree(
       { a: 1, b: 2, c: 3 },
@@ -394,11 +399,28 @@ describe("plot extraction", () => {
     ).toEqual([1, 3]);
   });
 
-  it("resolves a pinned pointer independently in each payload", () => {
+  it("resolves a pinned path independently in each payload", () => {
     const history = [message(1, 1, "[1]"), message(2, 2, '{"0":2}')];
-    expect(plotSeriesPointer(history, "/0").points.map(({ y }) => y)).toEqual([
-      1, 2,
+    expect(plotSeriesPath(history, "$[0]").points.map(({ y }) => y)).toEqual([
+      1,
     ]);
+    expect(plotSeriesPath(history, "$['0']").points.map(({ y }) => y)).toEqual([
+      2,
+    ]);
+  });
+
+  it("computes stable population statistics", () => {
+    const points = [
+      { x: 1, y: 100_000.1, segment: 0 },
+      { x: 2, y: 100_000.4, segment: 0 },
+    ];
+    expect(plotStatistics(points)).toMatchObject({
+      latest: 100_000.4,
+      low: 100_000.1,
+      high: 100_000.4,
+      mean: 100_000.25,
+    });
+    expect(plotStatistics(points)?.standardDeviation).toBeCloseTo(0.15, 10);
   });
 
   it("keeps every plot on a shared domain ending at now", () => {

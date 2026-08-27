@@ -17,8 +17,6 @@ body {
   --selected: color-mix(in srgb, Highlight 10%, transparent);
   --selected-mark: Highlight;
   --focus: Highlight;
-  --flash: color-mix(in srgb, Mark 70%, transparent);
-  --plot: color-mix(in srgb, #2da44e 85%, CanvasText);
   --error: color-mix(in srgb, red 78%, CanvasText);
   --space: 0.6rem;
   --space-tight: 0.3rem;
@@ -146,7 +144,7 @@ pre {
 .browser {
   display: grid;
   gap: var(--space);
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) minmax(0, 3fr);
   grid-template-rows: auto minmax(0, 1fr);
   height: 100dvh;
   padding: max(var(--space), env(safe-area-inset-top))
@@ -181,15 +179,29 @@ pre {
   min-width: 0;
 }
 
-.connection-state {
+.header-controls,
+.dashboard-actions {
   align-items: baseline;
   display: flex;
-  gap: var(--space);
+  flex-wrap: wrap;
+  gap: var(--space-tight);
+}
+
+.header-controls > span {
+  margin-right: var(--space-tight);
+}
+
+.dashboard-file {
+  display: none;
 }
 
 .problem,
 .header-error {
   color: var(--error);
+}
+
+.header-notice {
+  grid-column: 1 / -1;
 }
 
 .header-error {
@@ -269,7 +281,7 @@ pre {
   grid-column: 2 / -1;
   grid-row: 2 / -1;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: minmax(0, 1fr) minmax(0, 2fr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 3fr);
   min-height: 0;
   overflow: hidden;
 }
@@ -305,7 +317,7 @@ pre {
     grid-template-columns: 1fr;
   }
 
-  .connection-state {
+  .header-controls {
     justify-content: space-between;
   }
 }
