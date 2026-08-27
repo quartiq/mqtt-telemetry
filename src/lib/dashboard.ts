@@ -28,13 +28,13 @@ export function dashboardFromRoute(route: AppRoute): Dashboard {
     format: DASHBOARD_FORMAT,
     version: DASHBOARD_VERSION,
     broker: route.broker,
-    subscriptions: route.filters,
+    subscriptions: [...route.filters],
     retention: {
       messagesPerTopic: route.historyLimit,
       maxAgeSeconds:
         route.historyAgeMs === null ? null : route.historyAgeMs / 1000,
     },
-    plots: route.plots,
+    plots: route.plots.map(({ topic, path }) => ({ topic, path })),
   };
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  dashboardFromRoute,
   dashboardJson,
   dashboardShareUrl,
   parseDashboard,
@@ -19,6 +20,21 @@ const route: AppRoute = {
 };
 
 describe("dashboard files", () => {
+  it("detaches history state from reactive route collections", () => {
+    const reactiveLikeRoute = {
+      ...route,
+      filters: new Proxy([...route.filters], {}),
+      plots: new Proxy(
+        route.plots.map((plot) => new Proxy({ ...plot }, {})),
+        {},
+      ),
+    };
+    const dashboard = dashboardFromRoute(reactiveLikeRoute);
+    expect(() => structuredClone(dashboard)).not.toThrow();
+    expect(dashboard.subscriptions).toEqual(route.filters);
+    expect(dashboard.plots).toEqual(route.plots);
+  });
+
   it("round-trips only durable dashboard configuration", () => {
     const dashboard = parseDashboardJson(dashboardJson(route));
     expect(dashboard).toMatchObject({
