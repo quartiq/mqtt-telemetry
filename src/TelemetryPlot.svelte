@@ -20,7 +20,7 @@
     xMin: number;
     xMax: number;
     inspectTime?: number;
-    oninspect: (position?: number) => void;
+    oninspect: (time?: number) => void;
     onfocus: () => void;
     onremove: () => void;
   };
@@ -113,7 +113,10 @@
     return count;
   });
   let inspection = $derived(
-    inspectTime === undefined
+    !plot ||
+      inspectTime === undefined ||
+      inspectTime < plot.xMin ||
+      inspectTime > plot.xMax
       ? undefined
       : nearestPlotPoint(points, inspectTime),
   );
@@ -184,7 +187,11 @@
       oninspect(undefined);
       return;
     }
-    oninspect((position.x - left) / (width - left - right));
+    oninspect(
+      plot.xMin +
+        ((position.x - left) / (width - left - right)) *
+          (plot.xMax - plot.xMin),
+    );
   }
 
   function time(
