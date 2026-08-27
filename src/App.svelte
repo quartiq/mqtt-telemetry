@@ -311,7 +311,7 @@
   }
 
   function receiptTime(): number {
-    const now = performance.timeOrigin + performance.now();
+    const now = Date.now();
     lastReceivedAt = Math.max(now, lastReceivedAt + 0.001);
     return lastReceivedAt;
   }
@@ -336,10 +336,11 @@
         nextRoute.broker,
         nextRoute.filters,
         {
-          message: ({ topic, payload, packet }) => {
+          message: ({ topic, payload, packet, segment }) => {
             if (serial !== connectSerial || packet.cmd !== "publish") return;
             const added = store.add(topic, payload, {
               receivedAt: receiptTime(),
+              segment,
               retained: packet.retain,
               duplicate: packet.dup,
               qos: packet.qos,

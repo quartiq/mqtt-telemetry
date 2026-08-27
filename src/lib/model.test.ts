@@ -28,10 +28,12 @@ function message(
   receivedAt: number,
   value: string,
   retained = false,
+  segment = 0,
 ): TelemetryMessage {
   return {
     id,
     receivedAt,
+    segment,
     retained,
     duplicate: false,
     qos: 0,
@@ -359,23 +361,34 @@ describe("plot extraction", () => {
     ];
     expect(plotSeries(history, ["v"])).toEqual({
       points: [
-        { x: 1, y: 1 },
-        { x: 5, y: 5 },
+        { x: 1, y: 1, segment: 0 },
+        { x: 5, y: 5, segment: 0 },
       ],
       retainedExcluded: 1,
     });
+  });
+
+  it("preserves reconnect boundaries in plot points", () => {
+    const history = [
+      message(1, 1, '{"v":1}', false, 1),
+      message(2, 2, '{"v":2}', false, 3),
+    ];
+    expect(
+      plotSeries(history, ["v"]).points.map(({ segment }) => segment),
+    ).toEqual([1, 3]);
   });
 
   it("downsamples in time order while preserving bucket extrema", () => {
     const points = Array.from({ length: 100 }, (_, x) => ({
       x,
       y: x === 50 ? 1000 : x,
+      segment: 0,
     }));
     const sampled = downsamplePlotPoints(points, 20);
     expect(sampled.length).toBeLessThanOrEqual(20);
     expect(sampled[0]).toEqual(points[0]);
     expect(sampled.at(-1)).toEqual(points.at(-1));
-    expect(sampled).toContainEqual({ x: 50, y: 1000 });
+    expect(sampled).toContainEqual({ x: 50, y: 1000, segment: 0 });
     expect(
       sampled.every(
         (point, index) => !index || sampled[index - 1].x <= point.x,
@@ -393,6 +406,20 @@ describe("plot extraction", () => {
     expect(messageFrequency([message(1, 0, "1"), message(2, 2000, "2")])).toBe(
       "every 2 s",
     );
+    expect(
+      messageFrequency([
+        message(1, 0, "1", false, 1),
+        message(2, 10_000, "2", false, 3),
+        message(3, 11_000, "3", false, 3),
+      ]),
+    ).toBe("every 1 s");
+    expect(
+      messageFrequency([
+        message(1, 0, "1", false, 1),
+        message(2, 1_000, "2", false, 1),
+        message(3, 10_000, "3", true, 3),
+      ]),
+    ).toBe("");
   });
 
   it("summarizes the live history span", () => {

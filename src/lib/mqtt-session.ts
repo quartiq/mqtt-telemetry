@@ -16,6 +16,7 @@ export type IncomingMessage = {
   topic: string;
   payload: Uint8Array;
   packet: Packet;
+  segment: number;
 };
 
 export type SessionCallbacks = {
@@ -53,7 +54,8 @@ export class MqttSession {
     private readonly filters: string[],
   ) {
     client.on("message", (topic, payload, packet) => {
-      if (!this.closing) callbacks.message({ topic, payload, packet });
+      if (!this.closing)
+        callbacks.message({ topic, payload, packet, segment: this.generation });
     });
     client.on("connect", () => {
       if (this.closing) return;

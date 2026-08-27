@@ -182,8 +182,38 @@ describe("MQTT session", () => {
     client.emit("message", "sensors/room", new Uint8Array([50]), packet);
 
     expect(messages).toEqual([
-      { topic: "sensors/room", payload: new Uint8Array([49]), packet },
+      {
+        topic: "sensors/room",
+        payload: new Uint8Array([49]),
+        packet,
+        segment: 1,
+      },
     ]);
+  });
+
+  it("labels messages from different transports as separate segments", async () => {
+    const client = new FakeClient();
+    const messages: { segment: number }[] = [];
+    mocks.connect.mockReturnValueOnce(client as never);
+    const opening = MqttSession.connect("ws://broker.example/mqtt", ["#"], {
+      status: vi.fn(),
+      message: (message) => messages.push(message),
+    });
+    client.emit("connect");
+    const session = await opening;
+    const packet = { cmd: "publish", qos: 0, retain: false };
+
+    client.emit("message", "sensors/room", new Uint8Array([49]), packet);
+    client.emit("offline");
+    client.emit("reconnect");
+    client.emit("connect");
+    await vi.waitFor(() =>
+      expect(client.subscribeAsync).toHaveBeenCalledTimes(2),
+    );
+    client.emit("message", "sensors/room", new Uint8Array([50]), packet);
+
+    expect(messages.map(({ segment }) => segment)).toEqual([1, 3]);
+    session.close();
   });
 
   it("resubscribes after reconnect and reports ready only after SUBACK", async () => {

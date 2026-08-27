@@ -58,26 +58,49 @@
       ? (() => {
           const values = timeTickValues(plot.xMin, plot.xMax);
           const showMilliseconds = values.some((value) => value % 1_000 !== 0);
+          const showDate =
+            new Date(plot.xMin).toDateString() !==
+            new Date(plot.xMax).toDateString();
           return values.map((value) => ({
             value,
-            label: time(value, showMilliseconds),
+            label: time(value, showMilliseconds, showDate),
           }));
         })()
       : [],
   );
-  let line = $derived.by(() => {
-    if (!plot) return "";
+  let lines = $derived.by(() => {
+    if (!plot) return [];
     const plotWidth = width - left - right;
     const plotHeight = height - top - bottom;
-    return displayPoints
-      .map((point) => {
-        const x =
-          left + ((point.x - plot.xMin) / (plot.xMax - plot.xMin)) * plotWidth;
-        const y =
-          top + ((plot.yMax - point.y) / (plot.yMax - plot.yMin)) * plotHeight;
-        return `${x.toFixed(2)},${y.toFixed(2)}`;
-      })
-      .join(" ");
+    const segments: {
+      segment: number;
+      coordinates: { x: number; y: number }[];
+    }[] = [];
+    for (const point of displayPoints) {
+      const x =
+        left + ((point.x - plot.xMin) / (plot.xMax - plot.xMin)) * plotWidth;
+      const y =
+        top + ((plot.yMax - point.y) / (plot.yMax - plot.yMin)) * plotHeight;
+      let current = segments.at(-1);
+      if (!current || current.segment !== point.segment) {
+        current = { segment: point.segment, coordinates: [] };
+        segments.push(current);
+      }
+      current.coordinates.push({ x, y });
+    }
+    return segments.map(({ coordinates }) => ({
+      points: coordinates
+        .map(({ x, y }) => `${x.toFixed(2)},${y.toFixed(2)}`)
+        .join(" "),
+      singleton: coordinates.length === 1 ? coordinates[0] : undefined,
+    }));
+  });
+  let gaps = $derived.by(() => {
+    let count = 0;
+    for (let index = 1; index < points.length; index += 1) {
+      if (points[index - 1].segment !== points[index].segment) count += 1;
+    }
+    return count;
   });
   let statistics = $derived.by(() => {
     const items: string[] = [];
@@ -95,11 +118,20 @@
     );
     if (retainedExcluded)
       items.push(`${retainedExcluded.toLocaleString()} retained excluded`);
+    if (gaps)
+      items.push(
+        `${gaps.toLocaleString()} reconnect ${gaps === 1 ? "gap" : "gaps"}`,
+      );
     return items;
   });
 
-  function time(value: number, showMilliseconds: boolean): string {
-    return new Date(value).toLocaleTimeString(undefined, {
+  function time(
+    value: number,
+    showMilliseconds: boolean,
+    showDate: boolean,
+  ): string {
+    return new Date(value).toLocaleString(undefined, {
+      ...(showDate ? { month: "2-digit", day: "2-digit" } : {}),
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
@@ -164,7 +196,17 @@
         y1={height - bottom}
         y2={height - bottom}
       />
-      <polyline class="series" fill="none" points={line} />
+      {#each lines as line}
+        <polyline class="series" fill="none" points={line.points} />
+        {#if line.singleton}
+          <circle
+            class="series-point"
+            cx={line.singleton.x}
+            cy={line.singleton.y}
+            r="2"
+          />
+        {/if}
+      {/each}
     </svg>
   {:else}
     <p class="empty">
@@ -207,6 +249,10 @@
     stroke-linejoin: round;
     stroke-width: 2;
     vector-effect: non-scaling-stroke;
+  }
+
+  .series-point {
+    fill: var(--plot);
   }
 
   text {

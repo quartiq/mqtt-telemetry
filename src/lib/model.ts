@@ -14,6 +14,7 @@ export type Payload =
 export type TelemetryMessage = {
   id: number;
   receivedAt: number;
+  segment: number;
   retained: boolean;
   duplicate: boolean;
   qos: 0 | 1 | 2;
@@ -49,7 +50,7 @@ export type JsonSnapshot = {
   paths: Map<string, JsonPath>;
 };
 
-export type PlotPoint = { x: number; y: number };
+export type PlotPoint = { x: number; y: number; segment: number };
 export type PlotSeries = { points: PlotPoint[]; retainedExcluded: number };
 export type PlotScale = {
   min: number;
@@ -257,7 +258,12 @@ export function plotSeries(
     const value = getJsonPath(message.payload.value, path);
     if (typeof value !== "number" || !Number.isFinite(value)) continue;
     if (message.retained) retainedExcluded += 1;
-    else points.push({ x: message.receivedAt, y: value });
+    else
+      points.push({
+        x: message.receivedAt,
+        y: value,
+        segment: message.segment,
+      });
   }
   return { points, retainedExcluded };
 }
@@ -384,7 +390,10 @@ export function downsamplePlotPoints(
 }
 
 export function messageFrequency(history: TelemetryMessage[]): string {
-  const live = history.filter((message) => !message.retained).slice(-100);
+  const segment = history.at(-1)?.segment;
+  const live = history
+    .filter((message) => !message.retained && message.segment === segment)
+    .slice(-100);
   if (live.length < 2) return "";
   const seconds =
     (live.at(-1)!.receivedAt - live[0].receivedAt) / (live.length - 1) / 1000;
@@ -538,6 +547,7 @@ export class TelemetryStore {
     payload: Uint8Array,
     metadata: {
       receivedAt: number;
+      segment?: number;
       retained: boolean;
       duplicate?: boolean;
       qos: 0 | 1 | 2;
@@ -596,6 +606,7 @@ export class TelemetryStore {
     const message: TelemetryMessage = {
       id: ++this.sequence,
       ...metadata,
+      segment: metadata.segment ?? 0,
       duplicate: metadata.duplicate ?? false,
       bytes: payload.byteLength,
       unsafeIntegers: hasUnsafeInteger(parsed),

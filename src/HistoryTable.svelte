@@ -49,9 +49,25 @@
   let duplicates = $derived(
     messages.filter((message) => message.duplicate).length,
   );
+  let gapBefore = $derived.by(() => {
+    const ids = new Set<number>();
+    for (let index = 1; index < messages.length; index += 1) {
+      if (messages[index - 1].segment !== messages[index].segment)
+        ids.add(messages[index].id);
+    }
+    return ids;
+  });
+  let showDate = $derived.by(() => {
+    if (messages.length < 2) return false;
+    return (
+      new Date(messages[0].receivedAt).toDateString() !==
+      new Date(messages.at(-1)!.receivedAt).toDateString()
+    );
+  });
 
   function timestamp(value: number): string {
-    return new Date(value).toLocaleTimeString(undefined, {
+    return new Date(value).toLocaleString(undefined, {
+      ...(showDate ? { month: "2-digit", day: "2-digit" } : {}),
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
@@ -115,6 +131,13 @@
             : "redeliveries"}</span
         >
       {/if}
+      {#if gapBefore.size}
+        <span
+          >{gapBefore.size.toLocaleString()} reconnect {gapBefore.size === 1
+            ? "gap"
+            : "gaps"}</span
+        >
+      {/if}
       <span title={fieldLabel ?? "Full payload summary"}
         >{fieldLabel ? `field ${fieldLabel}` : "payload"}</span
       >
@@ -122,7 +145,7 @@
   </header>
   {#if messages.length}
     <div class="table-scroll">
-      <table>
+      <table class:dated={showDate}>
         <thead>
           <tr><th>Time</th><th>Delivery</th><th>Value</th></tr>
         </thead>
@@ -133,6 +156,7 @@
               : messagePayloadPreview(message)}
             <tr
               aria-selected={activeId === message.id}
+              class="message-row"
               class:selected={activeId === message.id}
               data-history-id={message.id}
               tabindex={activeId === message.id ? 0 : -1}
@@ -149,6 +173,13 @@
               >
               <td title={value}>{value}</td>
             </tr>
+            {#if gapBefore.has(message.id)}
+              <tr class="gap-row">
+                <td colspan="3"
+                  >Reconnected · messages during gap unavailable</td
+                >
+              </tr>
+            {/if}
           {/each}
         </tbody>
       </table>
@@ -210,27 +241,38 @@
     width: 8.5rem;
   }
 
+  table.dated th:first-child,
+  table.dated td:first-child {
+    width: 11rem;
+  }
+
   th:nth-child(2),
   td:nth-child(2) {
     width: 6.5rem;
   }
 
-  tbody tr {
+  tbody .message-row {
     cursor: default;
   }
 
-  tbody tr:hover {
+  tbody .message-row:hover {
     background: var(--hover);
   }
 
-  tbody tr:focus-visible {
+  tbody .message-row:focus-visible {
     outline: 1px solid var(--focus);
     outline-offset: -1px;
   }
 
-  tbody tr.selected {
+  tbody .message-row.selected {
     background: var(--selected);
     box-shadow: inset 2px 0 0 var(--selected-mark);
+  }
+
+  .gap-row td {
+    color: var(--muted);
+    font-style: italic;
+    text-align: center;
   }
 
   @media (max-width: 800px) {

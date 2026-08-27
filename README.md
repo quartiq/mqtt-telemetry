@@ -14,7 +14,7 @@ For a LAN broker that only provides `ws://`, open the hosted application, choose
 
 History exists only in the current tab. It defaults to 1,000 messages per topic and is bounded globally; payloads over 1 MiB are omitted. Retained publications appear in history but not in plots because their original publication time is unknown. Local clear actions never modify retained broker data.
 
-After a connection has been established, transport failures are retried and subscriptions are restored before the application reports connected. These are clean MQTT sessions: live QoS 0 traffic sent while disconnected is not recoverable. An initial connection failure or a failed resubscription requires explicit user action.
+After a connection has been established, transport failures are retried and subscriptions are restored before the application reports connected. These are clean MQTT sessions: live QoS 0 traffic sent while disconnected is not recoverable. History marks reconnect gaps and plots do not join across them. An initial connection failure or a failed resubscription requires explicit user action.
 
 The address bar records the broker, filters, history limit, selected topic, and selected field, making that view shareable. Message history and credentials are not included. Credentials use normal browser autocomplete and are not stored by the application.
 
