@@ -2,11 +2,14 @@
 
 <script lang="ts">
   import {
+    displayDatesDiffer,
+    formatTelemetryTime,
     messagePayloadPreview,
     messageFrequency,
     messageSpan,
     selectedMessageValue,
     type JsonPath,
+    type DisplayTimeZone,
     type TelemetryMessage,
   } from "./lib/model";
 
@@ -15,12 +18,20 @@
     selectedId: number | null;
     field: JsonPath | undefined;
     fieldLabel?: string;
+    timeZone: DisplayTimeZone;
     onselect: (id: number) => void;
     onlatest: () => void;
   };
 
-  let { messages, selectedId, field, fieldLabel, onselect, onlatest }: Props =
-    $props();
+  let {
+    messages,
+    selectedId,
+    field,
+    fieldLabel,
+    timeZone,
+    onselect,
+    onlatest,
+  }: Props = $props();
   const rowLimit = 500;
   let activeId = $derived(selectedId ?? messages.at(-1)?.id);
   let visibleMessages = $derived.by(() => {
@@ -59,20 +70,18 @@
   });
   let showDate = $derived.by(() => {
     if (messages.length < 2) return false;
-    return (
-      new Date(messages[0].receivedAt).toDateString() !==
-      new Date(messages.at(-1)!.receivedAt).toDateString()
+    return displayDatesDiffer(
+      messages[0].receivedAt,
+      messages.at(-1)!.receivedAt,
+      timeZone,
     );
   });
 
   function timestamp(value: number): string {
-    return new Date(value).toLocaleString(undefined, {
-      ...(showDate ? { month: "2-digit", day: "2-digit" } : {}),
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-      fractionalSecondDigits: 3,
+    return formatTelemetryTime(value, {
+      timeZone,
+      date: showDate ? "day" : undefined,
+      milliseconds: true,
     });
   }
 

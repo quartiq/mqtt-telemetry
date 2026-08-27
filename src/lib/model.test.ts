@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   TelemetryStore,
   downsamplePlotPoints,
+  displayDatesDiffer,
   fieldLabel,
   formatPlotNumber,
   formatPlotTick,
+  formatTelemetryTime,
   getJsonPath,
   jsonPath,
   jsonTree,
@@ -49,6 +51,24 @@ function message(
 }
 
 describe("payloads and JSON fields", () => {
+  it("formats every telemetry clock in 24-hour time", () => {
+    const value = Date.UTC(2026, 7, 27, 13, 4, 5, 6);
+    const formatted = formatTelemetryTime(value, {
+      timeZone: "utc",
+      date: "full",
+      milliseconds: true,
+    });
+    expect(formatted).toContain("13:04:05.006");
+    expect(formatted).not.toMatch(/AM|PM/i);
+    expect(
+      displayDatesDiffer(
+        Date.UTC(2026, 7, 27, 23),
+        Date.UTC(2026, 7, 28, 0),
+        "utc",
+      ),
+    ).toBe(true);
+  });
+
   it("distinguishes JSON, text, empty, and binary payloads", () => {
     expect(parsePayload(encode('{"value":1}')).kind).toBe("json");
     expect(parsePayload(encode("online"))).toEqual({
@@ -213,9 +233,9 @@ describe("topic history", () => {
       expect(store.history(store.nodeId(topic) as string)).toEqual([]);
     expect(store.history(store.nodeId("other") as string)).toHaveLength(1);
     expect(store.subtreeMessageCount(store.nodeId("a") as string)).toBe(0);
-    expect(store.snapshot().nodes.get(store.nodeId("a") as string)?.value).toBe(
-      "0 msgs",
-    );
+    expect(
+      store.snapshot().nodes.get(store.nodeId("a") as string)?.suffix,
+    ).toBe("(0)");
   });
 
   it("evicts the globally oldest history within the shared byte budget", () => {
@@ -284,7 +304,7 @@ describe("topic history", () => {
     expect(after.nodes).toBe(before.nodes);
     expect(after.revision).toBeGreaterThan(before.revision);
     expect(after.topicCount).toBe(1);
-    expect(after.nodes.get(leaf)?.value).toBe("0 msgs");
+    expect(after.nodes.get(leaf)?.suffix).toBe("(0)");
   });
 
   it("represents topics that are also branches and preserves empty levels", () => {
@@ -296,10 +316,10 @@ describe("topic history", () => {
     const a = store.nodeId("a") as string;
     expect(store.history(a)).toHaveLength(1);
     expect(snapshot.nodes.get(a)?.children).toHaveLength(1);
-    expect(snapshot.nodes.get(a)?.value).toBe("2 msgs");
+    expect(snapshot.nodes.get(a)?.suffix).toBe("(2)");
     expect(snapshot.nodes.get(a)?.title).toContain("1 direct; 2 total");
-    expect(snapshot.nodes.get(store.nodeId("a/b") as string)?.value).toBe(
-      "1 msg",
+    expect(snapshot.nodes.get(store.nodeId("a/b") as string)?.suffix).toBe(
+      "(1)",
     );
     expect(snapshot.roots.map((id) => snapshot.nodes.get(id)?.label)).toEqual([
       "(empty)",

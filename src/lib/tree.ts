@@ -2,6 +2,7 @@ export type TreeNodeView = {
   id: string;
   label: string;
   value?: string;
+  suffix?: string;
   parent?: string;
   children: string[];
   title?: string;

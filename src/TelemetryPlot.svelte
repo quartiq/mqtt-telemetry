@@ -3,13 +3,16 @@
 <script lang="ts">
   import {
     downsamplePlotPoints,
+    displayDatesDiffer,
     formatPlotNumber,
     formatPlotTick,
+    formatTelemetryTime,
     nearestPlotPoint,
     nicePlotScale,
     plotStatistics,
     timeTickValues,
     type PlotPoint,
+    type DisplayTimeZone,
   } from "./lib/model";
 
   type Props = {
@@ -19,6 +22,7 @@
     retainedExcluded: number;
     xMin: number;
     xMax: number;
+    timeZone: DisplayTimeZone;
     inspectTime?: number;
     oninspect: (time?: number) => void;
     onfocus: () => void;
@@ -31,6 +35,7 @@
     retainedExcluded,
     xMin,
     xMax,
+    timeZone,
     inspectTime,
     oninspect,
     onfocus,
@@ -68,12 +73,14 @@
       ? (() => {
           const values = timeTickValues(plot.xMin, plot.xMax);
           const showMilliseconds = values.some((value) => value % 1_000 !== 0);
-          const showDate =
-            new Date(plot.xMin).toDateString() !==
-            new Date(plot.xMax).toDateString();
+          const showDate = displayDatesDiffer(plot.xMin, plot.xMax, timeZone);
           return values.map((value) => ({
             value,
-            label: time(value, showMilliseconds, showDate),
+            label: formatTelemetryTime(value, {
+              timeZone,
+              date: showDate ? "day" : undefined,
+              milliseconds: showMilliseconds,
+            }),
           }));
         })()
       : [],
@@ -141,10 +148,14 @@
     if (plot) {
       const { latest, low, high, mean, standardDeviation } = plot.summary;
       if (inspection) {
-        const showDate =
-          new Date(plot.xMin).toDateString() !==
-          new Date(plot.xMax).toDateString();
-        items.push(`x ${time(inspection.x, true, showDate)}`);
+        const showDate = displayDatesDiffer(plot.xMin, plot.xMax, timeZone);
+        items.push(
+          `x ${formatTelemetryTime(inspection.x, {
+            timeZone,
+            date: showDate ? "day" : undefined,
+            milliseconds: true,
+          })}`,
+        );
         items.push(`y ${formatPlotNumber(inspection.y, plot.step)}`);
       } else {
         items.push(`latest ${formatPlotNumber(latest, plot.step)}`);
@@ -157,8 +168,6 @@
         `σ ${formatPlotNumber(standardDeviation, Math.min(plot.step, standardDeviation || plot.step))}`,
       );
       items.push(`n ${points.length.toLocaleString()}`);
-      items.push(`low ${formatPlotNumber(low, plot.step)}`);
-      items.push(`high ${formatPlotNumber(high, plot.step)}`);
     }
     if (retainedExcluded)
       items.push(`${retainedExcluded.toLocaleString()} retained excluded`);
@@ -192,21 +201,6 @@
         ((position.x - left) / (width - left - right)) *
           (plot.xMax - plot.xMin),
     );
-  }
-
-  function time(
-    value: number,
-    showMilliseconds: boolean,
-    showDate: boolean,
-  ): string {
-    return new Date(value).toLocaleString(undefined, {
-      ...(showDate ? { month: "2-digit", day: "2-digit" } : {}),
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-      ...(showMilliseconds ? { fractionalSecondDigits: 3 } : {}),
-    });
   }
 </script>
 

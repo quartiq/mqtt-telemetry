@@ -2,7 +2,11 @@
 
 <script lang="ts">
   import TelemetryPlot from "./TelemetryPlot.svelte";
-  import { plotTimeDomain, type PlotPoint } from "./lib/model";
+  import {
+    plotTimeDomain,
+    type DisplayTimeZone,
+    type PlotPoint,
+  } from "./lib/model";
   import type { PlotRef } from "./lib/routes";
 
   export type DashboardPlot = PlotRef & {
@@ -16,12 +20,14 @@
     plots: DashboardPlot[];
     now: number;
     ageMs: number | null;
+    timeZone: DisplayTimeZone;
     onfocus: (plot: PlotRef) => void;
     onremove: (plot: PlotRef) => void;
     onremoveall: () => void;
   };
 
-  let { plots, now, ageMs, onfocus, onremove, onremoveall }: Props = $props();
+  let { plots, now, ageMs, timeZone, onfocus, onremove, onremoveall }: Props =
+    $props();
   let domain = $derived(plotTimeDomain(plots, now, ageMs));
   let inspectTime = $state<number | undefined>();
 </script>
@@ -48,6 +54,7 @@
           retainedExcluded={plot.retainedExcluded}
           xMin={domain.min}
           xMax={domain.max}
+          {timeZone}
           {inspectTime}
           oninspect={(time) => (inspectTime = time)}
           onfocus={() => onfocus(plot)}

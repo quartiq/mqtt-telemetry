@@ -18,6 +18,7 @@
     plotSeriesPath,
     resolveJsonPath,
     telemetryPageTitle,
+    type DisplayTimeZone,
     type JsonPath,
   } from "./lib/model";
   import { MqttSession, type SessionStatus } from "./lib/mqtt-session";
@@ -666,6 +667,7 @@
       filters,
       historyLimit: formHistoryLimit,
       historyAgeMs: formHistoryAgeMs,
+      timeZone: route.timeZone,
       selectedTopic: "",
       fieldPath: null,
       plots: [],
@@ -686,6 +688,13 @@
     writeRoute(next, null);
     stopConnection();
     formBroker = previousBroker;
+  }
+
+  function changeTimeZone(event: Event) {
+    const timeZone = (event.currentTarget as HTMLSelectElement)
+      .value as DisplayTimeZone;
+    if (timeZone !== "local" && timeZone !== "utc") return;
+    writeRoute({ ...route, timeZone }, selectedMessageId);
   }
 
   function selectLoadedTopic(id: string, reset: boolean) {
@@ -989,6 +998,18 @@
           <button type="button" onclick={openDashboardFile}>Load…</button>
           <button type="button" onclick={copyDashboardLink}>Copy link</button>
         </div>
+        <label class="time-zone">
+          <span class="meta">Time</span>
+          <select
+            aria-label="Displayed time zone"
+            title="Display receipt times in the browser time zone or UTC"
+            value={route.timeZone}
+            onchange={changeTimeZone}
+          >
+            <option value="local">Local</option>
+            <option value="utc">UTC</option>
+          </select>
+        </label>
         <button type="button" onclick={changeConnection}
           >Change connection</button
         >
@@ -1110,6 +1131,7 @@
         checked={checkedJson}
         checkDisabled={plotLimitReached}
         subtreePlotCount={selectedValuePlotCount}
+        timeZone={route.timeZone}
         onselect={selectJson}
         ontoggle={toggleJson}
         oncheck={togglePlot}
@@ -1120,6 +1142,7 @@
         selectedId={selectedMessageId}
         field={activeField}
         fieldLabel={selectedFieldLabel}
+        timeZone={route.timeZone}
         onselect={selectHistory}
         onlatest={selectLatest}
       />
@@ -1127,6 +1150,7 @@
         plots={dashboardPlots}
         now={plotNow}
         ageMs={route.historyAgeMs}
+        timeZone={route.timeZone}
         onfocus={focusPlot}
         onremove={(plot) =>
           removePlots((current) => plotKey(current) === plotKey(plot))}

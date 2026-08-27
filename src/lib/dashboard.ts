@@ -1,4 +1,4 @@
-import { jsonPath, parseJsonPath } from "./model";
+import { jsonPath, parseJsonPath, type DisplayTimeZone } from "./model";
 import {
   MAX_HISTORY_AGE_SECONDS,
   MAX_HISTORY_LIMIT,
@@ -20,6 +20,9 @@ export type Dashboard = {
     messagesPerTopic: number;
     maxAgeSeconds: number | null;
   };
+  display: {
+    timeZone: DisplayTimeZone;
+  };
   plots: PlotRef[];
 };
 
@@ -34,6 +37,7 @@ export function dashboardFromRoute(route: AppRoute): Dashboard {
       maxAgeSeconds:
         route.historyAgeMs === null ? null : route.historyAgeMs / 1000,
     },
+    display: { timeZone: route.timeZone },
     plots: route.plots.map(({ topic, path }) => ({ topic, path })),
   };
 }
@@ -48,6 +52,7 @@ export function routeFromDashboard(dashboard: Dashboard): AppRoute {
       dashboard.retention.maxAgeSeconds === null
         ? null
         : dashboard.retention.maxAgeSeconds * 1000,
+    timeZone: dashboard.display.timeZone,
     selectedTopic: focus?.topic ?? "",
     fieldPath: focus?.path ?? null,
     plots: dashboard.plots,
@@ -93,6 +98,15 @@ export function parseDashboard(value: unknown): Dashboard {
   const age = value.retention.maxAgeSeconds;
   if (age !== null && !integerBetween(age, 1, MAX_HISTORY_AGE_SECONDS))
     throw new Error("Dashboard history age is invalid.");
+  const display = value.display;
+  const timeZone =
+    display === undefined
+      ? "local"
+      : isRecord(display) &&
+          (display.timeZone === "local" || display.timeZone === "utc")
+        ? display.timeZone
+        : undefined;
+  if (!timeZone) throw new Error("Dashboard display time zone is invalid.");
   if (!Array.isArray(value.plots) || value.plots.length > MAX_PLOTS)
     throw new Error(`A dashboard can contain at most ${MAX_PLOTS} plots.`);
 
@@ -125,6 +139,7 @@ export function parseDashboard(value: unknown): Dashboard {
       messagesPerTopic: messages,
       maxAgeSeconds: age,
     },
+    display: { timeZone },
     plots,
   };
 }

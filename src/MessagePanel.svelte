@@ -4,6 +4,8 @@
   import TreeView from "./TreeView.svelte";
   import {
     formatPayload,
+    formatTelemetryTime,
+    type DisplayTimeZone,
     type JsonSnapshot,
     type TelemetryMessage,
   } from "./lib/model";
@@ -19,6 +21,7 @@
     checked: Set<string>;
     checkDisabled: boolean;
     subtreePlotCount: number;
+    timeZone: DisplayTimeZone;
     onselect: (id: string) => void;
     ontoggle: (id: string, open: boolean) => void;
     oncheck: (id: string) => void;
@@ -36,6 +39,7 @@
     checked,
     checkDisabled,
     subtreePlotCount,
+    timeZone,
     onselect,
     ontoggle,
     oncheck,
@@ -48,7 +52,7 @@
     if (!message) return [];
     const items = [
       following ? "Following latest" : "Historical",
-      `received ${timestamp(message.receivedAt)}`,
+      `received ${formatTelemetryTime(message.receivedAt, { timeZone, date: "full", milliseconds: true })}`,
     ];
     if (message.retained) items.push("retained");
     if (message.duplicate) items.push("possible duplicate");
@@ -58,10 +62,6 @@
     if (message.unsafeIntegers) items.push("unsafe integer precision");
     return items;
   });
-
-  function timestamp(value: number): string {
-    return new Date(value).toLocaleString();
-  }
 </script>
 
 <section class="panel message-panel">

@@ -14,6 +14,7 @@ describe("route configuration", () => {
       filters: ["#"],
       historyLimit: DEFAULT_HISTORY_LIMIT,
       historyAgeMs: null,
+      timeZone: "local",
       selectedTopic: "",
       fieldPath: null,
       plots: [],

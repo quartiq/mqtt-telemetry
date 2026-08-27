@@ -8,6 +8,8 @@ Open <https://telemetry.quartiq.de/> and enter an MQTT-over-WebSocket URL. Use o
 
 Select a value to inspect its history. Toggle the square beside a numeric field to plot it. Topic search is a case-insensitive substring search unless it contains MQTT `+` or `#` wildcards.
 
+Receipt times use a consistent 24-hour clock. Choose Local or UTC from the connected header; saved dashboards retain that choice.
+
 Save a dashboard to keep its broker, subscriptions, retention limits, and plots as JSON; credentials and message history are never included. Load that file to restore it. **Copy link** creates an explicit self-contained bookmark/share link; opening it imports the dashboard and immediately removes the embedded JSON from the address bar.
 
 Browsers require `ws://` or `wss://`; ordinary `mqtt://` TCP endpoints do not work. The hosted HTTPS page requires `wss://` with a browser-trusted certificate. Chromium may additionally request Local Network Access permission for a private or loopback broker.

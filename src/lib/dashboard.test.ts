@@ -14,6 +14,7 @@ const route: AppRoute = {
   filters: ["sensors/#"],
   historyLimit: 250,
   historyAgeMs: 60_000,
+  timeZone: "utc",
   selectedTopic: "unshared/selection",
   fieldPath: "$.unshared",
   plots: [{ topic: "sensors/room", path: "$.temperature" }],
@@ -41,9 +42,11 @@ describe("dashboard files", () => {
       broker: route.broker,
       subscriptions: route.filters,
       retention: { messagesPerTopic: 250, maxAgeSeconds: 60 },
+      display: { timeZone: "utc" },
       plots: route.plots,
     });
     expect(routeFromDashboard(dashboard)).toMatchObject({
+      timeZone: "utc",
       selectedTopic: "sensors/room",
       fieldPath: "$.temperature",
     });
@@ -54,6 +57,15 @@ describe("dashboard files", () => {
     const dashboard = JSON.parse(dashboardJson(route));
     dashboard.plots[0].path = "$['temperature']";
     expect(parseDashboard(dashboard).plots[0].path).toBe("$.temperature");
+  });
+
+  it("loads older version-one dashboards in browser-local time", () => {
+    const dashboard = JSON.parse(dashboardJson(route));
+    delete dashboard.display;
+    expect(parseDashboard(dashboard).display.timeZone).toBe("local");
+
+    dashboard.display = { timeZone: "Mars/Olympus" };
+    expect(() => parseDashboard(dashboard)).toThrow(/time zone/);
   });
 
   it("rejects credentials, wildcard paths, and duplicate canonical plots", () => {

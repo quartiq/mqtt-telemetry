@@ -4,6 +4,7 @@ export type JsonValue =
   null | boolean | number | string | JsonValue[] | JsonObject;
 export type JsonObject = { [key: string]: JsonValue };
 export type JsonPath = (string | number)[];
+export type DisplayTimeZone = "local" | "utc";
 
 export type Payload =
   | { kind: "json"; value: JsonValue }
@@ -92,6 +93,45 @@ export const DEFAULT_JSON_TREE_LIMITS: JsonTreeLimits = {
 };
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
+
+export function formatTelemetryTime(
+  value: number,
+  options: {
+    timeZone: DisplayTimeZone;
+    date?: "day" | "full";
+    milliseconds?: boolean;
+  },
+): string {
+  return new Date(value).toLocaleString(undefined, {
+    ...(options.date
+      ? {
+          month: "2-digit" as const,
+          day: "2-digit" as const,
+          ...(options.date === "full" ? { year: "numeric" as const } : {}),
+        }
+      : {}),
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+    ...(options.milliseconds ? { fractionalSecondDigits: 3 } : {}),
+    ...(options.timeZone === "utc" ? { timeZone: "UTC" } : {}),
+  });
+}
+
+export function displayDatesDiffer(
+  left: number,
+  right: number,
+  timeZone: DisplayTimeZone,
+): boolean {
+  const formatter = new Intl.DateTimeFormat("en", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    ...(timeZone === "utc" ? { timeZone: "UTC" } : {}),
+  });
+  return formatter.format(left) !== formatter.format(right);
+}
 
 function topicId(parts: string[]): string {
   return JSON.stringify(parts);
@@ -901,7 +941,7 @@ export class TelemetryStore {
       label: node.label,
       ...(node.parent ? { parent: node.parent } : {}),
       children: node.children,
-      value: `${node.messageCount.toLocaleString()} ${node.messageCount === 1 ? "msg" : "msgs"}`,
+      suffix: `(${node.messageCount.toLocaleString()})`,
       title: node.children.length
         ? `${node.topic}\n${direct.toLocaleString()} direct; ${node.messageCount.toLocaleString()} total`
         : node.topic,
