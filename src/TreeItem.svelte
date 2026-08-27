@@ -132,10 +132,6 @@
     {:else}
       <span aria-hidden="true" class="spacer"></span>
     {/if}
-    <span class="label">{node.label}</span>
-    {#if node.value !== undefined}
-      <span class="separator"> = </span><span class="value">{node.value}</span>
-    {/if}
     {#if checkable}
       <button
         aria-label={checked ? "Remove plot" : "Add plot"}
@@ -151,6 +147,10 @@
         type="button"
         onclick={toggleCheck}>{checked ? "✓" : ""}</button
       >
+    {/if}
+    <span class="label">{node.label}</span>
+    {#if node.value !== undefined}
+      <span class="separator"> = </span><span class="value">{node.value}</span>
     {/if}
   </div>
 
@@ -256,7 +256,7 @@
     font-size: 0.75rem;
     height: 1rem;
     line-height: 0.8rem;
-    margin-left: var(--space-tight);
+    margin-right: var(--space-tight);
     min-height: 1rem;
     padding: 0;
     width: 1rem;

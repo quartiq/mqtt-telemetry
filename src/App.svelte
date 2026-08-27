@@ -151,11 +151,15 @@
     ).length;
   });
   let selectedTopicPlotCount = $derived(
-    route.plots.filter((plot) => plot.topic === selectedTopic).length,
+    selectedTopicId
+      ? route.plots.filter((plot) => plot.topic === selectedTopic).length
+      : 0,
   );
   let selectedTopicSubtreePlotCount = $derived(
-    route.plots.filter((plot) => topicContains(selectedTopic, plot.topic))
-      .length,
+    selectedTopicId
+      ? route.plots.filter((plot) => topicContains(selectedTopic, plot.topic))
+          .length
+      : 0,
   );
   let dashboardPlots = $derived.by(() => {
     revision;
@@ -659,10 +663,12 @@
   }
 
   function removeTopicPlots() {
+    if (!selectedTopicId) return;
     removePlots((plot) => plot.topic === selectedTopic);
   }
 
   function removeTopicSubtreePlots() {
+    if (!selectedTopicId) return;
     removePlots((plot) => topicContains(selectedTopic, plot.topic));
   }
 

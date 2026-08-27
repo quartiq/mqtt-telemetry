@@ -38,7 +38,7 @@
     >
   </header>
   {#if plots.length}
-    <div class:single={plots.length === 1} class="plot-grid">
+    <div class:two-columns={plots.length > 4} class="plot-grid">
       {#each plots as plot (plot.key)}
         <TelemetryPlot
           points={plot.points}
@@ -91,14 +91,14 @@
     display: grid;
     gap: var(--space);
     grid-auto-rows: minmax(16rem, 1fr);
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
     min-height: 0;
     overflow: auto;
     padding: var(--space);
   }
 
-  .plot-grid.single {
-    grid-template-columns: minmax(0, 1fr);
+  .plot-grid.two-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .empty {
@@ -110,7 +110,8 @@
       overflow: visible;
     }
 
-    .plot-grid {
+    .plot-grid,
+    .plot-grid.two-columns {
       display: grid;
       grid-template-columns: minmax(0, 1fr);
       overflow: visible;
