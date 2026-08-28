@@ -245,6 +245,42 @@ describe("MQTT session", () => {
     session.close();
   });
 
+  it("resubscribes an active session without reconnecting", async () => {
+    const client = new FakeClient();
+    const statuses: SessionStatus[] = [];
+    const session = await establish(client, statuses);
+    const refreshed = deferred();
+    client.subscribeAsync.mockImplementationOnce(() => refreshed.promise);
+
+    const resubscribing = session.resubscribe();
+    expect(client.subscribeAsync).toHaveBeenCalledTimes(2);
+    expect(client.end).not.toHaveBeenCalled();
+    refreshed.resolve([
+      { topic: "sensors/#", qos: 0 },
+      { topic: "alerts/+", qos: 0 },
+    ]);
+    await resubscribing;
+
+    expect(statuses.at(-1)).toEqual({ state: "connected", rejected: [] });
+    expect(client.end).not.toHaveBeenCalled();
+    session.close();
+  });
+
+  it("closes an active session when manual resubscription fails", async () => {
+    const client = new FakeClient();
+    const statuses: SessionStatus[] = [];
+    const session = await establish(client, statuses);
+    client.subscribeAsync.mockRejectedValueOnce(new Error("subscribe failed"));
+
+    await session.resubscribe();
+
+    expect(statuses.at(-1)).toEqual({
+      state: "error",
+      error: "subscribe failed",
+    });
+    expect(client.end).toHaveBeenCalledWith(true);
+  });
+
   it("closes an established session when resubscribing fails", async () => {
     const client = new FakeClient();
     const statuses: SessionStatus[] = [];

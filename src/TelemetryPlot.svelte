@@ -61,13 +61,11 @@
   let displayPoints = $derived(
     downsamplePlotPoints(points, width - left - right),
   );
-  let plot = $derived.by(() => {
+  let vertical = $derived.by(() => {
     if (!points.length) return undefined;
     const summary = plotStatistics(points)!;
     const yScale = nicePlotScale(summary.low, summary.high);
     return {
-      xMin,
-      xMax: Math.max(xMax, xMin + 0.001),
       summary,
       yMin: yScale.min,
       yMax: yScale.max,
@@ -78,6 +76,15 @@
       })),
     };
   });
+  let plot = $derived(
+    vertical
+      ? {
+          ...vertical,
+          xMin,
+          xMax: Math.max(xMax, xMin + 0.001),
+        }
+      : undefined,
+  );
   let xTicks = $derived.by(() =>
     plot
       ? (() => {
@@ -155,9 +162,9 @@
   });
   let statistics = $derived.by(() => {
     const items: string[] = [];
-    if (plot) {
-      const { latest, low, high, mean, standardDeviation } = plot.summary;
-      if (inspection) {
+    if (vertical) {
+      const { latest, low, high, mean, standardDeviation } = vertical.summary;
+      if (inspection && plot) {
         const showDate = displayDatesDiffer(plot.xMin, plot.xMax, timeZone);
         items.push(
           `x ${formatTelemetryTime(inspection.x, {
@@ -166,16 +173,16 @@
             milliseconds: true,
           })}`,
         );
-        items.push(`y ${formatPlotNumber(inspection.y, plot.step)}`);
+        items.push(`y ${formatPlotNumber(inspection.y, vertical.step)}`);
       } else {
-        items.push(`latest ${formatPlotNumber(latest, plot.step)}`);
+        items.push(`latest ${formatPlotNumber(latest, vertical.step)}`);
       }
-      items.push(`μ ${formatPlotNumber(mean, plot.step)}`);
+      items.push(`μ ${formatPlotNumber(mean, vertical.step)}`);
       items.push(
-        `p–p ${formatPlotNumber(high - low, Math.min(plot.step, high - low || plot.step))}`,
+        `p–p ${formatPlotNumber(high - low, Math.min(vertical.step, high - low || vertical.step))}`,
       );
       items.push(
-        `σ ${formatPlotNumber(standardDeviation, Math.min(plot.step, standardDeviation || plot.step))}`,
+        `σ ${formatPlotNumber(standardDeviation, Math.min(vertical.step, standardDeviation || vertical.step))}`,
       );
       items.push(`n ${points.length.toLocaleString()}`);
     }

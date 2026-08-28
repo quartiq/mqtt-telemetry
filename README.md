@@ -18,7 +18,7 @@ For a LAN broker that only provides `ws://`, save the hosted page as **Webpage, 
 
 ### Data and reconnect behavior
 
-History exists only in the current tab. It defaults to 1,000 messages per topic and is also globally bounded; payloads over 1 MiB are omitted. Retained publications appear in history but not plots because their original publication time is unknown. Clear actions affect only this tab.
+History exists only in the current tab. It defaults to 1,000 live messages per topic and is also globally bounded; payloads over 1 MiB are omitted. The latest retained snapshot for each topic is kept outside the count and age limits, but not plotted because its original publication time is unknown. Clear actions affect only this tab.
 
 After a connection has been established, transport failures are retried and subscriptions are restored before the application reports connected. These are clean MQTT sessions: live QoS 0 traffic sent while disconnected is not recoverable. History marks reconnect gaps and plots do not join across them. An initial connection failure or a failed resubscription requires explicit user action.
 
@@ -33,9 +33,11 @@ npm run dev
 npm run format:check
 npm test
 npm run build
+npm run test:browser
 ```
 
 `npm run build` type-checks and produces the self-contained `dist/index.html` used for both deployment and the local-file workflow.
+The browser smoke test opens that artifact from `file://` with Chrome or Chromium.
 
 ## Deploy
 
