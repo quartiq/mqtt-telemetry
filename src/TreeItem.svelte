@@ -124,15 +124,7 @@
         type="button"
         onclick={toggle}>{open ? "▾" : "▸"}</button
       >
-    {:else}
-      <span aria-hidden="true" class="spacer"></span>
-    {/if}
-    {#if context.showActivity}
-      <span aria-hidden="true" class="activity-slot">
-        <span class="activity-dot" use:indicateActivity={activity}></span>
-      </span>
-    {/if}
-    {#if checkable}
+    {:else if checkable}
       <button
         aria-label={checked ? "Remove plot" : "Add plot"}
         aria-pressed={checked}
@@ -147,6 +139,13 @@
         type="button"
         onclick={toggleCheck}>{checked ? "✓" : ""}</button
       >
+    {:else}
+      <span aria-hidden="true" class="spacer"></span>
+    {/if}
+    {#if context.showActivity}
+      <span aria-hidden="true" class="activity-slot">
+        <span class="activity-dot" use:indicateActivity={activity}></span>
+      </span>
     {/if}
     <span class="label">{node.label}</span>
     {#if node.suffix !== undefined}
@@ -281,7 +280,6 @@
     font-size: 0.75rem;
     height: 1rem;
     line-height: 0.8rem;
-    margin-right: var(--space-tight);
     min-height: 1rem;
     padding: 0;
     width: 1rem;

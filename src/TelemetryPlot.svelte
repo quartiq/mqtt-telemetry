@@ -50,12 +50,14 @@
     onremove,
   }: Props = $props();
 
-  const width = 640;
-  const height = 220;
   const left = 82;
   const right = 16;
   const top = 10;
   const bottom = 32;
+  let clientWidth = $state(640);
+  let clientHeight = $state(220);
+  let width = $derived(Math.max(clientWidth, left + right + 1));
+  let height = $derived(Math.max(clientHeight, top + bottom + 1));
   let displayPoints = $derived(
     downsamplePlotPoints(points, width - left - right),
   );
@@ -254,6 +256,8 @@
   </header>
   {#if plot}
     <svg
+      bind:clientWidth
+      bind:clientHeight
       role="img"
       viewBox={`0 0 ${width} ${height}`}
       aria-label={`${label} on ${topic} over receipt time`}
