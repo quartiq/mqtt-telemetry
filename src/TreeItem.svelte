@@ -124,15 +124,7 @@
         type="button"
         onclick={toggle}>{open ? "▾" : "▸"}</button
       >
-    {:else}
-      <span aria-hidden="true" class="spacer"></span>
-    {/if}
-    {#if context.showActivity}
-      <span aria-hidden="true" class="activity-slot">
-        <span class="activity-dot" use:indicateActivity={activity}></span>
-      </span>
-    {/if}
-    {#if checkable}
+    {:else if checkable}
       <button
         aria-label={checked ? "Remove plot" : "Add plot"}
         aria-pressed={checked}
@@ -147,6 +139,13 @@
         type="button"
         onclick={toggleCheck}>{checked ? "✓" : ""}</button
       >
+    {:else}
+      <span aria-hidden="true" class="spacer"></span>
+    {/if}
+    {#if context.showActivity}
+      <span aria-hidden="true" class="activity-slot">
+        <span class="activity-dot" use:indicateActivity={activity}></span>
+      </span>
     {/if}
     <span class="label">{node.label}</span>
     {#if node.suffix !== undefined}
@@ -230,15 +229,19 @@
     color: inherit;
     flex: 0 0 var(--caret);
     font: inherit;
-    line-height: inherit;
-    margin: 0;
+    line-height: 1;
+    margin: 0 var(--space-tight) 0 0;
     padding: 0;
-    text-align: left;
+    text-align: center;
     width: var(--caret);
   }
 
   .caret {
+    align-items: center;
+    align-self: stretch;
     cursor: pointer;
+    display: flex;
+    justify-content: center;
   }
 
   .label {
