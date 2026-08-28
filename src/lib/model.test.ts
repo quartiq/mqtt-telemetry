@@ -200,6 +200,61 @@ describe("topic history", () => {
     expect(store.history(store.nodeId("b") as string)).toHaveLength(1);
   });
 
+  it("reuses history snapshots until that topic changes", () => {
+    const store = new TelemetryStore(10);
+    store.add("a", encode("1"), { receivedAt: 1, retained: false, qos: 0 });
+    const a = store.nodeId("a") as string;
+    const first = store.history(a);
+
+    expect(store.history(a)).toBe(first);
+    store.add("b", encode("2"), { receivedAt: 2, retained: false, qos: 0 });
+    expect(store.history(a)).toBe(first);
+
+    store.add("a", encode("3"), { receivedAt: 3, retained: false, qos: 0 });
+    const updated = store.history(a);
+    expect(updated).not.toBe(first);
+    expect(updated.map(({ id }) => id)).toEqual([1, 3]);
+  });
+
+  it("refreshes only dirty topic views when taking a snapshot", () => {
+    const store = new TelemetryStore(10);
+    store.add("a/b", encode("1"), {
+      receivedAt: 1,
+      retained: false,
+      qos: 0,
+    });
+    const a = store.nodeId("a") as string;
+    const leaf = store.nodeId("a/b") as string;
+    const initial = store.snapshot();
+    const initialA = initial.nodes.get(a);
+    const initialLeaf = initial.nodes.get(leaf);
+
+    store.add("other", encode("2"), {
+      receivedAt: 2,
+      retained: false,
+      qos: 0,
+    });
+    const unrelated = store.snapshot();
+    expect(unrelated.nodes.get(a)).toBe(initialA);
+    expect(unrelated.nodes.get(leaf)).toBe(initialLeaf);
+
+    store.add("a/b", encode("3"), {
+      receivedAt: 3,
+      retained: false,
+      qos: 0,
+    });
+    store.add("a/b", encode("4"), {
+      receivedAt: 4,
+      retained: false,
+      qos: 0,
+    });
+    const updated = store.snapshot();
+    expect(updated.nodes.get(a)).not.toBe(initialA);
+    expect(updated.nodes.get(leaf)).not.toBe(initialLeaf);
+    expect(updated.nodes.get(a)?.suffix).toBe("(3)");
+    expect(updated.nodes.get(leaf)?.suffix).toBe("(3)");
+  });
+
   it("adjusts the limit immediately", () => {
     const store = new TelemetryStore(3);
     for (let receivedAt = 1; receivedAt <= 3; receivedAt += 1) {
@@ -483,6 +538,24 @@ describe("plot extraction", () => {
     const updated = store.plotSeries(a, "$.v");
     expect(updated).not.toBe(first);
     expect(updated.points.map(({ y }) => y)).toEqual([1, 3]);
+  });
+
+  it("bounds cached plot series to the dashboard capacity", () => {
+    const store = new TelemetryStore(10);
+    const payload = Object.fromEntries(
+      Array.from({ length: 9 }, (_, index) => [`v${index}`, index]),
+    );
+    store.add("a", encode(JSON.stringify(payload)), {
+      receivedAt: 1,
+      retained: false,
+      qos: 0,
+    });
+    const a = store.nodeId("a") as string;
+    const first = store.plotSeries(a, "$.v0");
+    for (let index = 1; index < 9; index += 1)
+      store.plotSeries(a, `$.v${index}`);
+
+    expect(store.plotSeries(a, "$.v0")).not.toBe(first);
   });
 
   it("formats axis values at the tick resolution", () => {

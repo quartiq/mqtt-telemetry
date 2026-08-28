@@ -14,7 +14,7 @@
   } from "./lib/model";
 
   type Props = {
-    messages: TelemetryMessage[];
+    messages: readonly TelemetryMessage[];
     selectedId: number | null;
     field: JsonPath | undefined;
     fieldLabel?: string;

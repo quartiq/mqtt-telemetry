@@ -416,14 +416,14 @@ export function messagePayloadPreview(message: TelemetryMessage): string {
 }
 
 export function plotSeries(
-  history: TelemetryMessage[],
+  history: readonly TelemetryMessage[],
   path: JsonPath,
 ): PlotSeries {
   return plotSeriesAtPath(history, path);
 }
 
 export function plotSeriesPath(
-  history: TelemetryMessage[],
+  history: readonly TelemetryMessage[],
   singularPath: string,
 ): PlotSeries {
   const path = parseJsonPath(singularPath);
@@ -431,7 +431,7 @@ export function plotSeriesPath(
 }
 
 function plotSeriesAtPath(
-  history: TelemetryMessage[],
+  history: readonly TelemetryMessage[],
   path: JsonPath,
 ): PlotSeries {
   const points: PlotPoint[] = [];
@@ -635,7 +635,7 @@ export function downsamplePlotPoints(
   return sampled;
 }
 
-export function messageFrequency(history: TelemetryMessage[]): string {
+export function messageFrequency(history: readonly TelemetryMessage[]): string {
   const segment = history.at(-1)?.segment;
   const live = history
     .filter((message) => !message.retained && message.segment === segment)
@@ -650,7 +650,7 @@ export function messageFrequency(history: TelemetryMessage[]): string {
   return `every ${seconds.toLocaleString(undefined, { maximumSignificantDigits: 3 })} s`;
 }
 
-export function messageSpan(history: TelemetryMessage[]): string {
+export function messageSpan(history: readonly TelemetryMessage[]): string {
   const live = history.filter((message) => !message.retained);
   if (live.length < 2) return "";
   const milliseconds = live.at(-1)!.receivedAt - live[0].receivedAt;
@@ -763,11 +763,14 @@ function truncate(value: string, limit = 256): string {
   return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
 }
 
-const MAX_PLOT_CACHE_ENTRIES = 16;
+const MAX_HISTORY_CACHE_ENTRIES = 8;
+const MAX_PLOT_CACHE_ENTRIES = 8;
 
 export class TelemetryStore {
   private readonly nodes = new Map<string, TopicNode>();
+  private readonly topicIds = new Map<string, string>();
   private readonly views = new Map<string, TreeNodeView>();
+  private readonly dirtyViews = new Set<string>();
   private roots: string[] = [];
   // Map insertion order is arrival order; its first remaining value is oldest.
   private readonly messages = new Map<
@@ -781,6 +784,10 @@ export class TelemetryStore {
   private readonly plotCache = new Map<
     string,
     { historyRevision: number; series: PlotSeries }
+  >();
+  private readonly historyCache = new Map<
+    string,
+    { historyRevision: number; history: readonly TelemetryMessage[] }
   >();
   private historyBytes = 0;
   private sequence = 0;
@@ -809,42 +816,12 @@ export class TelemetryStore {
       qos: 0 | 1 | 2;
     },
   ): { nodeId: string; message: TelemetryMessage } | undefined {
-    const parts = topic.split("/");
-    const ids = parts.map((_, index) => topicId(parts.slice(0, index + 1)));
-    const missing = ids.filter((id) => !this.nodes.has(id)).length;
-    if (this.nodes.size + missing > this.limits.maxTopicNodes) {
+    const nodeId = this.topicIds.get(topic) ?? this.addTopic(topic);
+    if (!nodeId) {
       this.droppedMessages += 1;
       this.revision += 1;
       return undefined;
     }
-    let parent: string | undefined;
-    for (let index = 0; index < parts.length; index += 1) {
-      const currentParts = parts.slice(0, index + 1);
-      const id = ids[index];
-      if (!this.nodes.has(id)) {
-        this.nodes.set(id, {
-          id,
-          label: topicLabel(parts[index]),
-          ...(parent ? { parent } : {}),
-          topic: currentParts.join("/"),
-          children: [],
-          history: [],
-          historyRevision: 0,
-          published: false,
-          messageCount: 0,
-        });
-        this.views.set(id, this.nodeView(id));
-        if (parent) {
-          const parentNode = this.nodes.get(parent) as TopicNode;
-          parentNode.children = this.sorted([...parentNode.children, id]);
-          this.refreshView(parent);
-        } else {
-          this.roots = this.sorted([...this.roots, id]);
-        }
-      }
-      parent = id;
-    }
-    const nodeId = parent as string;
     const node = this.nodes.get(nodeId) as TopicNode;
     if (!node.published) {
       node.published = true;
@@ -901,8 +878,7 @@ export class TelemetryStore {
   }
 
   nodeId(topic: string): string | undefined {
-    const id = topicId(topic.split("/"));
-    return this.nodes.has(id) ? id : undefined;
+    return this.topicIds.get(topic);
   }
 
   topic(id: string): string | undefined {
@@ -913,8 +889,25 @@ export class TelemetryStore {
     return this.nodes.get(id)?.messageCount ?? 0;
   }
 
-  history(id: string): TelemetryMessage[] {
-    return [...(this.nodes.get(id)?.history ?? [])];
+  history(id: string): readonly TelemetryMessage[] {
+    const node = this.nodes.get(id);
+    if (!node) return [];
+    const cached = this.historyCache.get(id);
+    if (cached?.historyRevision === node.historyRevision) {
+      this.historyCache.delete(id);
+      this.historyCache.set(id, cached);
+      return cached.history;
+    }
+
+    const history = [...node.history];
+    this.historyCache.delete(id);
+    this.historyCache.set(id, {
+      historyRevision: node.historyRevision,
+      history,
+    });
+    while (this.historyCache.size > MAX_HISTORY_CACHE_ENTRIES)
+      this.historyCache.delete(this.historyCache.keys().next().value as string);
+    return history;
   }
 
   plotSeries(id: string, singularPath: string): PlotSeries {
@@ -993,6 +986,8 @@ export class TelemetryStore {
   }
 
   snapshot(): TopicSnapshot {
+    for (const id of this.dirtyViews) this.views.set(id, this.nodeView(id));
+    this.dirtyViews.clear();
     return {
       roots: this.roots,
       nodes: this.views,
@@ -1012,6 +1007,43 @@ export class TelemetryStore {
     );
   }
 
+  private addTopic(topic: string): string | undefined {
+    const parts = topic.split("/");
+    const ids = parts.map((_, index) => topicId(parts.slice(0, index + 1)));
+    const missing = ids.filter((id) => !this.nodes.has(id)).length;
+    if (this.nodes.size + missing > this.limits.maxTopicNodes) return undefined;
+
+    let parent: string | undefined;
+    for (let index = 0; index < parts.length; index += 1) {
+      const id = ids[index];
+      if (!this.nodes.has(id)) {
+        const nodeTopic = parts.slice(0, index + 1).join("/");
+        this.nodes.set(id, {
+          id,
+          label: topicLabel(parts[index]),
+          ...(parent ? { parent } : {}),
+          topic: nodeTopic,
+          children: [],
+          history: [],
+          historyRevision: 0,
+          published: false,
+          messageCount: 0,
+        });
+        this.topicIds.set(nodeTopic, id);
+        this.dirtyViews.add(id);
+        if (parent) {
+          const parentNode = this.nodes.get(parent) as TopicNode;
+          parentNode.children = this.sorted([...parentNode.children, id]);
+          this.dirtyViews.add(parent);
+        } else {
+          this.roots = this.sorted([...this.roots, id]);
+        }
+      }
+      parent = id;
+    }
+    return parent;
+  }
+
   private nodeView(id: string): TreeNodeView {
     const node = this.nodes.get(id) as TopicNode;
     const direct = node.history.length;
@@ -1027,16 +1059,12 @@ export class TelemetryStore {
     };
   }
 
-  private refreshView(id: string): void {
-    this.views.set(id, this.nodeView(id));
-  }
-
   private adjustSubtree(id: string, delta: number): void {
     let current: string | undefined = id;
     while (current) {
       const node = this.nodes.get(current) as TopicNode;
       node.messageCount += delta;
-      this.refreshView(current);
+      this.dirtyViews.add(current);
       current = node.parent;
     }
   }
