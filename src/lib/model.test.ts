@@ -203,6 +203,81 @@ describe("topic history", () => {
     expect(store.subtreeMessageCount(store.nodeId("a") as string)).toBe(1);
   });
 
+  it("keeps one retained snapshot outside live count and age limits", () => {
+    const store = new TelemetryStore(1);
+    store.add("a", encode("retained"), {
+      receivedAt: 1000,
+      retained: true,
+      qos: 0,
+    });
+    store.add("a", encode("live 1"), {
+      receivedAt: 2000,
+      retained: false,
+      qos: 0,
+    });
+    store.add("a", encode("live 2"), {
+      receivedAt: 3000,
+      retained: false,
+      qos: 0,
+    });
+    const id = store.nodeId("a") as string;
+
+    expect(
+      store.history(id).map(({ retained, receivedAt }) => ({
+        retained,
+        receivedAt,
+      })),
+    ).toEqual([
+      { retained: true, receivedAt: 1000 },
+      { retained: false, receivedAt: 3000 },
+    ]);
+    expect(store.expireBefore(4000)).toBe(1);
+    expect(store.history(id)).toHaveLength(1);
+    expect(store.history(id)[0].retained).toBe(true);
+    store.clearHistory(id);
+    expect(store.history(id)).toEqual([]);
+  });
+
+  it("replaces a topic's previous retained snapshot", () => {
+    const store = new TelemetryStore(1);
+    store.add("a", encode("old"), {
+      receivedAt: 1000,
+      retained: true,
+      qos: 0,
+    });
+    store.add("a", encode("new"), {
+      receivedAt: 2000,
+      retained: true,
+      qos: 0,
+    });
+    const history = store.history(store.nodeId("a") as string);
+
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ receivedAt: 2000, retained: true });
+  });
+
+  it("still bounds retained snapshots by the hard global budget", () => {
+    const store = new TelemetryStore(1, {
+      maxHistoryBytes: Number.MAX_SAFE_INTEGER,
+      maxHistoryMessages: 1,
+    });
+    store.add("a", encode("1"), { receivedAt: 1, retained: true, qos: 0 });
+    store.add("b", encode("live"), {
+      receivedAt: 2,
+      retained: false,
+      qos: 0,
+    });
+
+    expect(store.history(store.nodeId("a") as string)).toHaveLength(1);
+    expect(store.history(store.nodeId("b") as string)).toEqual([]);
+
+    store.add("b", encode("2"), { receivedAt: 3, retained: true, qos: 0 });
+
+    expect(store.history(store.nodeId("a") as string)).toEqual([]);
+    expect(store.history(store.nodeId("b") as string)).toHaveLength(1);
+    expect(store.snapshot().evictedMessages).toBe(2);
+  });
+
   it("clears one topic without clearing descendants", () => {
     const store = new TelemetryStore(10);
     store.add("a", encode("1"), { receivedAt: 1, retained: false, qos: 0 });

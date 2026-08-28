@@ -34,10 +34,12 @@
 </script>
 
 <div class="retention">
-  <label title="Maximum buffered messages for each topic">
+  <label
+    title="Maximum recent live messages for each topic; the latest retained snapshot is kept separately"
+  >
     Keep
     <input
-      aria-label="Messages kept per topic"
+      aria-label="Live messages kept per topic"
       max={MAX_HISTORY_LIMIT}
       min="1"
       onchange={commit}
@@ -46,12 +48,14 @@
       type="number"
       {value}
     />
-    /topic
+    live/topic
   </label>
-  <label title="Discard locally buffered messages older than this">
+  <label
+    title="Discard locally buffered live messages older than this; retained snapshots are kept separately"
+  >
     for
     <select
-      aria-label="Maximum history age"
+      aria-label="Maximum live history age"
       onchange={commitAge}
       value={ageMs ?? ""}
     >
