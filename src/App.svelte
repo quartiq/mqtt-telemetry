@@ -96,6 +96,7 @@
   let activePassword = "";
   let viewToken = randomId();
   let lastReceivedAt = 0;
+  let lastSegment = 0;
   let renderFrame = 0;
   let plotNow = $state(Date.now());
 
@@ -118,6 +119,18 @@
       : topicExpanded,
   );
   let selectedTopic = $derived(store.topic(selectedTopicId) ?? "");
+  let connectionDraftMatches = $derived(
+    connectionKey({
+      ...route,
+      broker: formBroker.trim(),
+      filters: uniqueFilters(formFilters.split(/\r?\n/)),
+    }) === connectionKey(route) &&
+      username === activeUsername &&
+      password === activePassword,
+  );
+  let canResubscribe = $derived(
+    Boolean(session) && status === "Connected" && connectionDraftMatches,
+  );
   let selectedSubtreeCount = $derived.by(() => {
     revision;
     return selectedTopicId ? store.subtreeMessageCount(selectedTopicId) : 0;
@@ -558,6 +571,7 @@
     jsonExpandedByTopic.clear();
     viewToken = randomId();
     lastReceivedAt = 0;
+    lastSegment = 0;
     plotNow = Date.now();
   }
 
@@ -605,13 +619,16 @@
     });
   }
 
-  async function startConnection(nextRoute: AppRoute) {
+  async function startConnection(nextRoute: AppRoute, preserveData = false) {
     const serial = ++connectSerial;
     const credentials =
       username || password ? { username, password } : undefined;
     session?.close();
-    session = undefined;
-    resetData(nextRoute.historyLimit);
+    if (!preserveData) {
+      session = undefined;
+      resetData(nextRoute.historyLimit);
+    }
+    const segments = new Map<number, number>();
     status = "Connecting";
     error = "";
     try {
@@ -622,9 +639,14 @@
           message: ({ topic, payload, packet, segment }) => {
             if (serial !== connectSerial || packet.cmd !== "publish") return;
             const receivedAt = receiptTime();
+            let historySegment = segments.get(segment);
+            if (historySegment === undefined) {
+              historySegment = ++lastSegment;
+              segments.set(segment, historySegment);
+            }
             const added = store.add(topic, payload, {
               receivedAt,
-              segment,
+              segment: historySegment,
               retained: packet.retain,
               duplicate: packet.dup,
               qos: packet.qos,
@@ -689,6 +711,7 @@
       password === activePassword
     ) {
       editingConnection = false;
+      void startConnection(route, true);
       return;
     }
     editingConnection = false;
@@ -715,6 +738,21 @@
   function submitConnectionEdit(event: SubmitEvent) {
     event.preventDefault();
     connectFromForm();
+  }
+
+  async function resubscribeFromForm() {
+    const current = session;
+    if (!current || !canResubscribe) return;
+    editingConnection = false;
+    status = "Resubscribing";
+    error = "";
+    try {
+      await current.resubscribe();
+    } catch (caught) {
+      if (session !== current) return;
+      status = "Connection error";
+      error = caught instanceof Error ? caught.message : String(caught);
+    }
   }
 
   function changeTimeZone(event: Event) {
@@ -1049,6 +1087,7 @@
         </label>
         <button
           aria-expanded={editingConnection}
+          disabled={status === "Connecting" || status === "Resubscribing"}
           type="button"
           onclick={editingConnection ? cancelConnectionEdit : editConnection}
           >Connection…</button
@@ -1073,7 +1112,20 @@
             bind:password
           />
           <div class="connection-editor-actions">
-            <button type="submit">Apply</button>
+            <button
+              title="Apply these settings and open a new MQTT connection"
+              type="submit">Reconnect</button
+            >
+            <button
+              disabled={!canResubscribe}
+              title={!connectionDraftMatches
+                ? "Reconnect to apply the changed settings first"
+                : status !== "Connected"
+                  ? "Available while connected"
+                  : "Refresh subscriptions and retained messages without disconnecting"}
+              type="button"
+              onclick={resubscribeFromForm}>Resubscribe</button
+            >
             <button type="button" onclick={cancelConnectionEdit}>Cancel</button>
           </div>
         </form>

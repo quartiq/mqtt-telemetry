@@ -87,10 +87,16 @@ export class MqttSession {
     return grants.filter(({ qos }) => qos === 128).map(({ topic }) => topic);
   }
 
-  private async connected(generation: number): Promise<void> {
-    let rejected: string[];
+  private async restoreSubscriptions(
+    generation: number,
+  ): Promise<string[] | undefined> {
     try {
-      rejected = await this.subscribe();
+      const rejected = await this.subscribe();
+      return generation === this.generation &&
+        this.client.connected &&
+        !this.closing
+        ? rejected
+        : undefined;
     } catch (error) {
       if (
         generation === this.generation &&
@@ -104,14 +110,20 @@ export class MqttSession {
           error: error instanceof Error ? error.message : String(error),
         });
       }
-      return;
+      return undefined;
     }
-    if (
-      generation === this.generation &&
-      this.client.connected &&
-      !this.closing
-    )
-      this.callbacks.status({ state: "connected", rejected });
+  }
+
+  private async connected(generation: number): Promise<void> {
+    const rejected = await this.restoreSubscriptions(generation);
+    if (rejected) this.callbacks.status({ state: "connected", rejected });
+  }
+
+  async resubscribe(): Promise<void> {
+    if (this.closing || !this.client.connected)
+      throw new Error("Cannot resubscribe while disconnected.");
+    const rejected = await this.restoreSubscriptions(this.generation);
+    if (rejected) this.callbacks.status({ state: "connected", rejected });
   }
 
   static async connect(
