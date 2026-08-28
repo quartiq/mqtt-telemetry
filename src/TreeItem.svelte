@@ -229,15 +229,19 @@
     color: inherit;
     flex: 0 0 var(--caret);
     font: inherit;
-    line-height: inherit;
-    margin: 0;
+    line-height: 1;
+    margin: 0 var(--space-tight) 0 0;
     padding: 0;
-    text-align: left;
+    text-align: center;
     width: var(--caret);
   }
 
   .caret {
+    align-items: center;
+    align-self: stretch;
     cursor: pointer;
+    display: flex;
+    justify-content: center;
   }
 
   .label {
@@ -280,6 +284,7 @@
     font-size: 0.75rem;
     height: 1rem;
     line-height: 0.8rem;
+    margin-right: var(--space-tight);
     min-height: 1rem;
     padding: 0;
     width: 1rem;
