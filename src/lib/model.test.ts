@@ -8,6 +8,7 @@ import {
   formatPlotTick,
   formatTelemetryTime,
   getJsonPath,
+  historyNeedsDate,
   jsonPath,
   jsonTree,
   messagePayloadPreview,
@@ -63,6 +64,34 @@ describe("payloads and JSON fields", () => {
       displayDatesDiffer(
         Date.UTC(2026, 7, 27, 23),
         Date.UTC(2026, 7, 28, 0),
+        "utc",
+      ),
+    ).toBe(true);
+  });
+
+  it("shows dates for old single-day history and histories crossing a date", () => {
+    const now = Date.UTC(2026, 7, 28, 12);
+    expect(
+      historyNeedsDate(
+        [message(1, Date.UTC(2026, 7, 27, 18), "1")],
+        now,
+        "utc",
+      ),
+    ).toBe(true);
+    expect(
+      historyNeedsDate(
+        [message(1, Date.UTC(2026, 7, 28, 10), "1")],
+        now,
+        "utc",
+      ),
+    ).toBe(false);
+    expect(
+      historyNeedsDate(
+        [
+          message(1, Date.UTC(2026, 7, 27, 23), "1"),
+          message(2, Date.UTC(2026, 7, 28, 0), "2"),
+        ],
+        now,
         "utc",
       ),
     ).toBe(true);
@@ -428,6 +457,34 @@ describe("topic history", () => {
 });
 
 describe("plot extraction", () => {
+  it("reuses cached series until that topic's history changes", () => {
+    const store = new TelemetryStore(10);
+    store.add("a", encode('{"v":1}'), {
+      receivedAt: 1,
+      retained: false,
+      qos: 0,
+    });
+    const a = store.nodeId("a") as string;
+    const first = store.plotSeries(a, "$.v");
+
+    expect(store.plotSeries(a, "$.v")).toBe(first);
+    store.add("b", encode('{"v":2}'), {
+      receivedAt: 2,
+      retained: false,
+      qos: 0,
+    });
+    expect(store.plotSeries(a, "$.v")).toBe(first);
+
+    store.add("a", encode('{"v":3}'), {
+      receivedAt: 3,
+      retained: false,
+      qos: 0,
+    });
+    const updated = store.plotSeries(a, "$.v");
+    expect(updated).not.toBe(first);
+    expect(updated.points.map(({ y }) => y)).toEqual([1, 3]);
+  });
+
   it("formats axis values at the tick resolution", () => {
     expect(formatPlotNumber(1.000000002, 1e-9)).toBe("1.000000002");
     expect(formatPlotNumber(103_403.8, 0.03)).toBe("103403.8");

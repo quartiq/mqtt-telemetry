@@ -2,8 +2,8 @@
 
 <script lang="ts">
   import {
-    displayDatesDiffer,
     formatTelemetryTime,
+    historyNeedsDate,
     messagePayloadPreview,
     messageFrequency,
     messageSpan,
@@ -69,12 +69,7 @@
     return ids;
   });
   let showDate = $derived.by(() => {
-    if (messages.length < 2) return false;
-    return displayDatesDiffer(
-      messages[0].receivedAt,
-      messages.at(-1)!.receivedAt,
-      timeZone,
-    );
+    return historyNeedsDate(messages, Date.now(), timeZone);
   });
 
   function timestamp(value: number): string {
@@ -172,13 +167,18 @@
               onclick={(event) => selectRow(event, message.id)}
               onkeydown={(event) => keydown(event, message.id)}
             >
+              <td>{timestamp(message.receivedAt)}</td>
               <td
-                >{message.retained
-                  ? "retained"
-                  : timestamp(message.receivedAt)}</td
-              >
-              <td title={message.duplicate ? "Possible MQTT redelivery" : ""}
-                >QoS {message.qos}{message.duplicate ? " · DUP" : ""}</td
+                title={[
+                  `QoS ${message.qos}`,
+                  message.retained ? "Retained message" : "",
+                  message.duplicate ? "Possible MQTT redelivery" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+                >{message.retained ? "retained · " : ""}QoS {message.qos}{message.duplicate
+                  ? " · DUP"
+                  : ""}</td
               >
               <td title={value}>{value}</td>
             </tr>
@@ -264,7 +264,7 @@
 
   th:nth-child(2),
   td:nth-child(2) {
-    width: 6.5rem;
+    width: 7.5rem;
   }
 
   tbody .message-row {

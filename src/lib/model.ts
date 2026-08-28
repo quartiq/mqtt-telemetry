@@ -31,6 +31,7 @@ type TopicNode = {
   topic: string;
   children: string[];
   history: TelemetryMessage[];
+  historyRevision: number;
   latestRetainedId?: number;
   published: boolean;
   messageCount: number;
@@ -137,6 +138,20 @@ export function displayDatesDiffer(
     ...(timeZone === "utc" ? { timeZone: "UTC" } : {}),
   });
   return formatter.format(left) !== formatter.format(right);
+}
+
+export function historyNeedsDate(
+  messages: readonly TelemetryMessage[],
+  now: number,
+  timeZone: DisplayTimeZone,
+): boolean {
+  if (!messages.length) return false;
+  const first = messages[0].receivedAt;
+  const last = messages.at(-1)!.receivedAt;
+  return (
+    displayDatesDiffer(first, last, timeZone) ||
+    displayDatesDiffer(last, now, timeZone)
+  );
 }
 
 function topicId(parts: string[]): string {
@@ -404,19 +419,25 @@ export function plotSeries(
   history: TelemetryMessage[],
   path: JsonPath,
 ): PlotSeries {
-  return plotSeriesPath(history, jsonPath(path));
+  return plotSeriesAtPath(history, path);
 }
 
 export function plotSeriesPath(
   history: TelemetryMessage[],
   singularPath: string,
 ): PlotSeries {
+  const path = parseJsonPath(singularPath);
+  return path ? plotSeriesAtPath(history, path) : emptyPlotSeries();
+}
+
+function plotSeriesAtPath(
+  history: TelemetryMessage[],
+  path: JsonPath,
+): PlotSeries {
   const points: PlotPoint[] = [];
   let retainedExcluded = 0;
   for (const message of history) {
     if (message.payload.kind !== "json") continue;
-    const path = resolveJsonPath(message.payload.value, singularPath);
-    if (!path) continue;
     const value = getJsonPath(message.payload.value, path);
     if (typeof value !== "number" || !Number.isFinite(value)) continue;
     if (message.retained) retainedExcluded += 1;
@@ -428,6 +449,10 @@ export function plotSeriesPath(
       });
   }
   return { points, retainedExcluded };
+}
+
+function emptyPlotSeries(): PlotSeries {
+  return { points: [], retainedExcluded: 0 };
 }
 
 export function plotStatistics(
@@ -738,6 +763,8 @@ function truncate(value: string, limit = 256): string {
   return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
 }
 
+const MAX_PLOT_CACHE_ENTRIES = 16;
+
 export class TelemetryStore {
   private readonly nodes = new Map<string, TopicNode>();
   private readonly views = new Map<string, TreeNodeView>();
@@ -750,6 +777,10 @@ export class TelemetryStore {
   private readonly expirable = new Map<
     number,
     { nodeId: string; cost: number; receivedAt: number }
+  >();
+  private readonly plotCache = new Map<
+    string,
+    { historyRevision: number; series: PlotSeries }
   >();
   private historyBytes = 0;
   private sequence = 0;
@@ -798,6 +829,7 @@ export class TelemetryStore {
           topic: currentParts.join("/"),
           children: [],
           history: [],
+          historyRevision: 0,
           published: false,
           messageCount: 0,
         });
@@ -848,6 +880,7 @@ export class TelemetryStore {
       if (previous) this.removeMessages(nodeId, [previous], false);
     }
     node.history.push(message);
+    node.historyRevision += 1;
     if (metadata.retained) node.latestRetainedId = message.id;
     const stored = {
       nodeId,
@@ -882,6 +915,29 @@ export class TelemetryStore {
 
   history(id: string): TelemetryMessage[] {
     return [...(this.nodes.get(id)?.history ?? [])];
+  }
+
+  plotSeries(id: string, singularPath: string): PlotSeries {
+    const node = this.nodes.get(id);
+    if (!node) return emptyPlotSeries();
+    const key = JSON.stringify([id, singularPath]);
+    const cached = this.plotCache.get(key);
+    if (cached?.historyRevision === node.historyRevision) {
+      // Refresh insertion order so abandoned dashboard fields age out.
+      this.plotCache.delete(key);
+      this.plotCache.set(key, cached);
+      return cached.series;
+    }
+
+    const path = parseJsonPath(singularPath);
+    const series = path
+      ? plotSeriesAtPath(node.history, path)
+      : emptyPlotSeries();
+    this.plotCache.delete(key);
+    this.plotCache.set(key, { historyRevision: node.historyRevision, series });
+    while (this.plotCache.size > MAX_PLOT_CACHE_ENTRIES)
+      this.plotCache.delete(this.plotCache.keys().next().value as string);
+    return series;
   }
 
   setHistoryLimit(limit: number): void {
@@ -1011,6 +1067,7 @@ export class TelemetryStore {
     const node = this.nodes.get(nodeId) as TopicNode;
     const ids = new Set(removed.map(({ id }) => id));
     node.history = node.history.filter(({ id }) => !ids.has(id));
+    node.historyRevision += 1;
     for (const message of removed) {
       const stored = this.messages.get(message.id);
       if (!stored) continue;

@@ -16,7 +16,6 @@
     jsonPath,
     jsonTree,
     parseJsonPath,
-    plotSeriesPath,
     resolveJsonPath,
     telemetryPageTitle,
     type DisplayTimeZone,
@@ -204,18 +203,10 @@
     revision;
     return route.plots.map<DashboardPlot>((plot) => {
       const nodeId = store.nodeId(plot.topic);
-      const history = nodeId ? store.history(nodeId) : [];
-      const series = plotSeriesPath(history, plot.path);
-      let label = plot.path;
-      for (let index = history.length - 1; index >= 0; index -= 1) {
-        const payload = history[index].payload;
-        if (payload.kind !== "json") continue;
-        const resolved = resolveJsonPath(payload.value, plot.path);
-        if (resolved) {
-          label = fieldLabel(resolved);
-          break;
-        }
-      }
+      const series = nodeId
+        ? store.plotSeries(nodeId, plot.path)
+        : { points: [], retainedExcluded: 0 };
+      const label = fieldLabel(parseJsonPath(plot.path) ?? []);
       return {
         ...plot,
         key: plotKey(plot),
