@@ -4,7 +4,11 @@ A read-only MQTT JSON telemetry browser with bounded history and up to eight liv
 
 ## Use
 
-Open <https://telemetry.quartiq.de/> and enter an MQTT-over-WebSocket URL. Use one subscription filter per line. MQTT excludes `$` topics from `#`; subscribe to `$SYS/#` explicitly when needed.
+Start with the [live EMQX `dt/#` view with one-hour history](https://telemetry.quartiq.de/?broker=wss://broker.emqx.io:8084/mqtt&sub=dt/%23&history=1000&age=1h), which connects and subscribes immediately.
+
+For another broker, open <https://telemetry.quartiq.de/> and enter its MQTT-over-WebSocket URL, with one subscription filter per line. MQTT excludes `$` topics from `#`; subscribe to `$SYS/#` explicitly when needed.
+
+Launch URLs accept `broker`, repeated `sub`, `history`, and an optional `age` using `s`, `m`, `h`, or `d`. Encode MQTT wildcards as `%23` and `%2B`. These URLs omit plots and credentials; use dashboard JSON to share a complete dashboard.
 
 Select a value to inspect its history. Toggle the square beside a numeric field to plot it. Topic search is a case-insensitive substring search unless it contains MQTT `+` or `#` wildcards.
 
@@ -18,7 +22,7 @@ For a LAN broker that only provides `ws://`, save the hosted page as **Webpage, 
 
 ### Data and reconnect behavior
 
-History exists only in the current tab. It defaults to 1,000 live messages per topic and is also globally bounded; payloads over 1 MiB are omitted. The latest retained snapshot for each topic is kept outside the count and age limits, but not plotted because its original publication time is unknown. Clear actions affect only this tab.
+History exists only in the current tab. It defaults to 1,000 live messages per topic and is also globally bounded; payloads over 1 MiB are omitted. The latest retained snapshot for each topic is kept outside the count and age limits, but not plotted because its original publication time is unknown. History count and maximum age delete local samples; the independent plot window only limits the visible interval and its statistics. Clear actions affect only this tab.
 
 After a connection has been established, transport failures are retried and subscriptions are restored before the application reports connected. These are clean MQTT sessions: live QoS 0 traffic sent while disconnected is not recoverable. History marks reconnect gaps and plots do not join across them. An initial connection failure or a failed resubscription requires explicit user action.
 

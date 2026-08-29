@@ -1,5 +1,6 @@
 import { jsonPath, parseJsonPath, type DisplayTimeZone } from "./model";
 import {
+  DEFAULT_PLOT_WINDOW_MS,
   MAX_HISTORY_AGE_SECONDS,
   MAX_HISTORY_LIMIT,
   MAX_PLOTS,
@@ -22,6 +23,7 @@ export type Dashboard = {
   };
   display: {
     timeZone: DisplayTimeZone;
+    plotWindowSeconds: number | null;
   };
   plots: PlotRef[];
 };
@@ -37,7 +39,11 @@ export function dashboardFromRoute(route: AppRoute): Dashboard {
       maxAgeSeconds:
         route.historyAgeMs === null ? null : route.historyAgeMs / 1000,
     },
-    display: { timeZone: route.timeZone },
+    display: {
+      timeZone: route.timeZone,
+      plotWindowSeconds:
+        route.plotWindowMs === null ? null : route.plotWindowMs / 1000,
+    },
     plots: route.plots.map(({ topic, path }) => ({ topic, path })),
   };
 }
@@ -53,6 +59,10 @@ export function routeFromDashboard(dashboard: Dashboard): AppRoute {
         ? null
         : dashboard.retention.maxAgeSeconds * 1000,
     timeZone: dashboard.display.timeZone,
+    plotWindowMs:
+      dashboard.display.plotWindowSeconds === null
+        ? null
+        : dashboard.display.plotWindowSeconds * 1000,
     selectedTopic: focus?.topic ?? "",
     fieldPath: focus?.path ?? null,
     plots: dashboard.plots,
@@ -99,14 +109,24 @@ export function parseDashboard(value: unknown): Dashboard {
   if (age !== null && !integerBetween(age, 1, MAX_HISTORY_AGE_SECONDS))
     throw new Error("Dashboard history age is invalid.");
   const display = value.display;
+  if (display !== undefined && !isRecord(display))
+    throw new Error("Dashboard display settings are invalid.");
   const timeZone =
     display === undefined
       ? "local"
-      : isRecord(display) &&
-          (display.timeZone === "local" || display.timeZone === "utc")
+      : display.timeZone === "local" || display.timeZone === "utc"
         ? display.timeZone
         : undefined;
   if (!timeZone) throw new Error("Dashboard display time zone is invalid.");
+  const plotWindowSeconds =
+    display?.plotWindowSeconds === undefined
+      ? DEFAULT_PLOT_WINDOW_MS / 1000
+      : display.plotWindowSeconds;
+  if (
+    plotWindowSeconds !== null &&
+    !integerBetween(plotWindowSeconds, 1, MAX_HISTORY_AGE_SECONDS)
+  )
+    throw new Error("Dashboard plot window is invalid.");
   if (!Array.isArray(value.plots) || value.plots.length > MAX_PLOTS)
     throw new Error(`A dashboard can contain at most ${MAX_PLOTS} plots.`);
 
@@ -139,7 +159,7 @@ export function parseDashboard(value: unknown): Dashboard {
       messagesPerTopic: messages,
       maxAgeSeconds: age,
     },
-    display: { timeZone },
+    display: { timeZone, plotWindowSeconds },
     plots,
   };
 }

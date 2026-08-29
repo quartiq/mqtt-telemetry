@@ -1,6 +1,7 @@
 import type { DisplayTimeZone } from "./model";
 
 export const DEFAULT_HISTORY_LIMIT = 1000;
+export const DEFAULT_PLOT_WINDOW_MS = 10 * 60 * 1000;
 export const MAX_HISTORY_LIMIT = 10_000;
 export const MAX_HISTORY_AGE_SECONDS = 365 * 24 * 60 * 60;
 export const MAX_PLOTS = 8;
@@ -8,11 +9,17 @@ export const DEFAULT_FILTER = "#";
 
 export type PlotRef = { topic: string; path: string };
 
+export type LaunchRoute =
+  | { kind: "absent" }
+  | { kind: "valid"; route: AppRoute }
+  | { kind: "invalid"; error: string };
+
 export type AppRoute = {
   broker: string;
   filters: string[];
   historyLimit: number;
   historyAgeMs: number | null;
+  plotWindowMs: number | null;
   timeZone: DisplayTimeZone;
   selectedTopic: string;
   fieldPath: string | null;
@@ -25,6 +32,7 @@ export function defaultRoute(): AppRoute {
     filters: [DEFAULT_FILTER],
     historyLimit: DEFAULT_HISTORY_LIMIT,
     historyAgeMs: null,
+    plotWindowMs: DEFAULT_PLOT_WINDOW_MS,
     timeZone: "local",
     selectedTopic: "",
     fieldPath: null,
@@ -61,4 +69,121 @@ export function isWebSocketBroker(
 
 export function connectionKey(route: AppRoute): string {
   return JSON.stringify([route.broker, uniqueFilters(route.filters)]);
+}
+
+export function readLaunchRoute(
+  location: Pick<Location, "href" | "search" | "hash" | "protocol">,
+): LaunchRoute {
+  const parameters = new URLSearchParams(location.search);
+  const names = ["broker", "sub", "history", "age"];
+  const present = names.some((name) => parameters.has(name));
+  if (!present) return { kind: "absent" };
+
+  if (location.hash || location.href.endsWith("#"))
+    return launchError(
+      "Encode MQTT # wildcards in subscription parameters as %23.",
+    );
+  if (/[?&]sub=[^&]*\+/.test(location.search))
+    return launchError(
+      "Encode MQTT + wildcards in subscription parameters as %2B.",
+    );
+  for (const name of ["broker", "history", "age"])
+    if (parameters.getAll(name).length > 1)
+      return launchError(`URL parameter ${name} may appear only once.`);
+
+  const broker = parameters.get("broker") ?? "";
+  const filters = parameters.getAll("sub");
+  if (!broker || !filters.length || filters.some((filter) => !filter))
+    return launchError(
+      "A launch URL needs one broker and at least one non-empty sub parameter.",
+    );
+  const brokerError = isWebSocketBroker(broker, location.protocol);
+  if (brokerError) return launchError(brokerError);
+
+  const historyValue = parameters.get("history");
+  const historyLimit =
+    historyValue === null ? DEFAULT_HISTORY_LIMIT : Number(historyValue);
+  if (
+    historyValue !== null &&
+    (!/^\d+$/.test(historyValue) ||
+      !Number.isSafeInteger(historyLimit) ||
+      historyLimit < 1 ||
+      historyLimit > MAX_HISTORY_LIMIT)
+  )
+    return launchError(
+      `URL history must be an integer from 1 to ${MAX_HISTORY_LIMIT}.`,
+    );
+
+  const ageValue = parameters.get("age");
+  const historyAgeMs = ageValue === null ? null : parseAge(ageValue);
+  if (ageValue !== null && historyAgeMs === undefined)
+    return launchError(
+      "URL age must be a positive duration such as 10m, 1h, or 7d.",
+    );
+
+  return {
+    kind: "valid",
+    route: {
+      ...defaultRoute(),
+      broker,
+      filters: uniqueFilters(filters),
+      historyLimit,
+      historyAgeMs: historyAgeMs ?? null,
+    },
+  };
+}
+
+export function launchUrl(
+  route: AppRoute,
+  location: Pick<Location, "href">,
+): string {
+  const url = new URL(location.href);
+  url.search = "";
+  url.hash = "";
+  if (!route.broker) return url.href;
+
+  const parameters = new URLSearchParams();
+  parameters.set("broker", route.broker);
+  for (const filter of uniqueFilters(route.filters))
+    parameters.append("sub", filter);
+  parameters.set("history", String(route.historyLimit));
+  if (route.historyAgeMs !== null)
+    parameters.set("age", formatAge(route.historyAgeMs));
+  url.search = readableSearch(parameters);
+  return url.href;
+}
+
+function launchError(error: string): LaunchRoute {
+  return { kind: "invalid", error };
+}
+
+function parseAge(value: string): number | undefined {
+  const match = /^([1-9]\d*)(s|m|h|d)$/.exec(value);
+  if (!match) return undefined;
+  const unit = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[
+    match[2] as "s" | "m" | "h" | "d"
+  ];
+  const milliseconds = Number(match[1]) * unit;
+  return Number.isSafeInteger(milliseconds) &&
+    milliseconds <= MAX_HISTORY_AGE_SECONDS * 1000
+    ? milliseconds
+    : undefined;
+}
+
+function formatAge(milliseconds: number): string {
+  for (const [suffix, unit] of [
+    ["d", 86_400_000],
+    ["h", 3_600_000],
+    ["m", 60_000],
+    ["s", 1000],
+  ] as const)
+    if (milliseconds % unit === 0) return `${milliseconds / unit}${suffix}`;
+  return `${milliseconds / 1000}s`;
+}
+
+function readableSearch(parameters: URLSearchParams): string {
+  return parameters
+    .toString()
+    .replaceAll("+", "%20")
+    .replace(/%(?:3A|2F|24|3F|3D|5B|5D)/g, decodeURIComponent);
 }

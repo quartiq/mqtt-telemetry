@@ -9,6 +9,7 @@
     formatTelemetryTime,
     nearestPlotPoint,
     nicePlotScale,
+    plotPointInsertionIndex,
     plotStatistics,
     timeTickValues,
     type PlotPoint,
@@ -31,6 +32,8 @@
     onmoveearlier: () => void;
     onmovelater: () => void;
     onremove: () => void;
+    windowLabel?: string;
+    onshowall: () => void;
   };
   let {
     points,
@@ -48,6 +51,8 @@
     onmoveearlier,
     onmovelater,
     onremove,
+    windowLabel,
+    onshowall,
   }: Props = $props();
 
   const left = 82;
@@ -58,12 +63,19 @@
   let clientHeight = $state(220);
   let width = $derived(Math.max(clientWidth, left + right + 1));
   let height = $derived(Math.max(clientHeight, top + bottom + 1));
+  let visibleStart = $derived(plotPointInsertionIndex(points, xMin));
+  let visibleEnd = $derived(plotPointInsertionIndex(points, xMax, true));
+  let visiblePoints = $derived.by(() =>
+    visibleStart === 0 && visibleEnd === points.length
+      ? points
+      : points.slice(visibleStart, visibleEnd),
+  );
   let displayPoints = $derived(
-    downsamplePlotPoints(points, width - left - right),
+    downsamplePlotPoints(visiblePoints, width - left - right),
   );
   let vertical = $derived.by(() => {
-    if (!points.length) return undefined;
-    const summary = plotStatistics(points)!;
+    if (!visiblePoints.length) return undefined;
+    const summary = plotStatistics(visiblePoints)!;
     const yScale = nicePlotScale(summary.low, summary.high);
     return {
       summary,
@@ -131,8 +143,9 @@
   });
   let gaps = $derived.by(() => {
     let count = 0;
-    for (let index = 1; index < points.length; index += 1) {
-      if (points[index - 1].segment !== points[index].segment) count += 1;
+    for (let index = 1; index < visiblePoints.length; index += 1) {
+      if (visiblePoints[index - 1].segment !== visiblePoints[index].segment)
+        count += 1;
     }
     return count;
   });
@@ -142,7 +155,7 @@
       inspectTime < plot.xMin ||
       inspectTime > plot.xMax
       ? undefined
-      : nearestPlotPoint(points, inspectTime),
+      : nearestPlotPoint(visiblePoints, inspectTime),
   );
   let inspectionMarker = $derived.by(() => {
     if (!plot || inspectTime === undefined || !inspection) return undefined;
@@ -184,7 +197,7 @@
       items.push(
         `σ ${formatPlotNumber(standardDeviation, Math.min(vertical.step, standardDeviation || vertical.step))}`,
       );
-      items.push(`n ${points.length.toLocaleString()}`);
+      items.push(`n ${visiblePoints.length.toLocaleString()}`);
     }
     if (retainedExcluded)
       items.push(`${retainedExcluded.toLocaleString()} retained excluded`);
@@ -339,8 +352,13 @@
     </svg>
   {:else}
     <p class="empty">
-      Waiting for live numeric samples. The plot will resume when this field
-      appears.
+      {#if points.length && windowLabel}
+        No samples in {windowLabel}.
+        <button type="button" onclick={onshowall}>Show all history</button>
+      {:else}
+        Waiting for live numeric samples. The plot will resume when this field
+        appears.
+      {/if}
     </p>
   {/if}
 </section>

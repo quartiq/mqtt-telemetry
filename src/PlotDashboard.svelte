@@ -8,6 +8,7 @@
     type PlotPoint,
   } from "./lib/model";
   import type { PlotRef } from "./lib/routes";
+  import { formatDuration } from "./lib/duration";
 
   export type DashboardPlot = PlotRef & {
     key: string;
@@ -19,16 +20,28 @@
   type Props = {
     plots: DashboardPlot[];
     now: number;
-    ageMs: number | null;
+    windowMs: number | null;
     timeZone: DisplayTimeZone;
     onfocus: (plot: PlotRef) => void;
     onmove: (plot: PlotRef, offset: -1 | 1) => void;
     onremove: (plot: PlotRef) => void;
+    onshowall: () => void;
   };
 
-  let { plots, now, ageMs, timeZone, onfocus, onmove, onremove }: Props =
-    $props();
-  let domain = $derived(plotTimeDomain(plots, now, ageMs));
+  let {
+    plots,
+    now,
+    windowMs,
+    timeZone,
+    onfocus,
+    onmove,
+    onremove,
+    onshowall,
+  }: Props = $props();
+  let domain = $derived(plotTimeDomain(plots, now, windowMs));
+  let windowLabel = $derived(
+    windowMs === null ? undefined : `the last ${formatDuration(windowMs)}`,
+  );
   let inspectTime = $state<number | undefined>();
 </script>
 
@@ -52,6 +65,8 @@
           onmoveearlier={() => onmove(plot, -1)}
           onmovelater={() => onmove(plot, 1)}
           onremove={() => onremove(plot)}
+          {windowLabel}
+          {onshowall}
         />
       {/each}
     </div>
