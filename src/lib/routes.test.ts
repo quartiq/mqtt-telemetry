@@ -5,6 +5,8 @@ import {
   connectionKey,
   defaultRoute,
   isWebSocketBroker,
+  launchUrl,
+  readLaunchRoute,
   uniqueFilters,
 } from "./routes";
 
@@ -67,5 +69,95 @@ describe("route configuration", () => {
       isWebSocketBroker("wss://user:secret@broker.example", "https:"),
     ).toContain("credentials");
     expect(isWebSocketBroker("localhost", "http:")).toContain("complete");
+  });
+
+  it("reads a complete launch query with repeated subscriptions", () => {
+    expect(
+      readLaunchRoute({
+        href: "https://telemetry.example/?broker=wss://broker.example/mqtt&sub=dt/%23&sub=$SYS/%23&history=250&age=1h",
+        search:
+          "?broker=wss://broker.example/mqtt&sub=dt/%23&sub=$SYS/%23&history=250&age=1h",
+        hash: "",
+        protocol: "https:",
+      }),
+    ).toMatchObject({
+      present: true,
+      route: {
+        broker: "wss://broker.example/mqtt",
+        filters: ["dt/#", "$SYS/#"],
+        historyLimit: 250,
+        historyAgeMs: 3_600_000,
+        plots: [],
+      },
+    });
+  });
+
+  it("writes a readable canonical launch URL with only necessary escaping", () => {
+    expect(
+      launchUrl(
+        {
+          ...defaultRoute(),
+          broker: "wss://broker.example/mqtt?token=a/b",
+          filters: ["dt/+/#", "$SYS/#"],
+          historyLimit: 250,
+          historyAgeMs: 3_600_000,
+        },
+        { href: "https://telemetry.example/old?discard=1#old" } as Location,
+      ),
+    ).toBe(
+      "https://telemetry.example/old?broker=wss://broker.example/mqtt?token=a/b&sub=dt/%2B/%23&sub=$SYS/%23&history=250&age=1h",
+    );
+  });
+
+  it("rejects ambiguous wildcards and invalid launch limits", () => {
+    const base = {
+      protocol: "https:",
+      hash: "",
+      href: "https://telemetry.example/",
+    };
+    expect(
+      readLaunchRoute({
+        ...base,
+        search: "?broker=wss://broker.example&sub=dt/+",
+      }).error,
+    ).toContain("%2B");
+    expect(
+      readLaunchRoute({
+        ...base,
+        href: "https://telemetry.example/?broker=wss://broker.example&sub=dt/#",
+        search: "?broker=wss://broker.example&sub=dt/",
+      }).error,
+    ).toContain("%23");
+    expect(
+      readLaunchRoute({
+        ...base,
+        hash: "#&history=250",
+        href: "https://telemetry.example/?broker=wss://broker.example&sub=dt/#&history=250",
+        search: "?broker=wss://broker.example&sub=dt/",
+      }).error,
+    ).toContain("%23");
+    expect(
+      readLaunchRoute({
+        ...base,
+        search: "?broker=wss://broker.example&sub=dt/%23&history=0",
+      }).error,
+    ).toContain("history");
+    expect(
+      readLaunchRoute({
+        ...base,
+        search: "?broker=wss://broker.example&sub=dt/%23&age=1week",
+      }).error,
+    ).toContain("age");
+  });
+
+  it("does not turn an incomplete query into a wildcard connection", () => {
+    expect(
+      readLaunchRoute({
+        href: "https://telemetry.example/?broker=wss://broker.example&history=1000",
+        search: "?broker=wss://broker.example&history=1000",
+        hash: "",
+        protocol: "https:",
+      }),
+    ).toMatchObject({ present: true, error: expect.any(String) });
   });
 });

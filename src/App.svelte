@@ -38,7 +38,9 @@
     connectionKey,
     defaultRoute,
     isWebSocketBroker,
+    launchUrl,
     MAX_PLOTS,
+    readLaunchRoute,
     uniqueFilters,
     type AppRoute,
     type PlotRef,
@@ -60,10 +62,12 @@
   };
 
   const inlineDashboard = readInlineDashboard(location.hash);
+  const launchRoute = readLaunchRoute(location);
   const storedRoute = routeFromViewState(history.state);
   const initialRoute = inlineDashboard.dashboard
     ? routeFromDashboard(inlineDashboard.dashboard)
-    : (storedRoute ?? defaultRoute());
+    : (launchRoute.route ??
+      (launchRoute.present ? defaultRoute() : (storedRoute ?? defaultRoute())));
   let route = $state(initialRoute);
   let formBroker = $state(initialRoute.broker);
   let formFilters = $state(initialRoute.filters.join("\n"));
@@ -87,7 +91,11 @@
   let jsonExpanded = $state(new Set<string>(["$"]));
   const jsonExpandedByTopic = new Map<string, Set<string>>();
   let status = $state("Idle");
-  let error = $state(inlineDashboard.error ?? "");
+  let error = $state(
+    inlineDashboard.present
+      ? (inlineDashboard.error ?? "")
+      : (launchRoute.error ?? ""),
+  );
   let dashboardNotice = $state("");
   let editingConnection = $state(false);
   let dashboardFileInput: HTMLInputElement;
@@ -101,7 +109,11 @@
   let plotNow = $state(Date.now());
 
   if (location.search || location.hash || !storedRoute)
-    history.replaceState(historyState(null), "", cleanUrl());
+    history.replaceState(
+      historyState(null),
+      "",
+      launchUrl(initialRoute, location),
+    );
 
   let topicSnapshot = $derived.by(() => {
     revision;
@@ -360,13 +372,6 @@
     };
   });
 
-  function cleanUrl(): string {
-    const url = new URL(location.href);
-    url.search = "";
-    url.hash = "";
-    return url.href;
-  }
-
   function readInlineDashboard(hash: string): {
     present: boolean;
     dashboard?: Dashboard;
@@ -445,7 +450,11 @@
   ) {
     route = next;
     const method = replace ? "replaceState" : "pushState";
-    history[method](historyState(messageId, next), "", cleanUrl());
+    history[method](
+      historyState(messageId, next),
+      "",
+      launchUrl(next, location),
+    );
   }
 
   function replaceRoute(next: AppRoute, messageId: number | null) {

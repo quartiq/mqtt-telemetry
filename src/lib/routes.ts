@@ -9,6 +9,12 @@ export const DEFAULT_FILTER = "#";
 
 export type PlotRef = { topic: string; path: string };
 
+export type LaunchRoute = {
+  present: boolean;
+  route?: AppRoute;
+  error?: string;
+};
+
 export type AppRoute = {
   broker: string;
   filters: string[];
@@ -64,4 +70,140 @@ export function isWebSocketBroker(
 
 export function connectionKey(route: AppRoute): string {
   return JSON.stringify([route.broker, uniqueFilters(route.filters)]);
+}
+
+export function readLaunchRoute(
+  location: Pick<Location, "href" | "search" | "hash" | "protocol">,
+): LaunchRoute {
+  const parameters = new URLSearchParams(location.search);
+  const names = ["broker", "sub", "history", "age"];
+  const present = names.some((name) => parameters.has(name));
+  if (!present) return { present: false };
+
+  if (location.hash || location.href.endsWith("#"))
+    return launchError(
+      "Encode MQTT # wildcards in subscription parameters as %23.",
+    );
+  if (rawParameterContains(location.search, "sub", "+"))
+    return launchError(
+      "Encode MQTT + wildcards in subscription parameters as %2B.",
+    );
+  for (const name of ["broker", "history", "age"])
+    if (parameters.getAll(name).length > 1)
+      return launchError(`URL parameter ${name} may appear only once.`);
+
+  const broker = parameters.get("broker") ?? "";
+  const filters = parameters.getAll("sub");
+  if (!broker || !filters.length || filters.some((filter) => !filter))
+    return launchError(
+      "A launch URL needs one broker and at least one non-empty sub parameter.",
+    );
+  const brokerError = isWebSocketBroker(broker, location.protocol);
+  if (brokerError) return launchError(brokerError);
+
+  const historyValue = parameters.get("history");
+  const historyLimit =
+    historyValue === null ? DEFAULT_HISTORY_LIMIT : Number(historyValue);
+  if (
+    historyValue !== null &&
+    (!/^\d+$/.test(historyValue) ||
+      !Number.isSafeInteger(historyLimit) ||
+      historyLimit < 1 ||
+      historyLimit > MAX_HISTORY_LIMIT)
+  )
+    return launchError(
+      `URL history must be an integer from 1 to ${MAX_HISTORY_LIMIT}.`,
+    );
+
+  const ageValue = parameters.get("age");
+  const historyAgeMs = ageValue === null ? null : parseAge(ageValue);
+  if (ageValue !== null && historyAgeMs === undefined)
+    return launchError(
+      "URL age must be a positive duration such as 10m, 1h, or 7d.",
+    );
+
+  return {
+    present: true,
+    route: {
+      ...defaultRoute(),
+      broker,
+      filters: uniqueFilters(filters),
+      historyLimit,
+      historyAgeMs: historyAgeMs ?? null,
+    },
+  };
+}
+
+export function launchUrl(
+  route: AppRoute,
+  location: Pick<Location, "href">,
+): string {
+  const url = new URL(location.href);
+  url.search = "";
+  url.hash = "";
+  if (!route.broker) return url.href;
+
+  const parameters = [
+    `broker=${readableParameter(route.broker, ":/?=[]")}`,
+    ...uniqueFilters(route.filters).map(
+      (filter) => `sub=${readableParameter(filter, "/$")}`,
+    ),
+    `history=${route.historyLimit}`,
+  ];
+  if (route.historyAgeMs !== null)
+    parameters.push(`age=${formatAge(route.historyAgeMs)}`);
+  url.search = parameters.join("&");
+  return url.href;
+}
+
+function launchError(error: string): LaunchRoute {
+  return { present: true, error };
+}
+
+function rawParameterContains(
+  search: string,
+  name: string,
+  character: string,
+): boolean {
+  return search
+    .replace(/^\?/, "")
+    .split("&")
+    .some(
+      (item) =>
+        item.split("=", 1)[0] === name &&
+        item.slice(name.length + 1).includes(character),
+    );
+}
+
+function parseAge(value: string): number | undefined {
+  const match = /^([1-9]\d*)(s|m|h|d)$/.exec(value);
+  if (!match) return undefined;
+  const unit = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[
+    match[2] as "s" | "m" | "h" | "d"
+  ];
+  const milliseconds = Number(match[1]) * unit;
+  return Number.isSafeInteger(milliseconds) &&
+    milliseconds <= MAX_HISTORY_AGE_SECONDS * 1000
+    ? milliseconds
+    : undefined;
+}
+
+function formatAge(milliseconds: number): string {
+  for (const [suffix, unit] of [
+    ["d", 86_400_000],
+    ["h", 3_600_000],
+    ["m", 60_000],
+    ["s", 1000],
+  ] as const)
+    if (milliseconds % unit === 0) return `${milliseconds / unit}${suffix}`;
+  return `${milliseconds / 1000}s`;
+}
+
+function readableParameter(value: string, readable: string): string {
+  return encodeURIComponent(value).replace(/%[0-9A-F]{2}/g, (encoded) => {
+    const character = String.fromCharCode(
+      Number.parseInt(encoded.slice(1), 16),
+    );
+    return readable.includes(character) ? character : encoded;
+  });
 }
