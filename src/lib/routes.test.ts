@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_HISTORY_LIMIT,
+  DEFAULT_PLOT_WINDOW_MS,
   connectionKey,
   defaultRoute,
   isWebSocketBroker,
@@ -14,6 +15,7 @@ describe("route configuration", () => {
       filters: ["#"],
       historyLimit: DEFAULT_HISTORY_LIMIT,
       historyAgeMs: null,
+      plotWindowMs: DEFAULT_PLOT_WINDOW_MS,
       timeZone: "local",
       selectedTopic: "",
       fieldPath: null,
@@ -35,6 +37,9 @@ describe("route configuration", () => {
         ...route,
         plots: [{ topic: "a", path: "$.value" }],
       }),
+    );
+    expect(connectionKey({ ...route, plotWindowMs: null })).toBe(
+      connectionKey(route),
     );
   });
 

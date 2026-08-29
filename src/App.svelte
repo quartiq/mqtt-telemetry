@@ -4,6 +4,7 @@
   import { onMount } from "svelte";
   import ConnectionForm from "./ConnectionForm.svelte";
   import ConnectionFields from "./ConnectionFields.svelte";
+  import DurationSelect from "./DurationSelect.svelte";
   import HistoryLimit from "./HistoryLimit.svelte";
   import HistoryTable from "./HistoryTable.svelte";
   import MessagePanel from "./MessagePanel.svelte";
@@ -690,6 +691,7 @@
       filters,
       historyLimit: formHistoryLimit,
       historyAgeMs: formHistoryAgeMs,
+      plotWindowMs: route.plotWindowMs,
       timeZone: route.timeZone,
       selectedTopic: "",
       fieldPath: null,
@@ -879,6 +881,13 @@
     return true;
   }
 
+  function changePlotWindow(windowMs: number | null): boolean {
+    if (windowMs === route.plotWindowMs) return true;
+    plotNow = Date.now();
+    writeRoute({ ...route, plotWindowMs: windowMs }, selectedMessageId);
+    return true;
+  }
+
   function plotKey(plot: PlotRef): string {
     return JSON.stringify([plot.topic, plot.path]);
   }
@@ -971,6 +980,14 @@
   function clearTopicHistory() {
     if (!selectedTopicId) return;
     store.clearHistory(selectedTopicId);
+    selectedMessageId = null;
+    revision += 1;
+    replaceRoute(route, null);
+  }
+
+  function clearAllHistory() {
+    if (!topicSnapshot.bufferedMessages) return;
+    store.clearAllHistory();
     selectedMessageId = null;
     revision += 1;
     replaceRoute(route, null);
@@ -1141,46 +1158,69 @@
       </header>
       <div class="topic-policy">
         <div class="topic-action-groups">
-          <div class="topic-actions">
-            <span class="meta">History</span>
-            <button
-              disabled={!currentHistory.length}
-              title="Clear local history for the selected topic only. Broker-retained messages are unchanged."
-              type="button"
-              onclick={clearTopicHistory}>Clear topic</button
-            >
-            <button
-              disabled={!selectedSubtreeCount}
-              title="Clear local history for the selected topic and its subtopics. Broker-retained messages are unchanged."
-              type="button"
-              onclick={clearTopicSubtree}>Clear subtree</button
-            >
+          <div class="topic-policy-group">
+            <div class="topic-actions">
+              <span class="meta">History</span>
+              <button
+                disabled={!currentHistory.length}
+                title="Clear local history for the selected topic only. Broker-retained messages are unchanged."
+                type="button"
+                onclick={clearTopicHistory}>Clear topic</button
+              >
+              <button
+                disabled={!selectedSubtreeCount}
+                title="Clear local history for the selected topic and its subtopics. Broker-retained messages are unchanged."
+                type="button"
+                onclick={clearTopicSubtree}>Clear subtree</button
+              >
+              <button
+                disabled={!topicSnapshot.bufferedMessages}
+                title="Clear all locally buffered messages. Topics, plots, settings, and broker-retained messages are unchanged."
+                type="button"
+                onclick={clearAllHistory}>Clear all</button
+              >
+            </div>
+            <HistoryLimit
+              value={route.historyLimit}
+              onchange={changeHistoryLimit}
+              ageMs={route.historyAgeMs}
+              onagechange={changeHistoryAge}
+            />
           </div>
-          <div class="topic-actions">
-            <span class="meta">Plots</span>
-            <button
-              disabled={!selectedTopicPlotCount}
-              type="button"
-              onclick={removeTopicPlots}>Remove topic</button
+          <div class="topic-policy-group">
+            <div class="topic-actions">
+              <span class="meta">Plots</span>
+              <button
+                disabled={!selectedTopicPlotCount}
+                type="button"
+                onclick={removeTopicPlots}>Remove topic</button
+              >
+              <button
+                disabled={!selectedTopicSubtreePlotCount}
+                type="button"
+                onclick={removeTopicSubtreePlots}>Remove subtree</button
+              >
+              <button
+                disabled={!route.plots.length}
+                type="button"
+                onclick={() => removePlots(() => true)}>Remove all</button
+              >
+            </div>
+            <label
+              class="plot-window"
+              title="Only changes the visible plot interval and its statistics; buffered history is not deleted"
             >
-            <button
-              disabled={!selectedTopicSubtreePlotCount}
-              type="button"
-              onclick={removeTopicSubtreePlots}>Remove subtree</button
-            >
-            <button
-              disabled={!route.plots.length}
-              type="button"
-              onclick={() => removePlots(() => true)}>Remove all</button
-            >
+              <span>Show</span>
+              <DurationSelect
+                ariaLabel="Plot time window"
+                noneLabel="all history"
+                prefix="last "
+                value={route.plotWindowMs}
+                onchange={changePlotWindow}
+              />
+            </label>
           </div>
         </div>
-        <HistoryLimit
-          value={route.historyLimit}
-          onchange={changeHistoryLimit}
-          ageMs={route.historyAgeMs}
-          onagechange={changeHistoryAge}
-        />
       </div>
       <div class="topic-search">
         <input
@@ -1256,12 +1296,13 @@
       <PlotDashboard
         plots={dashboardPlots}
         now={plotNow}
-        ageMs={route.historyAgeMs}
+        windowMs={route.plotWindowMs}
         timeZone={route.timeZone}
         onfocus={focusPlot}
         onmove={movePlot}
         onremove={(plot) =>
           removePlots((current) => plotKey(current) === plotKey(plot))}
+        onshowall={() => changePlotWindow(null)}
       />
     </section>
   </main>

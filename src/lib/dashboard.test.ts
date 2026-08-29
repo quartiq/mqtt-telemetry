@@ -14,6 +14,7 @@ const route: AppRoute = {
   filters: ["sensors/#"],
   historyLimit: 250,
   historyAgeMs: 60_000,
+  plotWindowMs: 600_000,
   timeZone: "utc",
   selectedTopic: "unshared/selection",
   fieldPath: "$.unshared",
@@ -45,11 +46,12 @@ describe("dashboard files", () => {
       broker: route.broker,
       subscriptions: route.filters,
       retention: { messagesPerTopic: 250, maxAgeSeconds: 60 },
-      display: { timeZone: "utc" },
+      display: { timeZone: "utc", plotWindowSeconds: 600 },
       plots: route.plots,
     });
     expect(routeFromDashboard(dashboard)).toMatchObject({
       timeZone: "utc",
+      plotWindowMs: 600_000,
       selectedTopic: "sensors/room",
       fieldPath: "$.temperature",
     });
@@ -62,13 +64,27 @@ describe("dashboard files", () => {
     expect(parseDashboard(dashboard).plots[0].path).toBe("$.temperature");
   });
 
-  it("loads older version-one dashboards in browser-local time", () => {
+  it("loads older version-one dashboards with local time and the default plot window", () => {
     const dashboard = JSON.parse(dashboardJson(route));
     delete dashboard.display;
-    expect(parseDashboard(dashboard).display.timeZone).toBe("local");
+    expect(parseDashboard(dashboard).display).toEqual({
+      timeZone: "local",
+      plotWindowSeconds: 600,
+    });
 
     dashboard.display = { timeZone: "Mars/Olympus" };
     expect(() => parseDashboard(dashboard)).toThrow(/time zone/);
+  });
+
+  it("accepts all-history dashboards and rejects invalid plot windows", () => {
+    const dashboard = JSON.parse(dashboardJson(route));
+    dashboard.display.plotWindowSeconds = null;
+    expect(
+      routeFromDashboard(parseDashboard(dashboard)).plotWindowMs,
+    ).toBeNull();
+
+    dashboard.display.plotWindowSeconds = 0;
+    expect(() => parseDashboard(dashboard)).toThrow(/plot window/);
   });
 
   it("rejects credentials, wildcard paths, and duplicate canonical plots", () => {

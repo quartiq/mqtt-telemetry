@@ -1,6 +1,7 @@
 import type { DisplayTimeZone } from "./model";
 
 export const DEFAULT_HISTORY_LIMIT = 1000;
+export const DEFAULT_PLOT_WINDOW_MS = 10 * 60 * 1000;
 export const MAX_HISTORY_LIMIT = 10_000;
 export const MAX_HISTORY_AGE_SECONDS = 365 * 24 * 60 * 60;
 export const MAX_PLOTS = 8;
@@ -13,6 +14,7 @@ export type AppRoute = {
   filters: string[];
   historyLimit: number;
   historyAgeMs: number | null;
+  plotWindowMs: number | null;
   timeZone: DisplayTimeZone;
   selectedTopic: string;
   fieldPath: string | null;
@@ -25,6 +27,7 @@ export function defaultRoute(): AppRoute {
     filters: [DEFAULT_FILTER],
     historyLimit: DEFAULT_HISTORY_LIMIT,
     historyAgeMs: null,
+    plotWindowMs: DEFAULT_PLOT_WINDOW_MS,
     timeZone: "local",
     selectedTopic: "",
     fieldPath: null,

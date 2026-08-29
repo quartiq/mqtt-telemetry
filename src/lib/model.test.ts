@@ -21,6 +21,7 @@ import {
   plotSeries,
   plotSeriesPath,
   plotStatistics,
+  plotPointInsertionIndex,
   plotTimeDomain,
   telemetryPageTitle,
   timeTickValues,
@@ -338,6 +339,32 @@ describe("topic history", () => {
 
     expect(history).toHaveLength(1);
     expect(history[0]).toMatchObject({ receivedAt: 2000, retained: true });
+  });
+
+  it("clears all local history without removing discovered topics", () => {
+    const store = new TelemetryStore(10);
+    store.add("a", encode("retained"), {
+      receivedAt: 1000,
+      retained: true,
+      qos: 0,
+    });
+    store.add("a/b", encode("live"), {
+      receivedAt: 2000,
+      retained: false,
+      qos: 0,
+    });
+    const a = store.nodeId("a") as string;
+    const b = store.nodeId("a/b") as string;
+
+    expect(store.snapshot().bufferedMessages).toBe(2);
+    store.clearAllHistory();
+
+    expect(store.nodeId("a")).toBe(a);
+    expect(store.nodeId("a/b")).toBe(b);
+    expect(store.history(a)).toEqual([]);
+    expect(store.history(b)).toEqual([]);
+    expect(store.subtreeMessageCount(a)).toBe(0);
+    expect(store.snapshot().bufferedMessages).toBe(0);
   });
 
   it("still bounds retained snapshots by the hard global budget", () => {
@@ -661,7 +688,20 @@ describe("plot extraction", () => {
     expect(nearestPlotPoint([], 10)).toBeUndefined();
   });
 
-  it("keeps every plot on a shared domain ending at now", () => {
+  it("finds an inclusive visible plot range at exact boundaries", () => {
+    const points = [
+      { x: 10, y: 1, segment: 0 },
+      { x: 20, y: 2, segment: 0 },
+      { x: 20, y: 3, segment: 0 },
+      { x: 30, y: 4, segment: 0 },
+    ];
+    expect(plotPointInsertionIndex(points, 20)).toBe(1);
+    expect(plotPointInsertionIndex(points, 20, true)).toBe(3);
+    expect(plotPointInsertionIndex(points, 25)).toBe(3);
+    expect(plotPointInsertionIndex(points, 40, true)).toBe(4);
+  });
+
+  it("keeps every plot on a shared display window ending at now", () => {
     const series = [
       { points: [{ x: 7000, y: 1, segment: 0 }], retainedExcluded: 0 },
       { points: [{ x: 8000, y: 2, segment: 0 }], retainedExcluded: 0 },

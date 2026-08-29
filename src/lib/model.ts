@@ -42,6 +42,7 @@ export type TopicSnapshot = {
   nodes: Map<string, TreeNodeView>;
   revision: number;
   topicCount: number;
+  bufferedMessages: number;
   droppedMessages: number;
   evictedMessages: number;
   omittedPayloads: number;
@@ -497,12 +498,28 @@ export function nearestPlotPoint(
   return time - before.x <= after.x - time ? before : after;
 }
 
+export function plotPointInsertionIndex(
+  points: readonly PlotPoint[],
+  time: number,
+  afterEqual = false,
+): number {
+  let low = 0;
+  let high = points.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (points[middle].x < time || (afterEqual && points[middle].x === time))
+      low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
 export function plotTimeDomain(
   series: Iterable<PlotSeries>,
   now: number,
-  ageMs: number | null,
+  windowMs: number | null,
 ): PlotTimeDomain {
-  if (ageMs !== null) return { min: now - ageMs, max: now };
+  if (windowMs !== null) return { min: now - windowMs, max: now };
   let earliest = Number.POSITIVE_INFINITY;
   for (const plot of series)
     if (plot.points.length) earliest = Math.min(earliest, plot.points[0].x);
@@ -975,6 +992,15 @@ export class TelemetryStore {
     this.revision += 1;
   }
 
+  clearAllHistory(): void {
+    if (!this.messages.size) return;
+    for (const node of this.nodes.values()) {
+      if (node.history.length)
+        this.dropOldest(node.id, node.history.length, false);
+    }
+    this.revision += 1;
+  }
+
   ancestorIds(id: string): string[] {
     const ancestors: string[] = [];
     let parent = this.nodes.get(id)?.parent;
@@ -993,6 +1019,7 @@ export class TelemetryStore {
       nodes: this.views,
       revision: this.revision,
       topicCount: this.topicCount,
+      bufferedMessages: this.messages.size,
       droppedMessages: this.droppedMessages,
       evictedMessages: this.evictedMessages,
       omittedPayloads: this.omittedPayloads,
