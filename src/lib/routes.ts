@@ -9,11 +9,10 @@ export const DEFAULT_FILTER = "#";
 
 export type PlotRef = { topic: string; path: string };
 
-export type LaunchRoute = {
-  present: boolean;
-  route?: AppRoute;
-  error?: string;
-};
+export type LaunchRoute =
+  | { kind: "absent" }
+  | { kind: "valid"; route: AppRoute }
+  | { kind: "invalid"; error: string };
 
 export type AppRoute = {
   broker: string;
@@ -78,13 +77,13 @@ export function readLaunchRoute(
   const parameters = new URLSearchParams(location.search);
   const names = ["broker", "sub", "history", "age"];
   const present = names.some((name) => parameters.has(name));
-  if (!present) return { present: false };
+  if (!present) return { kind: "absent" };
 
   if (location.hash || location.href.endsWith("#"))
     return launchError(
       "Encode MQTT # wildcards in subscription parameters as %23.",
     );
-  if (rawParameterContains(location.search, "sub", "+"))
+  if (/[?&]sub=[^&]*\+/.test(location.search))
     return launchError(
       "Encode MQTT + wildcards in subscription parameters as %2B.",
     );
@@ -123,7 +122,7 @@ export function readLaunchRoute(
     );
 
   return {
-    present: true,
+    kind: "valid",
     route: {
       ...defaultRoute(),
       broker,
@@ -143,36 +142,19 @@ export function launchUrl(
   url.hash = "";
   if (!route.broker) return url.href;
 
-  const parameters = [
-    `broker=${readableParameter(route.broker, ":/?=[]")}`,
-    ...uniqueFilters(route.filters).map(
-      (filter) => `sub=${readableParameter(filter, "/$")}`,
-    ),
-    `history=${route.historyLimit}`,
-  ];
+  const parameters = new URLSearchParams();
+  parameters.set("broker", route.broker);
+  for (const filter of uniqueFilters(route.filters))
+    parameters.append("sub", filter);
+  parameters.set("history", String(route.historyLimit));
   if (route.historyAgeMs !== null)
-    parameters.push(`age=${formatAge(route.historyAgeMs)}`);
-  url.search = parameters.join("&");
+    parameters.set("age", formatAge(route.historyAgeMs));
+  url.search = readableSearch(parameters);
   return url.href;
 }
 
 function launchError(error: string): LaunchRoute {
-  return { present: true, error };
-}
-
-function rawParameterContains(
-  search: string,
-  name: string,
-  character: string,
-): boolean {
-  return search
-    .replace(/^\?/, "")
-    .split("&")
-    .some(
-      (item) =>
-        item.split("=", 1)[0] === name &&
-        item.slice(name.length + 1).includes(character),
-    );
+  return { kind: "invalid", error };
 }
 
 function parseAge(value: string): number | undefined {
@@ -199,11 +181,9 @@ function formatAge(milliseconds: number): string {
   return `${milliseconds / 1000}s`;
 }
 
-function readableParameter(value: string, readable: string): string {
-  return encodeURIComponent(value).replace(/%[0-9A-F]{2}/g, (encoded) => {
-    const character = String.fromCharCode(
-      Number.parseInt(encoded.slice(1), 16),
-    );
-    return readable.includes(character) ? character : encoded;
-  });
+function readableSearch(parameters: URLSearchParams): string {
+  return parameters
+    .toString()
+    .replaceAll("+", "%20")
+    .replace(/%(?:3A|2F|24|3F|3D|5B|5D)/g, decodeURIComponent);
 }

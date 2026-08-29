@@ -4,9 +4,11 @@ A read-only MQTT JSON telemetry browser with bounded history and up to eight liv
 
 ## Use
 
-Open <https://telemetry.quartiq.de/> and enter an MQTT-over-WebSocket URL. Use one subscription filter per line. MQTT excludes `$` topics from `#`; subscribe to `$SYS/#` explicitly when needed.
+Start with the [live EMQX `dt/#` view with one-hour history](https://telemetry.quartiq.de/?broker=wss://broker.emqx.io:8084/mqtt&sub=dt/%23&history=1000&age=1h), which connects and subscribes immediately.
 
-Launch links can connect immediately with `broker`, one or more `sub` parameters, `history`, and an optional `age` (`s`, `m`, `h`, or `d`), for example [EMQX `dt/#`, one-hour history](https://telemetry.quartiq.de/?broker=wss://broker.emqx.io:8084/mqtt&sub=dt/%23&history=1000&age=1h). URL-encode MQTT wildcards as `%23` and `%2B`. These parameters intentionally omit plots and credentials; use dashboard JSON to share a complete dashboard.
+For another broker, open <https://telemetry.quartiq.de/> and enter its MQTT-over-WebSocket URL, with one subscription filter per line. MQTT excludes `$` topics from `#`; subscribe to `$SYS/#` explicitly when needed.
+
+Launch URLs accept `broker`, repeated `sub`, `history`, and an optional `age` using `s`, `m`, `h`, or `d`. Encode MQTT wildcards as `%23` and `%2B`. These URLs omit plots and credentials; use dashboard JSON to share a complete dashboard.
 
 Select a value to inspect its history. Toggle the square beside a numeric field to plot it. Topic search is a case-insensitive substring search unless it contains MQTT `+` or `#` wildcards.
 

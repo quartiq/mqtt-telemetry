@@ -10,6 +10,8 @@ import {
   uniqueFilters,
 } from "./routes";
 
+const launch = (href: string) => readLaunchRoute(new URL(href));
+
 describe("route configuration", () => {
   it("defaults to a wildcard subscription and bounded history", () => {
     expect(defaultRoute()).toEqual({
@@ -73,15 +75,11 @@ describe("route configuration", () => {
 
   it("reads a complete launch query with repeated subscriptions", () => {
     expect(
-      readLaunchRoute({
-        href: "https://telemetry.example/?broker=wss://broker.example/mqtt&sub=dt/%23&sub=$SYS/%23&history=250&age=1h",
-        search:
-          "?broker=wss://broker.example/mqtt&sub=dt/%23&sub=$SYS/%23&history=250&age=1h",
-        hash: "",
-        protocol: "https:",
-      }),
+      launch(
+        "https://telemetry.example/?broker=wss://broker.example/mqtt&sub=dt/%23&sub=$SYS/%23&history=250&age=1h",
+      ),
     ).toMatchObject({
-      present: true,
+      kind: "valid",
       route: {
         broker: "wss://broker.example/mqtt",
         filters: ["dt/#", "$SYS/#"],
@@ -98,66 +96,50 @@ describe("route configuration", () => {
         {
           ...defaultRoute(),
           broker: "wss://broker.example/mqtt?token=a/b",
-          filters: ["dt/+/#", "$SYS/#"],
+          filters: ["dt/+/#", "$SYS/#", "room one/#"],
           historyLimit: 250,
           historyAgeMs: 3_600_000,
         },
-        { href: "https://telemetry.example/old?discard=1#old" } as Location,
+        new URL("https://telemetry.example/old?discard=1#old"),
       ),
     ).toBe(
-      "https://telemetry.example/old?broker=wss://broker.example/mqtt?token=a/b&sub=dt/%2B/%23&sub=$SYS/%23&history=250&age=1h",
+      "https://telemetry.example/old?broker=wss://broker.example/mqtt?token=a/b&sub=dt/%2B/%23&sub=$SYS/%23&sub=room%20one/%23&history=250&age=1h",
     );
   });
 
   it("rejects ambiguous wildcards and invalid launch limits", () => {
-    const base = {
-      protocol: "https:",
-      hash: "",
-      href: "https://telemetry.example/",
-    };
     expect(
-      readLaunchRoute({
-        ...base,
-        search: "?broker=wss://broker.example&sub=dt/+",
-      }).error,
-    ).toContain("%2B");
+      launch("https://telemetry.example/?broker=wss://broker.example&sub=dt/+"),
+    ).toMatchObject({ kind: "invalid", error: expect.stringContaining("%2B") });
+    for (const suffix of ["#", "#&history=250"])
+      expect(
+        launch(
+          `https://telemetry.example/?broker=wss://broker.example&sub=dt/${suffix}`,
+        ),
+      ).toMatchObject({
+        kind: "invalid",
+        error: expect.stringContaining("%23"),
+      });
     expect(
-      readLaunchRoute({
-        ...base,
-        href: "https://telemetry.example/?broker=wss://broker.example&sub=dt/#",
-        search: "?broker=wss://broker.example&sub=dt/",
-      }).error,
-    ).toContain("%23");
+      launch(
+        "https://telemetry.example/?broker=wss://broker.example&sub=dt/%23&history=0",
+      ),
+    ).toMatchObject({
+      kind: "invalid",
+      error: expect.stringContaining("history"),
+    });
     expect(
-      readLaunchRoute({
-        ...base,
-        hash: "#&history=250",
-        href: "https://telemetry.example/?broker=wss://broker.example&sub=dt/#&history=250",
-        search: "?broker=wss://broker.example&sub=dt/",
-      }).error,
-    ).toContain("%23");
-    expect(
-      readLaunchRoute({
-        ...base,
-        search: "?broker=wss://broker.example&sub=dt/%23&history=0",
-      }).error,
-    ).toContain("history");
-    expect(
-      readLaunchRoute({
-        ...base,
-        search: "?broker=wss://broker.example&sub=dt/%23&age=1week",
-      }).error,
-    ).toContain("age");
+      launch(
+        "https://telemetry.example/?broker=wss://broker.example&sub=dt/%23&age=1week",
+      ),
+    ).toMatchObject({ kind: "invalid", error: expect.stringContaining("age") });
   });
 
   it("does not turn an incomplete query into a wildcard connection", () => {
     expect(
-      readLaunchRoute({
-        href: "https://telemetry.example/?broker=wss://broker.example&history=1000",
-        search: "?broker=wss://broker.example&history=1000",
-        hash: "",
-        protocol: "https:",
-      }),
-    ).toMatchObject({ present: true, error: expect.any(String) });
+      launch(
+        "https://telemetry.example/?broker=wss://broker.example&history=1000",
+      ),
+    ).toMatchObject({ kind: "invalid", error: expect.any(String) });
   });
 });

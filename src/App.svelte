@@ -66,8 +66,11 @@
   const storedRoute = routeFromViewState(history.state);
   const initialRoute = inlineDashboard.dashboard
     ? routeFromDashboard(inlineDashboard.dashboard)
-    : (launchRoute.route ??
-      (launchRoute.present ? defaultRoute() : (storedRoute ?? defaultRoute())));
+    : launchRoute.kind === "valid"
+      ? launchRoute.route
+      : launchRoute.kind === "invalid"
+        ? defaultRoute()
+        : (storedRoute ?? defaultRoute());
   let route = $state(initialRoute);
   let formBroker = $state(initialRoute.broker);
   let formFilters = $state(initialRoute.filters.join("\n"));
@@ -94,7 +97,9 @@
   let error = $state(
     inlineDashboard.present
       ? (inlineDashboard.error ?? "")
-      : (launchRoute.error ?? ""),
+      : launchRoute.kind === "invalid"
+        ? launchRoute.error
+        : "",
   );
   let dashboardNotice = $state("");
   let editingConnection = $state(false);
@@ -112,7 +117,9 @@
     history.replaceState(
       historyState(null),
       "",
-      launchUrl(initialRoute, location),
+      launchRoute.kind === "invalid" && !inlineDashboard.present
+        ? location.href
+        : launchUrl(initialRoute, location),
     );
 
   let topicSnapshot = $derived.by(() => {
