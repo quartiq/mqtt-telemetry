@@ -10,7 +10,6 @@
   import PlotDashboard, { type DashboardPlot } from "./PlotDashboard.svelte";
   import TreeView from "./TreeView.svelte";
   import {
-    TelemetryStore,
     fieldLabel,
     getJsonPath,
     jsonPath,
@@ -18,16 +17,14 @@
     parseJsonPath,
     resolveJsonPath,
     telemetryPageTitle,
-    type DisplayTimeZone,
-    type JsonPath,
-  } from "./lib/model";
+  } from "./lib/json";
+  import { TelemetryStore } from "./lib/telemetry";
+  import type { DisplayTimeZone } from "./lib/time";
   import { MqttSession, type SessionStatus } from "./lib/mqtt-session";
   import { randomId } from "./lib/random-id";
   import {
-    dashboardFromRoute,
     dashboardJson,
     dashboardShareUrl,
-    parseDashboard,
     parseDashboardJson,
     readInlineDashboard,
     resolveStartupRoute,
@@ -46,20 +43,16 @@
     type PlotRef,
   } from "./lib/routes";
   import {
+    browserViewState,
+    messageIdFromViewState,
+    routeFromViewState,
+  } from "./lib/view-state";
+  import {
     filterTopicTree,
     selectionAfterCollapse,
     treeAncestorIds,
     type TreeActivity,
   } from "./lib/tree";
-
-  type ViewState = {
-    app: "mqtt-telemetry";
-    token: string;
-    messageId: number | null;
-    dashboard: Dashboard;
-    selectedTopic: string;
-    fieldPath: string | null;
-  };
 
   const inlineDashboard = readInlineDashboard(location.hash);
   const launchRoute = readLaunchRoute(location);
@@ -81,8 +74,6 @@
   let route = $state(initialRoute);
   let formBroker = $state(initialRoute.broker);
   let formFilters = $state(initialRoute.filters.join("\n"));
-  let formHistoryLimit = $state(initialRoute.historyLimit);
-  let formHistoryAgeMs = $state(initialRoute.historyAgeMs);
   let username = $state("");
   let password = $state("");
   let authBroker = initialRoute.broker;
@@ -92,13 +83,13 @@
   let revision = $state(0);
   let selectedTopicId = $state("");
   let selectedMessageId = $state<number | null>(null);
-  let selectedField = $state<JsonPath | undefined>();
   let fieldByTopic = new Map<string, string | null>();
   let revealedFieldKey = "";
   let topicExpanded = $state(new Set<string>());
   let autoExpandedTopicRoots = new Set<string>();
   let topicActivity = $state.raw(new Map<string, TreeActivity>());
   let topicSearch = $state("");
+  let historyExpanded = $state(false);
   let jsonExpanded = $state(new Set<string>(["$"]));
   const jsonExpandedByTopic = new Map<string, Set<string>>();
   let status = $state(initialRoute.broker ? "Connecting" : "Not connected");
@@ -117,7 +108,7 @@
 
   if (location.search || location.hash || !storedRoute)
     history.replaceState(
-      historyState(null),
+      browserViewState(initialRoute, viewToken, null),
       "",
       launchRoute.kind === "invalid" && inlineDashboard.kind === "absent"
         ? location.href
@@ -178,19 +169,24 @@
       ? jsonTree(currentMessage.payload.value)
       : undefined,
   );
-  let activeField = $derived.by(() => {
-    if (route.fieldPath === null || !selectedField) return undefined;
-    return jsonPath(selectedField) === route.fieldPath
-      ? selectedField
-      : undefined;
-  });
-  let selectedJsonId = $derived(
-    route.fieldPath === null
-      ? ""
-      : activeField
-        ? jsonPath(activeField)
-        : route.fieldPath,
+  let selectedFieldPath = $derived(
+    selectedTopic
+      ? route.selectedTopic === selectedTopic
+        ? route.fieldPath
+        : (fieldByTopic.get(selectedTopic) ?? null)
+      : null,
   );
+  let activeField = $derived.by(() => {
+    if (selectedFieldPath === null) return undefined;
+    for (let index = currentHistory.length - 1; index >= 0; index -= 1) {
+      const payload = currentHistory[index].payload;
+      if (payload.kind !== "json") continue;
+      const resolved = resolveJsonPath(payload.value, selectedFieldPath);
+      if (resolved) return resolved;
+    }
+    return undefined;
+  });
+  let selectedJsonId = $derived(selectedFieldPath ?? "");
   let checkableJson = $derived.by(() => {
     const ids = new Set<string>();
     if (currentMessage?.payload.kind !== "json" || !jsonSnapshot) return ids;
@@ -232,11 +228,11 @@
     });
   });
   let selectedFieldLabel = $derived(
-    route.fieldPath === null
+    selectedFieldPath === null
       ? undefined
       : activeField
         ? fieldLabel(activeField)
-        : route.fieldPath,
+        : selectedFieldPath,
   );
   let topicWarning = $derived(
     [
@@ -260,37 +256,15 @@
 
   $effect(() => {
     const topic = selectedTopic;
-    if (!topic) {
-      selectedField = undefined;
-      return;
-    }
-    const path =
-      route.selectedTopic === topic
-        ? route.fieldPath
-        : (fieldByTopic.get(topic) ?? null);
+    const path = selectedFieldPath;
+    if (!topic) return;
     fieldByTopic.set(topic, path);
-    if (path === null) {
-      selectedField = undefined;
-      return;
-    }
-    let resolved: JsonPath | undefined;
-    for (let index = currentHistory.length - 1; index >= 0; index -= 1) {
-      const payload = currentHistory[index].payload;
-      if (payload.kind !== "json") continue;
-      resolved = resolveJsonPath(payload.value, path);
-      if (resolved) break;
-    }
-    if (resolved) {
-      if (!selectedField || jsonPath(resolved) !== jsonPath(selectedField))
-        selectedField = resolved;
-      const id = jsonPath(resolved);
-      const revealKey = `${topic}\0${path}`;
-      if (jsonSnapshot?.nodes.has(id) && revealedFieldKey !== revealKey) {
-        revealedFieldKey = revealKey;
-        revealJson(id);
-      }
-    } else {
-      selectedField = undefined;
+    if (path === null || !activeField) return;
+    const id = jsonPath(activeField);
+    const revealKey = `${topic}\0${path}`;
+    if (jsonSnapshot?.nodes.has(id) && revealedFieldKey !== revealKey) {
+      revealedFieldKey = revealKey;
+      revealJson(id);
     }
   });
 
@@ -327,8 +301,6 @@
       if (connectionKey(next) !== connectionKey(route)) {
         route = next;
         formFilters = next.filters.join("\n");
-        formHistoryLimit = next.historyLimit;
-        formHistoryAgeMs = next.historyAgeMs;
         if (next.broker !== authBroker) {
           username = "";
           password = "";
@@ -344,8 +316,6 @@
         const historyLimitChanged = next.historyLimit !== route.historyLimit;
         const historyAgeChanged = next.historyAgeMs !== route.historyAgeMs;
         route = next;
-        formHistoryLimit = next.historyLimit;
-        formHistoryAgeMs = next.historyAgeMs;
         if (historyLimitChanged) {
           store.setHistoryLimit(next.historyLimit);
           revision += 1;
@@ -378,55 +348,6 @@
     };
   });
 
-  function routeFromViewState(state: unknown): AppRoute | undefined {
-    if (
-      typeof state !== "object" ||
-      state === null ||
-      !("app" in state) ||
-      state.app !== "mqtt-telemetry" ||
-      !("dashboard" in state)
-    )
-      return undefined;
-    try {
-      const dashboard = parseDashboard(state.dashboard);
-      const base = routeFromDashboard(dashboard);
-      const selectedTopic =
-        "selectedTopic" in state && typeof state.selectedTopic === "string"
-          ? state.selectedTopic
-          : base.selectedTopic;
-      const parsedField =
-        "fieldPath" in state && typeof state.fieldPath === "string"
-          ? parseJsonPath(state.fieldPath)
-          : undefined;
-      return {
-        ...base,
-        selectedTopic,
-        fieldPath:
-          "fieldPath" in state && state.fieldPath === null
-            ? null
-            : parsedField
-              ? jsonPath(parsedField)
-              : base.fieldPath,
-      };
-    } catch {
-      return undefined;
-    }
-  }
-
-  function historyState(
-    messageId = selectedMessageId,
-    nextRoute = route,
-  ): ViewState {
-    return {
-      app: "mqtt-telemetry",
-      token: viewToken,
-      messageId,
-      dashboard: dashboardFromRoute(nextRoute),
-      selectedTopic: nextRoute.selectedTopic,
-      fieldPath: nextRoute.fieldPath,
-    };
-  }
-
   function writeRoute(
     next: AppRoute,
     messageId: number | null,
@@ -435,7 +356,7 @@
     route = next;
     const method = replace ? "replaceState" : "pushState";
     history[method](
-      historyState(messageId, next),
+      browserViewState(next, viewToken, messageId),
       "",
       launchUrl(next, location),
     );
@@ -478,8 +399,6 @@
     }
     formBroker = next.broker;
     formFilters = next.filters.join("\n");
-    formHistoryLimit = next.historyLimit;
-    formHistoryAgeMs = next.historyAgeMs;
     writeRoute(next, null);
     const brokerError = isWebSocketBroker(next.broker);
     if (brokerError) {
@@ -546,7 +465,6 @@
     revision += 1;
     selectedTopicId = "";
     selectedMessageId = null;
-    selectedField = undefined;
     fieldByTopic = new Map();
     revealedFieldKey = "";
     topicExpanded = new Set();
@@ -636,7 +554,6 @@
               segment: historySegment,
               retained: packet.retain,
               duplicate: packet.dup,
-              qos: packet.qos,
             });
             if (route.historyAgeMs !== null)
               store.expireBefore(receivedAt - route.historyAgeMs);
@@ -692,8 +609,8 @@
     const next: AppRoute = {
       broker,
       filters,
-      historyLimit: formHistoryLimit,
-      historyAgeMs: formHistoryAgeMs,
+      historyLimit: route.historyLimit,
+      historyAgeMs: route.historyAgeMs,
       plotWindowMs: route.plotWindowMs,
       timeZone: route.timeZone,
       selectedTopic: "",
@@ -767,13 +684,25 @@
       jsonExpanded = new Set(jsonExpandedByTopic.get(nextTopic) ?? ["$"]);
     }
     selectedTopicId = id;
-    if (changed || reset)
+    if (changed || reset) {
       topicExpanded = new Set([...topicExpanded, ...store.ancestorIds(id)]);
+      revealTopic(id);
+    }
     if (reset) {
       selectedMessageId = null;
-      selectedField = undefined;
       revealedFieldKey = "";
     }
+  }
+
+  function revealTopic(id: string) {
+    if (topicSearch.trim() && !topicFilter.nodes.has(id)) topicSearch = "";
+    requestAnimationFrame(() =>
+      document
+        .querySelector<HTMLElement>(
+          `.topic-tree [data-tree-id="${CSS.escape(id)}"]`,
+        )
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" }),
+    );
   }
 
   function selectTopic(id: string) {
@@ -815,7 +744,6 @@
     const path = jsonSnapshot?.paths.get(id);
     if (!path) return;
     const fieldPath = jsonPath(path);
-    selectedField = path;
     fieldByTopic.set(selectedTopic, fieldPath);
     revealedFieldKey = `${selectedTopic}\0${fieldPath}`;
     revealJson(id);
@@ -864,7 +792,6 @@
   function changeHistoryLimit(limit: number): boolean {
     if (limit === route.historyLimit) return true;
     store.setHistoryLimit(limit);
-    formHistoryLimit = limit;
     revision += 1;
     const id = selectedMessageId;
     const nextMessageId = currentHistory.some((message) => message.id === id)
@@ -877,7 +804,6 @@
 
   function changeHistoryAge(ageMs: number | null): boolean {
     if (ageMs === route.historyAgeMs) return true;
-    formHistoryAgeMs = ageMs;
     plotNow = Date.now();
     if (ageMs !== null && store.expireBefore(plotNow - ageMs)) revision += 1;
     writeRoute({ ...route, historyAgeMs: ageMs }, selectedMessageId);
@@ -989,13 +915,7 @@
     if (id) selectLoadedTopic(id, selectedTopic !== route.selectedTopic);
     else if (route.selectedTopic) selectedTopicId = "";
 
-    const view = state as Partial<ViewState> | null;
-    const messageId =
-      view?.app === "mqtt-telemetry" &&
-      view.token === viewToken &&
-      typeof view.messageId === "number"
-        ? view.messageId
-        : null;
+    const messageId = messageIdFromViewState(state, viewToken);
     selectedMessageId = currentHistory.some(
       (message) => message.id === messageId,
     )
@@ -1042,7 +962,7 @@
       <h1>
         <button
           aria-label={route.broker
-            ? `Connection settings for ${route.broker}`
+            ? `Connection settings for ${route.broker}; subscriptions ${route.filters.join(", ")}`
             : "Open connection settings"}
           aria-expanded={editingConnection}
           class="connection-disclosure"
@@ -1050,24 +970,25 @@
             status === "Resubscribing" ||
             (editingConnection && !route.broker)}
           title={route.broker
-            ? `Connection settings: ${route.broker}`
+            ? `Connection settings: ${route.broker}\nSubscriptions: ${route.filters.join(", ")}`
             : "Connect to an MQTT broker"}
           type="button"
           onclick={editingConnection && route.broker
             ? cancelConnectionEdit
             : editConnection}
         >
-          <span class="broker-label">{route.broker || "Connect to MQTT"}</span>
           <span aria-hidden="true" class="disclosure-mark"
             >{editingConnection ? "▾" : "▸"}</span
           >
+          <span class="connection-summary">
+            <span class="broker-label">{route.broker || "Connect to MQTT"}</span
+            >
+            {#if route.broker}
+              <span class="subscription-label">{route.filters.join(", ")}</span>
+            {/if}
+          </span>
         </button>
       </h1>
-      {#if selectedTopic}
-        <div class="breadcrumb" aria-label="Selected topic">
-          <span>{selectedTopic}</span>
-        </div>
-      {/if}
     </div>
     <div class="header-controls">
       <div class="connection-state">
@@ -1088,6 +1009,14 @@
             >{buildLabel}</span
           >
         {/if}
+      </div>
+      <div class="history-options" aria-label="History policy">
+        <HistoryPolicy
+          value={route.historyLimit}
+          onchange={changeHistoryLimit}
+          ageMs={route.historyAgeMs}
+          onagechange={changeHistoryAge}
+        />
       </div>
       <div class="display-options" aria-label="Display">
         <label class="display-option">
@@ -1172,81 +1101,72 @@
     {/if}
   </header>
 
-  <aside class="topics panel">
-    <header>
-      <h2>
-        Topics <span class="count"
-          >({topicSnapshot.topicCount.toLocaleString()})</span
-        >
-      </h2>
-      <span class="meta" title={route.filters.join("\n")}
-        >{route.filters.join(", ")}</span
-      >
-      {#if topicWarning}
-        <span class="meta problem" title="Browser safety limits applied">
-          {topicWarning}
-        </span>
-      {/if}
-    </header>
-    <div class="topic-policy">
-      <HistoryPolicy
-        value={route.historyLimit}
-        onchange={changeHistoryLimit}
-        ageMs={route.historyAgeMs}
-        onagechange={changeHistoryAge}
-        canClear={Boolean(topicSnapshot.bufferedMessages)}
-        onclear={clearAllHistory}
-      />
-    </div>
-    <div class="topic-search">
-      <input
-        aria-label="Search topic paths"
-        id="topic-search"
-        onkeydown={topicSearchKeydown}
-        placeholder="Substring or MQTT filter"
-        title="Plain text matches anywhere in a topic path; + and # use MQTT filter syntax. Press / to focus."
-        type="search"
-        bind:value={topicSearch}
-      />
-      {#if topicSearch.trim()}
-        {#if topicFilter.error}
-          <span class="meta problem" title={topicFilter.error}
-            >Invalid filter</span
+  <section
+    aria-label="Telemetry browsers"
+    class:history-expanded={historyExpanded}
+    class="browsers"
+  >
+    <aside class="topics panel">
+      <header class="topics-header">
+        <h2>
+          Topics <span class="count"
+            >({topicSnapshot.topicCount.toLocaleString()})</span
           >
-        {:else}
-          <span class="meta">
-            {topicFilter.matches.length.toLocaleString()}
-            {topicFilter.matches.length === 1 ? "match" : "matches"}
+        </h2>
+        <div class="topic-search">
+          <input
+            aria-label="Search topic paths"
+            id="topic-search"
+            onkeydown={topicSearchKeydown}
+            placeholder="Substring or MQTT filter"
+            title="Plain text matches anywhere in a topic path; + and # use MQTT filter syntax. Press / to focus."
+            type="search"
+            bind:value={topicSearch}
+          />
+          {#if topicSearch.trim()}
+            {#if topicFilter.error}
+              <span class="meta problem" title={topicFilter.error}
+                >Invalid filter</span
+              >
+            {:else}
+              <span class="meta">
+                {topicFilter.matches.length.toLocaleString()}
+                {topicFilter.matches.length === 1 ? "match" : "matches"}
+              </span>
+            {/if}
+          {/if}
+        </div>
+        {#if topicWarning}
+          <span class="meta problem" title="Browser safety limits applied">
+            {topicWarning}
           </span>
         {/if}
-      {/if}
-    </div>
-    <div class="topic-tree">
-      {#if visibleTopics.roots.length}
-        <TreeView
-          roots={visibleTopics.roots}
-          nodes={visibleTopics.nodes}
-          revision={topicSnapshot.revision}
-          selected={selectedTopicId}
-          expanded={visibleTopicExpanded}
-          activity={topicActivity}
-          label="MQTT topics"
-          onselect={selectTopic}
-          ontoggle={toggleTopic}
-        />
-      {:else if topicSearch.trim()}
-        <p class="empty">No matching topics.</p>
-      {:else}
-        <p class="empty">
-          {route.broker
-            ? "Waiting for subscribed messages…"
-            : "Connect to a broker to browse topics."}
-        </p>
-      {/if}
-    </div>
-  </aside>
+      </header>
+      <div class="topic-tree">
+        {#if visibleTopics.roots.length}
+          <TreeView
+            roots={visibleTopics.roots}
+            nodes={visibleTopics.nodes}
+            revision={topicSnapshot.revision}
+            selected={selectedTopicId}
+            expanded={visibleTopicExpanded}
+            activity={topicActivity}
+            label="MQTT topics"
+            onselect={selectTopic}
+            ontoggle={toggleTopic}
+          />
+        {:else if topicSearch.trim()}
+          <p class="empty">No matching topics.</p>
+        {:else}
+          <p class="empty">
+            {route.broker
+              ? "Waiting for subscribed messages…"
+              : "Connect to a broker to browse topics."}
+          </p>
+        {/if}
+      </div>
+    </aside>
 
-  <section class="details">
     <MessagePanel
       message={currentMessage}
       topic={selectedTopic}
@@ -1259,6 +1179,7 @@
       checked={checkedJson}
       checkDisabled={plotLimitReached}
       subtreePlotCount={selectedValuePlotCount}
+      plotCount={route.plots.length}
       subtreeMessages={selectedSubtreeCount}
       showPlotHint={Boolean(checkableJson.size && !route.plots.length)}
       timeZone={route.timeZone}
@@ -1266,31 +1187,34 @@
       ontoggle={toggleJson}
       oncheck={togglePlot}
       onremoveplots={removeSelectedValuePlots}
+      onremoveallplots={() => removePlots(() => true)}
     />
     <HistoryTable
+      expanded={historyExpanded}
       messages={currentHistory}
       selectedId={selectedMessageId}
       field={activeField}
-      fieldLabel={selectedFieldLabel}
       timeZone={route.timeZone}
       canClearTopic={Boolean(currentHistory.length)}
       canClearSubtree={Boolean(selectedSubtreeCount)}
+      canClearAll={Boolean(topicSnapshot.bufferedMessages)}
       onselect={selectHistory}
       onlatest={selectLatest}
       oncleartopic={clearTopicHistory}
       onclearsubtree={clearTopicSubtree}
-    />
-    <PlotDashboard
-      plots={dashboardPlots}
-      now={plotNow}
-      windowMs={route.plotWindowMs}
-      timeZone={route.timeZone}
-      onfocus={focusPlot}
-      onmove={movePlot}
-      onremove={(plot) =>
-        removePlots((current) => plotKey(current) === plotKey(plot))}
-      onremoveall={() => removePlots(() => true)}
-      onshowall={() => changePlotWindow(null)}
+      onclearall={clearAllHistory}
+      ontoggle={() => (historyExpanded = !historyExpanded)}
     />
   </section>
+  <PlotDashboard
+    plots={dashboardPlots}
+    now={plotNow}
+    windowMs={route.plotWindowMs}
+    timeZone={route.timeZone}
+    onfocus={focusPlot}
+    onmove={movePlot}
+    onremove={(plot) =>
+      removePlots((current) => plotKey(current) === plotKey(plot))}
+    onshowall={() => changePlotWindow(null)}
+  />
 </main>

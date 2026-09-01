@@ -9,12 +9,9 @@
     onchange: (value: number) => boolean | void;
     ageMs: number | null;
     onagechange: (value: number | null) => boolean | void;
-    canClear: boolean;
-    onclear: () => void;
   };
 
-  let { value, onchange, ageMs, onagechange, canClear, onclear }: Props =
-    $props();
+  let { value, onchange, ageMs, onagechange }: Props = $props();
 
   function commit(event: Event) {
     const input = event.currentTarget as HTMLInputElement;
@@ -23,7 +20,7 @@
   }
 </script>
 
-<div aria-label="History policy" class="history-policy">
+<div class="history-policy">
   <label
     title="Maximum recent live messages for each topic; the latest retained snapshot is kept separately"
   >
@@ -51,28 +48,23 @@
       onchange={onagechange}
     />
   </label>
-  <button
-    aria-label="Clear all history"
-    disabled={!canClear}
-    title="Does not clear retained broker messages"
-    type="button"
-    onclick={onclear}>Clear all</button
-  >
 </div>
 
 <style>
-  .history-policy,
+  .history-policy {
+    align-items: baseline;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    font-size: var(--text-small);
+    gap: var(--space-tight);
+  }
+
   label {
     align-items: baseline;
     display: flex;
     gap: var(--space-tight);
     white-space: nowrap;
-  }
-
-  .history-policy {
-    color: var(--muted);
-    flex-wrap: wrap;
-    font-size: var(--text-small);
   }
 
   input {

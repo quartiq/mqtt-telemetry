@@ -9,7 +9,12 @@ import {
   resolveStartupRoute,
   routeFromDashboard,
 } from "./dashboard";
-import { defaultRoute, type AppRoute } from "./routes";
+import { defaultRoute, MAX_PLOTS, type AppRoute } from "./routes";
+import {
+  browserViewState,
+  messageIdFromViewState,
+  routeFromViewState,
+} from "./view-state";
 
 const route: AppRoute = {
   broker: "wss://broker.example/mqtt",
@@ -27,7 +32,7 @@ const route: AppRoute = {
 };
 
 describe("dashboard files", () => {
-  it("detaches history state from reactive route collections", () => {
+  it("creates cloneable browser state and restores transient selection", () => {
     const reactiveLikeRoute = {
       ...route,
       filters: new Proxy([...route.filters], {}),
@@ -36,10 +41,11 @@ describe("dashboard files", () => {
         {},
       ),
     };
-    const dashboard = dashboardFromRoute(reactiveLikeRoute);
-    expect(() => structuredClone(dashboard)).not.toThrow();
-    expect(dashboard.subscriptions).toEqual(route.filters);
-    expect(dashboard.plots).toEqual(route.plots);
+    const state = browserViewState(reactiveLikeRoute, "tab", 42);
+    expect(() => structuredClone(state)).not.toThrow();
+    expect(routeFromViewState(state)).toEqual(route);
+    expect(messageIdFromViewState(state, "tab")).toBe(42);
+    expect(messageIdFromViewState(state, "another-tab")).toBeNull();
   });
 
   it("round-trips only durable dashboard configuration", () => {
@@ -99,6 +105,21 @@ describe("dashboard files", () => {
       { topic: "a", path: "$['value']" },
     ];
     expect(() => parseDashboard(dashboard)).toThrow(/duplicate/);
+  });
+
+  it("accepts the plot limit and rejects one more", () => {
+    const dashboard = JSON.parse(dashboardJson(route));
+    dashboard.plots = Array.from({ length: MAX_PLOTS }, (_, index) => ({
+      topic: "sensors/room",
+      path: `$.value${index}`,
+    }));
+    expect(parseDashboard(dashboard).plots).toHaveLength(MAX_PLOTS);
+
+    dashboard.plots.push({
+      topic: "sensors/room",
+      path: `$.value${MAX_PLOTS}`,
+    });
+    expect(() => parseDashboard(dashboard)).toThrow(`at most ${MAX_PLOTS}`);
   });
 
   it("puts an explicit share payload in the fragment and removes query state", () => {

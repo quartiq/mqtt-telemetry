@@ -2,11 +2,8 @@
 
 <script lang="ts">
   import TelemetryPlot from "./TelemetryPlot.svelte";
-  import {
-    plotTimeDomain,
-    type DisplayTimeZone,
-    type PlotPoint,
-  } from "./lib/model";
+  import { plotTimeDomain, type PlotPoint } from "./lib/plot";
+  import type { DisplayTimeZone } from "./lib/time";
   import type { PlotRef } from "./lib/routes";
   import { formatDuration } from "./lib/duration";
 
@@ -25,7 +22,6 @@
     onfocus: (plot: PlotRef) => void;
     onmove: (plot: PlotRef, offset: -1 | 1) => void;
     onremove: (plot: PlotRef) => void;
-    onremoveall: () => void;
     onshowall: () => void;
   };
 
@@ -37,7 +33,6 @@
     onfocus,
     onmove,
     onremove,
-    onremoveall,
     onshowall,
   }: Props = $props();
   let domain = $derived(plotTimeDomain(plots, now, windowMs));
@@ -47,13 +42,8 @@
   let inspectTime = $state<number | undefined>();
 </script>
 
-<section class:with-actions={plots.length > 1} class="plot-dashboard">
+<section class="plot-dashboard">
   {#if plots.length}
-    {#if plots.length > 1}
-      <div class="dashboard-actions">
-        <button type="button" onclick={onremoveall}>Remove all</button>
-      </div>
-    {/if}
     <div class:two-columns={plots.length > 4} class="plot-grid">
       {#each plots as plot, index (plot.key)}
         <TelemetryPlot
@@ -84,22 +74,9 @@
 
 <style>
   .plot-dashboard {
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
     display: grid;
-    grid-column: 1 / -1;
     min-height: 0;
     overflow: hidden;
-  }
-
-  .plot-dashboard.with-actions {
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .dashboard-actions {
-    display: flex;
-    justify-content: flex-end;
-    padding: var(--space) var(--space) 0;
   }
 
   .plot-grid {
@@ -109,15 +86,10 @@
     grid-template-columns: minmax(0, 1fr);
     min-height: 0;
     overflow: auto;
-    padding: var(--space);
   }
 
   .plot-grid.two-columns {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .empty {
-    padding: var(--space);
   }
 
   @media (max-width: 800px) {

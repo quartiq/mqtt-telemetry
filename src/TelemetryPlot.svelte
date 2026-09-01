@@ -3,18 +3,20 @@
 <script lang="ts">
   import {
     downsamplePlotPoints,
-    displayDatesDiffer,
     formatPlotNumber,
     formatPlotTick,
-    formatTelemetryTime,
     nearestPlotPoint,
     nicePlotScale,
     plotPointInsertionIndex,
     plotStatistics,
     timeTickValues,
     type PlotPoint,
+  } from "./lib/plot";
+  import {
+    displayDatesDiffer,
+    formatTelemetryTime,
     type DisplayTimeZone,
-  } from "./lib/model";
+  } from "./lib/time";
 
   type Props = {
     points: PlotPoint[];
@@ -248,24 +250,36 @@
           disabled={!canMoveEarlier}
           title="Move plot earlier"
           type="button"
-          onclick={onmoveearlier}>‹</button
+          onclick={onmoveearlier}
         >
+          <svg aria-hidden="true" viewBox="0 0 16 16">
+            <path d="m10 3-5 5 5 5" />
+          </svg>
+        </button>
         <button
           aria-label={`Move plot of ${label} on ${topic} later`}
           class="plot-action"
           disabled={!canMoveLater}
           title="Move plot later"
           type="button"
-          onclick={onmovelater}>›</button
+          onclick={onmovelater}
         >
+          <svg aria-hidden="true" viewBox="0 0 16 16">
+            <path d="m6 3 5 5-5 5" />
+          </svg>
+        </button>
       {/if}
       <button
         aria-label={`Remove plot of ${label} on ${topic}`}
         class="plot-action"
         title="Remove plot"
         type="button"
-        onclick={onremove}>×</button
+        onclick={onremove}
       >
+        <svg aria-hidden="true" viewBox="0 0 16 16">
+          <path d="m4 4 8 8m0-8-8 8" />
+        </svg>
+      </button>
     </div>
     <div
       class="panel-stats meta"
@@ -394,15 +408,31 @@
   }
 
   .plot-actions {
+    align-items: center;
     display: flex;
   }
 
   .plot-action {
+    align-items: center;
     background: transparent;
     border: 0;
     color: var(--muted);
-    font-size: 1.2rem;
-    padding: 0 var(--space-tight);
+    display: flex;
+    justify-content: center;
+    padding: 0;
+    width: 1.4rem;
+  }
+
+  .plot-action svg {
+    cursor: inherit;
+    display: block;
+    fill: none;
+    height: 0.8rem;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.5;
+    width: 0.8rem;
   }
 
   .plot-action:disabled {

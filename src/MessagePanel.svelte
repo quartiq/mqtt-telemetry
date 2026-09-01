@@ -2,13 +2,9 @@
 
 <script lang="ts">
   import TreeView from "./TreeView.svelte";
-  import {
-    formatPayload,
-    formatTelemetryTime,
-    type DisplayTimeZone,
-    type JsonSnapshot,
-    type TelemetryMessage,
-  } from "./lib/model";
+  import type { JsonSnapshot } from "./lib/json";
+  import { formatPayload, type TelemetryMessage } from "./lib/telemetry";
+  import { formatTelemetryTime, type DisplayTimeZone } from "./lib/time";
 
   type Props = {
     message?: TelemetryMessage;
@@ -22,6 +18,7 @@
     checked: Set<string>;
     checkDisabled: boolean;
     subtreePlotCount: number;
+    plotCount: number;
     subtreeMessages: number;
     showPlotHint: boolean;
     timeZone: DisplayTimeZone;
@@ -29,6 +26,7 @@
     ontoggle: (id: string, open: boolean) => void;
     oncheck: (id: string) => void;
     onremoveplots: () => void;
+    onremoveallplots: () => void;
   };
 
   let {
@@ -43,6 +41,7 @@
     checked,
     checkDisabled,
     subtreePlotCount,
+    plotCount,
     subtreeMessages,
     showPlotHint,
     timeZone,
@@ -50,6 +49,7 @@
     ontoggle,
     oncheck,
     onremoveplots,
+    onremoveallplots,
   }: Props = $props();
   let fieldMissing = $derived(
     Boolean(selected && snapshot && !snapshot.nodes.has(selected)),
@@ -57,23 +57,27 @@
   let statistics = $derived.by(() => {
     if (!message) return [];
     const items = [
-      following ? "Following latest" : "Historical",
-      `received ${formatTelemetryTime(message.receivedAt, { timeZone, date: true, milliseconds: true })}`,
+      following ? "Latest" : "Historical",
+      formatTelemetryTime(message.receivedAt, {
+        timeZone,
+        date: true,
+        milliseconds: true,
+      }),
     ];
     if (message.retained) items.push("retained");
     if (message.duplicate) items.push("possible duplicate");
-    items.push(`QoS ${message.qos}`, `${message.bytes.toLocaleString()} bytes`);
-    if (snapshot)
-      items.push(`${snapshot.nodes.size.toLocaleString()} JSON nodes`);
+    items.push(`${message.bytes.toLocaleString()} bytes`);
+    if (snapshot) items.push(`${snapshot.nodes.size.toLocaleString()} nodes`);
     if (showPlotHint) items.push("check a numeric field to plot");
     if (message.unsafeIntegers) items.push("unsafe integer precision");
     return items;
   });
+  let tagline = $derived(statistics.join(" · "));
 </script>
 
 <section class="panel message-panel">
   <header class="panel-header">
-    <h2 title={topic}>{topic || "No topic selected"}</h2>
+    <h2>Value</h2>
     <div class="panel-controls">
       {#if fieldMissing}
         <span
@@ -82,19 +86,28 @@
           >field absent</span
         >
       {/if}
-      {#if subtreePlotCount}
-        <button
-          class="remove-plots"
-          type="button"
-          title="Remove plots for numeric fields in the selected JSON value"
-          onclick={onremoveplots}
-          >Remove {subtreePlotCount}
-          {subtreePlotCount === 1 ? "plot" : "plots"}</button
-        >
+      {#if subtreePlotCount || plotCount > 1}
+        <div class="remove-controls">
+          <span class="meta">Remove Plots</span>
+          {#if subtreePlotCount}
+            <button
+              aria-label={`Remove ${subtreePlotCount} ${subtreePlotCount === 1 ? "plot" : "plots"} for the selected value`}
+              type="button"
+              onclick={onremoveplots}>Value ({subtreePlotCount})</button
+            >
+          {/if}
+          {#if plotCount > 1}
+            <button
+              aria-label="Remove all plots"
+              type="button"
+              onclick={onremoveallplots}>All</button
+            >
+          {/if}
+        </div>
       {/if}
     </div>
     {#if statistics.length}
-      <div class="panel-stats meta">
+      <div class="panel-stats meta" title={tagline}>
         {#each statistics as statistic}<span>{statistic}</span>{/each}
       </div>
     {/if}
@@ -152,19 +165,42 @@
     font-size: var(--text-small);
   }
 
-  .remove-plots {
-    white-space: nowrap;
-  }
-
-  .panel-controls {
+  .panel-controls,
+  .remove-controls {
     align-items: baseline;
     display: flex;
     gap: var(--space-tight);
   }
 
+  .remove-controls {
+    white-space: nowrap;
+  }
+
   @media (max-width: 800px) {
     .message-panel {
       height: clamp(16rem, 40svh, 24rem);
+    }
+  }
+
+  @media (max-width: 420px) {
+    .message-panel > .panel-header {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .message-panel > .panel-header h2 {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .panel-controls {
+      grid-column: 1;
+      grid-row: 2;
+      justify-content: flex-end;
+    }
+
+    .panel-stats {
+      grid-column: 1;
+      grid-row: 3;
     }
   }
 </style>

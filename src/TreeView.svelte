@@ -106,7 +106,8 @@
 <style>
   ul {
     margin: 0;
-    min-width: 0;
+    min-width: 100%;
     padding: 0;
+    width: max-content;
   }
 </style>
