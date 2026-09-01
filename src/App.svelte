@@ -1129,7 +1129,7 @@
         </label>
         <label
           class="display-option"
-          title="Only changes the visible plot interval and its statistics; buffered history is not deleted"
+          title="Only changes the visible plot interval and its statistics; history is not deleted"
         >
           <span class="meta">Show</span>
           <DurationSelect
@@ -1219,20 +1219,23 @@
           <div class="topic-actions">
             <span class="meta">Clear history</span>
             <button
+              aria-label="Clear history for the selected topic"
               disabled={!currentHistory.length}
-              title="Clear local history for the selected topic only. Broker-retained messages are unchanged."
+              title="Broker-retained messages are unaffected"
               type="button"
               onclick={clearTopicHistory}>Topic</button
             >
             <button
+              aria-label="Clear history for the selected topic and its descendants"
               disabled={!selectedSubtreeCount}
-              title="Clear local history for the selected topic and its subtopics. Broker-retained messages are unchanged."
+              title="Broker-retained messages are unaffected"
               type="button"
               onclick={clearTopicSubtree}>Subtree</button
             >
             <button
+              aria-label="Clear all history"
               disabled={!topicSnapshot.bufferedMessages}
-              title="Clear all locally buffered messages. Topics, plots, settings, and broker-retained messages are unchanged."
+              title="Broker-retained messages are unaffected"
               type="button"
               onclick={clearAllHistory}>All</button
             >
@@ -1248,20 +1251,20 @@
           <div class="topic-actions">
             <span class="meta">Remove plots</span>
             <button
+              aria-label="Remove plots for the selected topic"
               disabled={!selectedTopicPlotCount}
-              title="Remove plots for the selected topic"
               type="button"
               onclick={removeTopicPlots}>Topic</button
             >
             <button
+              aria-label="Remove plots for the selected topic and its descendants"
               disabled={!selectedTopicSubtreePlotCount}
-              title="Remove plots for the selected topic and its subtopics"
               type="button"
               onclick={removeTopicSubtreePlots}>Subtree</button
             >
             <button
+              aria-label="Remove all plots"
               disabled={!route.plots.length}
-              title="Remove every plot"
               type="button"
               onclick={() => removePlots(() => true)}>All</button
             >

@@ -194,7 +194,7 @@ pre {
 
 .app-header h1,
 .breadcrumb span,
-.topics .meta {
+.topics > header .meta {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -368,8 +368,9 @@ pre {
 }
 
 .topic-actions > .meta {
-  flex: 0 0 3.4rem;
+  flex: 0 0 5.8rem;
   margin-left: 0;
+  white-space: nowrap;
 }
 
 .count {

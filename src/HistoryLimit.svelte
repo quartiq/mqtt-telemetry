@@ -37,7 +37,7 @@
     /topic
   </label>
   <label
-    title="Discard locally buffered live messages older than this; retained snapshots are kept separately"
+    title="Discard history messages older than this; retained snapshots are kept separately"
   >
     Age
     <DurationSelect
