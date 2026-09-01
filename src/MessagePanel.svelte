@@ -87,7 +87,7 @@
       {/if}
       {#if subtreePlotCount || plotCount > 1}
         <div class="remove-controls">
-          <span class="meta">Remove</span>
+          <span class="meta">Remove Plots</span>
           {#if subtreePlotCount}
             <button
               aria-label={`Remove ${subtreePlotCount} ${subtreePlotCount === 1 ? "plot" : "plots"} for the selected value`}

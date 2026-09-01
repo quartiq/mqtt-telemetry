@@ -135,7 +135,7 @@
         >Latest</button
       >
       <div class="clear-controls">
-        <span class="meta">Clear</span>
+        <span class="meta">Clear History</span>
         <button
           aria-label="Clear history for the selected topic"
           disabled={!canClearTopic}

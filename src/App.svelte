@@ -1066,11 +1066,6 @@
           >
         </button>
       </h1>
-      {#if selectedTopic}
-        <div class="breadcrumb" aria-label="Selected topic">
-          <span>{selectedTopic}</span>
-        </div>
-      {/if}
     </div>
     <div class="header-controls">
       <div class="connection-state">
@@ -1091,6 +1086,14 @@
             >{buildLabel}</span
           >
         {/if}
+      </div>
+      <div class="history-options" aria-label="History policy">
+        <HistoryPolicy
+          value={route.historyLimit}
+          onchange={changeHistoryLimit}
+          ageMs={route.historyAgeMs}
+          onagechange={changeHistoryAge}
+        />
       </div>
       <div class="display-options" aria-label="Display">
         <label class="display-option">
@@ -1176,49 +1179,41 @@
   </header>
 
   <aside class="topics panel">
-    <header>
+    <header class="topics-header">
       <h2>
         Topics <span class="count"
           >({topicSnapshot.topicCount.toLocaleString()})</span
         >
       </h2>
+      <div class="topic-search">
+        <input
+          aria-label="Search topic paths"
+          id="topic-search"
+          onkeydown={topicSearchKeydown}
+          placeholder="Substring or MQTT filter"
+          title="Plain text matches anywhere in a topic path; + and # use MQTT filter syntax. Press / to focus."
+          type="search"
+          bind:value={topicSearch}
+        />
+        {#if topicSearch.trim()}
+          {#if topicFilter.error}
+            <span class="meta problem" title={topicFilter.error}
+              >Invalid filter</span
+            >
+          {:else}
+            <span class="meta">
+              {topicFilter.matches.length.toLocaleString()}
+              {topicFilter.matches.length === 1 ? "match" : "matches"}
+            </span>
+          {/if}
+        {/if}
+      </div>
       {#if topicWarning}
         <span class="meta problem" title="Browser safety limits applied">
           {topicWarning}
         </span>
       {/if}
     </header>
-    <div class="topic-policy" aria-label="History policy">
-      <HistoryPolicy
-        value={route.historyLimit}
-        onchange={changeHistoryLimit}
-        ageMs={route.historyAgeMs}
-        onagechange={changeHistoryAge}
-      />
-    </div>
-    <div class="topic-search">
-      <input
-        aria-label="Search topic paths"
-        id="topic-search"
-        onkeydown={topicSearchKeydown}
-        placeholder="Substring or MQTT filter"
-        title="Plain text matches anywhere in a topic path; + and # use MQTT filter syntax. Press / to focus."
-        type="search"
-        bind:value={topicSearch}
-      />
-      {#if topicSearch.trim()}
-        {#if topicFilter.error}
-          <span class="meta problem" title={topicFilter.error}
-            >Invalid filter</span
-          >
-        {:else}
-          <span class="meta">
-            {topicFilter.matches.length.toLocaleString()}
-            {topicFilter.matches.length === 1 ? "match" : "matches"}
-          </span>
-        {/if}
-      {/if}
-    </div>
     <div class="topic-tree">
       {#if visibleTopics.roots.length}
         <TreeView
