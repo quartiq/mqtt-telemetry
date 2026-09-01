@@ -1074,10 +1074,13 @@
           <span aria-hidden="true" class="disclosure-mark"
             >{editingConnection ? "▾" : "▸"}</span
           >
-          <span class="broker-label">{route.broker || "Connect to MQTT"}</span>
-          {#if route.broker}
-            <span class="subscription-label">{route.filters.join(", ")}</span>
-          {/if}
+          <span class="connection-summary">
+            <span class="broker-label">{route.broker || "Connect to MQTT"}</span
+            >
+            {#if route.broker}
+              <span class="subscription-label">{route.filters.join(", ")}</span>
+            {/if}
+          </span>
         </button>
       </h1>
     </div>
