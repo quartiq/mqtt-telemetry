@@ -77,8 +77,6 @@
 
 <style>
   .plot-dashboard {
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
     display: grid;
     min-height: 0;
     overflow: hidden;
@@ -91,15 +89,10 @@
     grid-template-columns: minmax(0, 1fr);
     min-height: 0;
     overflow: auto;
-    padding: var(--space);
   }
 
   .plot-grid.two-columns {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .empty {
-    padding: var(--space);
   }
 
   @media (max-width: 800px) {

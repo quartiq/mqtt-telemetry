@@ -129,7 +129,6 @@ pre {
 
 .panel > header {
   align-items: baseline;
-  border-bottom: 1px solid var(--border);
   display: flex;
   gap: var(--space);
   margin-bottom: var(--space-tight);
