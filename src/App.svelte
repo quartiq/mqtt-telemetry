@@ -1042,7 +1042,7 @@
       <h1>
         <button
           aria-label={route.broker
-            ? `Connection settings for ${route.broker}`
+            ? `Connection settings for ${route.broker}; subscriptions ${route.filters.join(", ")}`
             : "Open connection settings"}
           aria-expanded={editingConnection}
           class="connection-disclosure"
@@ -1050,7 +1050,7 @@
             status === "Resubscribing" ||
             (editingConnection && !route.broker)}
           title={route.broker
-            ? `Connection settings: ${route.broker}`
+            ? `Connection settings: ${route.broker}\nSubscriptions: ${route.filters.join(", ")}`
             : "Connect to an MQTT broker"}
           type="button"
           onclick={editingConnection && route.broker
@@ -1058,6 +1058,9 @@
             : editConnection}
         >
           <span class="broker-label">{route.broker || "Connect to MQTT"}</span>
+          {#if route.broker}
+            <span class="subscription-label">{route.filters.join(", ")}</span>
+          {/if}
           <span aria-hidden="true" class="disclosure-mark"
             >{editingConnection ? "▾" : "▸"}</span
           >
@@ -1179,23 +1182,18 @@
           >({topicSnapshot.topicCount.toLocaleString()})</span
         >
       </h2>
-      <span class="meta" title={route.filters.join("\n")}
-        >{route.filters.join(", ")}</span
-      >
       {#if topicWarning}
         <span class="meta problem" title="Browser safety limits applied">
           {topicWarning}
         </span>
       {/if}
     </header>
-    <div class="topic-policy">
+    <div class="topic-policy" aria-label="History policy">
       <HistoryPolicy
         value={route.historyLimit}
         onchange={changeHistoryLimit}
         ageMs={route.historyAgeMs}
         onagechange={changeHistoryAge}
-        canClear={Boolean(topicSnapshot.bufferedMessages)}
-        onclear={clearAllHistory}
       />
     </div>
     <div class="topic-search">
@@ -1259,6 +1257,7 @@
       checked={checkedJson}
       checkDisabled={plotLimitReached}
       subtreePlotCount={selectedValuePlotCount}
+      plotCount={route.plots.length}
       subtreeMessages={selectedSubtreeCount}
       showPlotHint={Boolean(checkableJson.size && !route.plots.length)}
       timeZone={route.timeZone}
@@ -1266,6 +1265,7 @@
       ontoggle={toggleJson}
       oncheck={togglePlot}
       onremoveplots={removeSelectedValuePlots}
+      onremoveallplots={() => removePlots(() => true)}
     />
     <HistoryTable
       messages={currentHistory}
@@ -1275,10 +1275,12 @@
       timeZone={route.timeZone}
       canClearTopic={Boolean(currentHistory.length)}
       canClearSubtree={Boolean(selectedSubtreeCount)}
+      canClearAll={Boolean(topicSnapshot.bufferedMessages)}
       onselect={selectHistory}
       onlatest={selectLatest}
       oncleartopic={clearTopicHistory}
       onclearsubtree={clearTopicSubtree}
+      onclearall={clearAllHistory}
     />
     <PlotDashboard
       plots={dashboardPlots}
@@ -1289,7 +1291,6 @@
       onmove={movePlot}
       onremove={(plot) =>
         removePlots((current) => plotKey(current) === plotKey(plot))}
-      onremoveall={() => removePlots(() => true)}
       onshowall={() => changePlotWindow(null)}
     />
   </section>

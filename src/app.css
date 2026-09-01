@@ -235,7 +235,18 @@ pre {
 }
 
 .broker-label {
+  flex: 0 1 auto;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subscription-label {
+  color: var(--muted);
+  flex: 1 1 auto;
+  font-size: var(--text-small);
+  min-width: 2rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -21,10 +21,12 @@
     timeZone: DisplayTimeZone;
     canClearTopic: boolean;
     canClearSubtree: boolean;
+    canClearAll: boolean;
     onselect: (id: number) => void;
     onlatest: () => void;
     oncleartopic: () => void;
     onclearsubtree: () => void;
+    onclearall: () => void;
   };
 
   let {
@@ -35,10 +37,12 @@
     timeZone,
     canClearTopic,
     canClearSubtree,
+    canClearAll,
     onselect,
     onlatest,
     oncleartopic,
     onclearsubtree,
+    onclearall,
   }: Props = $props();
   const rowLimit = 500;
   let activeId = $derived(selectedId ?? messages.at(-1)?.id);
@@ -146,6 +150,13 @@
           type="button"
           onclick={onclearsubtree}>Subtree</button
         >
+        <button
+          aria-label="Clear all history"
+          disabled={!canClearAll}
+          title="Does not clear retained broker messages"
+          type="button"
+          onclick={onclearall}>All</button
+        >
       </div>
     </div>
     <div class="panel-stats meta">
@@ -176,7 +187,11 @@
     <div class="table-scroll">
       <table class:dated={showDate}>
         <thead>
-          <tr><th>Time</th><th>Delivery</th><th>Value</th></tr>
+          <tr>
+            <th>Time</th><th>Value</th><th
+              title="R: retained; D: possible redelivery">R/D</th
+            >
+          </tr>
         </thead>
         <tbody>
           {#each visibleMessages as message (message.id)}
@@ -193,19 +208,19 @@
               onkeydown={(event) => keydown(event, message.id)}
             >
               <td>{timestamp(message.receivedAt)}</td>
+              <td title={value}>{value}</td>
               <td
                 title={[
-                  `QoS ${message.qos}`,
                   message.retained ? "Retained message" : "",
                   message.duplicate ? "Possible MQTT redelivery" : "",
                 ]
                   .filter(Boolean)
                   .join(" · ")}
-                >{message.retained ? "retained · " : ""}QoS {message.qos}{message.duplicate
-                  ? " · DUP"
-                  : ""}</td
+                >{message.retained ? "R" : ""}{message.retained &&
+                message.duplicate
+                  ? " "
+                  : ""}{message.duplicate ? "D" : ""}</td
               >
-              <td title={value}>{value}</td>
             </tr>
             {#if gapBefore.has(message.id)}
               <tr class="gap-row">
@@ -264,6 +279,7 @@
     border-collapse: collapse;
     font-size: var(--text-small);
     table-layout: fixed;
+    min-width: 36rem;
     width: 100%;
   }
 
@@ -295,9 +311,9 @@
     width: 11rem;
   }
 
-  th:nth-child(2),
-  td:nth-child(2) {
-    width: 7.5rem;
+  th:last-child,
+  td:last-child {
+    width: 2.5rem;
   }
 
   tbody .message-row {
@@ -327,6 +343,28 @@
   @media (max-width: 800px) {
     .history-panel {
       height: clamp(16rem, 40svh, 24rem);
+    }
+  }
+
+  @media (max-width: 420px) {
+    .history-panel > .panel-header {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .history-panel > .panel-header h2 {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .controls {
+      grid-column: 1;
+      grid-row: 2;
+      justify-content: flex-end;
+    }
+
+    .panel-stats {
+      grid-column: 1;
+      grid-row: 3;
     }
   }
 </style>

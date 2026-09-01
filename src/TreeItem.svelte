@@ -27,12 +27,15 @@
     context.revision;
     return context.activity.get(node.id);
   });
+  const activityDurationMs = 1100;
 
   function indicateActivity(node: HTMLElement, initial?: typeof activity) {
     let timer = 0;
     const run = (next?: typeof activity) => {
       clearTimeout(timer);
-      const remaining = next ? 1000 - (performance.now() - next.at) : 0;
+      const remaining = next
+        ? activityDurationMs - (performance.now() - next.at)
+        : 0;
       node.style.opacity = remaining > 0 ? "1" : "0";
       if (remaining > 0)
         timer = window.setTimeout(() => {
