@@ -638,7 +638,8 @@
             plotNow = Date.now();
             scheduleRender();
             if (!added) return;
-            const root = store.ancestorIds(added.nodeId).at(-1);
+            const ancestors = store.ancestorIds(added.nodeId);
+            const root = ancestors.at(-1);
             if (root && !autoExpandedTopicRoots.has(root)) {
               autoExpandedTopicRoots.add(root);
               topicExpanded = new Set([...topicExpanded, root]);
@@ -646,7 +647,8 @@
             const activity = {
               at: performance.now(),
             };
-            topicActivity.set(added.nodeId, activity);
+            for (const id of [added.nodeId, ...ancestors])
+              topicActivity.set(id, activity);
             if (route.selectedTopic === topic) {
               selectLoadedTopic(added.nodeId, false);
             }

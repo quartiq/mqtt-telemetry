@@ -513,6 +513,20 @@ describe("topic history", () => {
     ]);
   });
 
+  it("returns topic ancestors from the immediate parent to the root", () => {
+    const store = new TelemetryStore(10);
+    store.add("a/b/c", encode("1"), {
+      receivedAt: 1,
+      retained: false,
+      qos: 0,
+    });
+    const leaf = store.nodeId("a/b/c") as string;
+    expect(store.ancestorIds(leaf).map((id) => store.topic(id))).toEqual([
+      "a/b",
+      "a",
+    ]);
+  });
+
   it("bounds discovered topics and omits oversized payload contents", () => {
     const store = new TelemetryStore(10, {
       maxTopicNodes: 2,
