@@ -2,16 +2,18 @@
 
 <script lang="ts">
   import {
-    formatTelemetryTime,
-    historyNeedsDate,
     messagePayloadPreview,
     messageFrequency,
     messageSpan,
     selectedMessageValue,
-    type JsonPath,
-    type DisplayTimeZone,
     type TelemetryMessage,
-  } from "./lib/model";
+  } from "./lib/telemetry";
+  import type { JsonPath } from "./lib/json";
+  import {
+    formatTelemetryTime,
+    historyNeedsDate,
+    type DisplayTimeZone,
+  } from "./lib/time";
 
   type Props = {
     expanded: boolean;

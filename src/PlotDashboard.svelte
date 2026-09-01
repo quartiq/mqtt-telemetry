@@ -2,11 +2,8 @@
 
 <script lang="ts">
   import TelemetryPlot from "./TelemetryPlot.svelte";
-  import {
-    plotTimeDomain,
-    type DisplayTimeZone,
-    type PlotPoint,
-  } from "./lib/model";
+  import { plotTimeDomain, type PlotPoint } from "./lib/plot";
+  import type { DisplayTimeZone } from "./lib/time";
   import type { PlotRef } from "./lib/routes";
   import { formatDuration } from "./lib/duration";
 

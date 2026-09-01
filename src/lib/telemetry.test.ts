@@ -1,34 +1,40 @@
 import { describe, expect, it } from "vitest";
 import {
-  TelemetryStore,
-  downsamplePlotPoints,
-  displayDatesDiffer,
   fieldLabel,
-  formatPlotNumber,
-  formatPlotTick,
-  formatTelemetryTime,
   getJsonPath,
-  historyNeedsDate,
   jsonPath,
   jsonTree,
-  messagePayloadPreview,
-  messageFrequency,
-  messageSpan,
+  parseJsonPath,
+  resolveJsonPath,
+  telemetryPageTitle,
+} from "./json";
+import {
+  downsamplePlotPoints,
+  formatPlotNumber,
+  formatPlotTick,
   nearestPlotPoint,
   nicePlotScale,
-  parsePayload,
-  parseJsonPath,
+  plotPointInsertionIndex,
   plotSeries,
   plotSeriesPath,
   plotStatistics,
-  plotPointInsertionIndex,
   plotTimeDomain,
-  telemetryPageTitle,
   timeTickValues,
-  resolveJsonPath,
+} from "./plot";
+import {
+  TelemetryStore,
+  messageFrequency,
+  messagePayloadPreview,
+  messageSpan,
+  parsePayload,
   selectedMessageValue,
   type TelemetryMessage,
-} from "./model";
+} from "./telemetry";
+import {
+  displayDatesDiffer,
+  formatTelemetryTime,
+  historyNeedsDate,
+} from "./time";
 import { MAX_PLOTS } from "./routes";
 
 const encode = (value: string) => new TextEncoder().encode(value);

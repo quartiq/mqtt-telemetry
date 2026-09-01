@@ -3,18 +3,20 @@
 <script lang="ts">
   import {
     downsamplePlotPoints,
-    displayDatesDiffer,
     formatPlotNumber,
     formatPlotTick,
-    formatTelemetryTime,
     nearestPlotPoint,
     nicePlotScale,
     plotPointInsertionIndex,
     plotStatistics,
     timeTickValues,
     type PlotPoint,
+  } from "./lib/plot";
+  import {
+    displayDatesDiffer,
+    formatTelemetryTime,
     type DisplayTimeZone,
-  } from "./lib/model";
+  } from "./lib/time";
 
   type Props = {
     points: PlotPoint[];

@@ -2,13 +2,9 @@
 
 <script lang="ts">
   import TreeView from "./TreeView.svelte";
-  import {
-    formatPayload,
-    formatTelemetryTime,
-    type DisplayTimeZone,
-    type JsonSnapshot,
-    type TelemetryMessage,
-  } from "./lib/model";
+  import type { JsonSnapshot } from "./lib/json";
+  import { formatPayload, type TelemetryMessage } from "./lib/telemetry";
+  import { formatTelemetryTime, type DisplayTimeZone } from "./lib/time";
 
   type Props = {
     message?: TelemetryMessage;

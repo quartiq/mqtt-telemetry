@@ -1,9 +1,11 @@
-import { jsonPath, parseJsonPath, type DisplayTimeZone } from "./model";
+import { jsonPath, parseJsonPath } from "./json";
+import type { DisplayTimeZone } from "./time";
 import {
   MAX_HISTORY_AGE_SECONDS,
   MAX_HISTORY_LIMIT,
   MAX_PLOTS,
   defaultRoute,
+  webSocketBrokerError,
   type AppRoute,
   type LaunchRoute,
   type PlotRef,
@@ -142,7 +144,7 @@ export function parseDashboard(value: unknown): Dashboard {
   if (!isRecord(value)) throw new Error("Dashboard must be a JSON object.");
   if (value.format !== DASHBOARD_FORMAT || value.version !== DASHBOARD_VERSION)
     throw new Error("Unsupported MQTT Telemetry dashboard format or version.");
-  if (typeof value.broker !== "string" || !webSocketUrl(value.broker))
+  if (typeof value.broker !== "string" || webSocketBrokerError(value.broker))
     throw new Error(
       "Dashboard broker must be a ws:// or wss:// URL without credentials.",
     );
@@ -228,19 +230,6 @@ export function dashboardShareUrl(route: AppRoute, location: Location): string {
   url.search = "";
   url.hash = `${DASHBOARD_FRAGMENT}=${encodeURIComponent(dashboardJson(route, false))}`;
   return url.href;
-}
-
-function webSocketUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return (
-      (url.protocol === "ws:" || url.protocol === "wss:") &&
-      !url.username &&
-      !url.password
-    );
-  } catch {
-    return false;
-  }
 }
 
 function integerBetween(

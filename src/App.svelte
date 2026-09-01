@@ -10,7 +10,6 @@
   import PlotDashboard, { type DashboardPlot } from "./PlotDashboard.svelte";
   import TreeView from "./TreeView.svelte";
   import {
-    TelemetryStore,
     fieldLabel,
     getJsonPath,
     jsonPath,
@@ -18,15 +17,14 @@
     parseJsonPath,
     resolveJsonPath,
     telemetryPageTitle,
-    type DisplayTimeZone,
-  } from "./lib/model";
+  } from "./lib/json";
+  import { TelemetryStore } from "./lib/telemetry";
+  import type { DisplayTimeZone } from "./lib/time";
   import { MqttSession, type SessionStatus } from "./lib/mqtt-session";
   import { randomId } from "./lib/random-id";
   import {
-    dashboardFromRoute,
     dashboardJson,
     dashboardShareUrl,
-    parseDashboard,
     parseDashboardJson,
     readInlineDashboard,
     resolveStartupRoute,
@@ -45,20 +43,16 @@
     type PlotRef,
   } from "./lib/routes";
   import {
+    browserViewState,
+    messageIdFromViewState,
+    routeFromViewState,
+  } from "./lib/view-state";
+  import {
     filterTopicTree,
     selectionAfterCollapse,
     treeAncestorIds,
     type TreeActivity,
   } from "./lib/tree";
-
-  type ViewState = {
-    app: "mqtt-telemetry";
-    token: string;
-    messageId: number | null;
-    dashboard: Dashboard;
-    selectedTopic: string;
-    fieldPath: string | null;
-  };
 
   const inlineDashboard = readInlineDashboard(location.hash);
   const launchRoute = readLaunchRoute(location);
@@ -114,7 +108,7 @@
 
   if (location.search || location.hash || !storedRoute)
     history.replaceState(
-      historyState(null),
+      browserViewState(initialRoute, viewToken, null),
       "",
       launchRoute.kind === "invalid" && inlineDashboard.kind === "absent"
         ? location.href
@@ -354,55 +348,6 @@
     };
   });
 
-  function routeFromViewState(state: unknown): AppRoute | undefined {
-    if (
-      typeof state !== "object" ||
-      state === null ||
-      !("app" in state) ||
-      state.app !== "mqtt-telemetry" ||
-      !("dashboard" in state)
-    )
-      return undefined;
-    try {
-      const dashboard = parseDashboard(state.dashboard);
-      const base = routeFromDashboard(dashboard);
-      const selectedTopic =
-        "selectedTopic" in state && typeof state.selectedTopic === "string"
-          ? state.selectedTopic
-          : base.selectedTopic;
-      const parsedField =
-        "fieldPath" in state && typeof state.fieldPath === "string"
-          ? parseJsonPath(state.fieldPath)
-          : undefined;
-      return {
-        ...base,
-        selectedTopic,
-        fieldPath:
-          "fieldPath" in state && state.fieldPath === null
-            ? null
-            : parsedField
-              ? jsonPath(parsedField)
-              : base.fieldPath,
-      };
-    } catch {
-      return undefined;
-    }
-  }
-
-  function historyState(
-    messageId = selectedMessageId,
-    nextRoute = route,
-  ): ViewState {
-    return {
-      app: "mqtt-telemetry",
-      token: viewToken,
-      messageId,
-      dashboard: dashboardFromRoute(nextRoute),
-      selectedTopic: nextRoute.selectedTopic,
-      fieldPath: nextRoute.fieldPath,
-    };
-  }
-
   function writeRoute(
     next: AppRoute,
     messageId: number | null,
@@ -411,7 +356,7 @@
     route = next;
     const method = replace ? "replaceState" : "pushState";
     history[method](
-      historyState(messageId, next),
+      browserViewState(next, viewToken, messageId),
       "",
       launchUrl(next, location),
     );
@@ -970,13 +915,7 @@
     if (id) selectLoadedTopic(id, selectedTopic !== route.selectedTopic);
     else if (route.selectedTopic) selectedTopicId = "";
 
-    const view = state as Partial<ViewState> | null;
-    const messageId =
-      view?.app === "mqtt-telemetry" &&
-      view.token === viewToken &&
-      typeof view.messageId === "number"
-        ? view.messageId
-        : null;
+    const messageId = messageIdFromViewState(state, viewToken);
     selectedMessageId = currentHistory.some(
       (message) => message.id === messageId,
     )

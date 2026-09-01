@@ -1,4 +1,4 @@
-import type { DisplayTimeZone } from "./model";
+import type { DisplayTimeZone } from "./time";
 
 export const DEFAULT_HISTORY_LIMIT = 1000;
 export const DEFAULT_PLOT_WINDOW_MS: number | null = null;
@@ -49,6 +49,15 @@ export function isWebSocketBroker(
   value: string,
   pageProtocol = globalThis.location?.protocol ?? "http:",
 ): string | undefined {
+  const error = webSocketBrokerError(value);
+  if (error) return error;
+  if (pageProtocol === "https:" && new URL(value).protocol === "ws:") {
+    return "An HTTPS page cannot connect to a ws:// broker. Use wss:// or open the app over HTTP.";
+  }
+  return undefined;
+}
+
+export function webSocketBrokerError(value: string): string | undefined {
   let url: URL;
   try {
     url = new URL(value);
@@ -60,9 +69,6 @@ export function isWebSocketBroker(
   }
   if (url.username || url.password) {
     return "Do not put credentials in the broker URL. Use the username and password fields.";
-  }
-  if (pageProtocol === "https:" && url.protocol === "ws:") {
-    return "An HTTPS page cannot connect to a ws:// broker. Use wss:// or open the app over HTTP.";
   }
   return undefined;
 }
