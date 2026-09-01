@@ -19,8 +19,12 @@
     field: JsonPath | undefined;
     fieldLabel?: string;
     timeZone: DisplayTimeZone;
+    canClearTopic: boolean;
+    canClearSubtree: boolean;
     onselect: (id: number) => void;
     onlatest: () => void;
+    oncleartopic: () => void;
+    onclearsubtree: () => void;
   };
 
   let {
@@ -29,8 +33,12 @@
     field,
     fieldLabel,
     timeZone,
+    canClearTopic,
+    canClearSubtree,
     onselect,
     onlatest,
+    oncleartopic,
+    onclearsubtree,
   }: Props = $props();
   const rowLimit = 500;
   let activeId = $derived(selectedId ?? messages.at(-1)?.id);
@@ -122,6 +130,23 @@
       <button disabled={selectedId === null} type="button" onclick={onlatest}
         >Latest</button
       >
+      <div class="clear-controls">
+        <span class="meta">Clear</span>
+        <button
+          aria-label="Clear history for the selected topic"
+          disabled={!canClearTopic}
+          title="Does not clear retained broker messages"
+          type="button"
+          onclick={oncleartopic}>Topic</button
+        >
+        <button
+          aria-label="Clear history for the selected topic and its descendants"
+          disabled={!canClearSubtree}
+          title="Does not clear retained broker messages"
+          type="button"
+          onclick={onclearsubtree}>Subtree</button
+        >
+      </div>
     </div>
     <div class="panel-stats meta">
       <span>{messages.length.toLocaleString()} messages</span>
@@ -210,11 +235,19 @@
     min-height: 0;
   }
 
-  .controls {
+  .controls,
+  .clear-controls {
     align-items: baseline;
     display: flex;
-    gap: var(--space-tight);
     white-space: nowrap;
+  }
+
+  .controls {
+    gap: var(--space);
+  }
+
+  .clear-controls {
+    gap: var(--space-tight);
   }
 
   .table-scroll {

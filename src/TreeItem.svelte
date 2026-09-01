@@ -210,6 +210,7 @@
     display: flex;
     flex: 0 0 0.55rem;
     justify-content: center;
+    margin-right: 0.2rem;
     width: 0.55rem;
   }
 
