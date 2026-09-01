@@ -19,7 +19,6 @@
     resolveJsonPath,
     telemetryPageTitle,
     type DisplayTimeZone,
-    type JsonPath,
   } from "./lib/model";
   import { MqttSession, type SessionStatus } from "./lib/mqtt-session";
   import { randomId } from "./lib/random-id";
@@ -90,7 +89,6 @@
   let revision = $state(0);
   let selectedTopicId = $state("");
   let selectedMessageId = $state<number | null>(null);
-  let selectedField = $state<JsonPath | undefined>();
   let fieldByTopic = new Map<string, string | null>();
   let revealedFieldKey = "";
   let topicExpanded = $state(new Set<string>());
@@ -177,19 +175,24 @@
       ? jsonTree(currentMessage.payload.value)
       : undefined,
   );
-  let activeField = $derived.by(() => {
-    if (route.fieldPath === null || !selectedField) return undefined;
-    return jsonPath(selectedField) === route.fieldPath
-      ? selectedField
-      : undefined;
-  });
-  let selectedJsonId = $derived(
-    route.fieldPath === null
-      ? ""
-      : activeField
-        ? jsonPath(activeField)
-        : route.fieldPath,
+  let selectedFieldPath = $derived(
+    selectedTopic
+      ? route.selectedTopic === selectedTopic
+        ? route.fieldPath
+        : (fieldByTopic.get(selectedTopic) ?? null)
+      : null,
   );
+  let activeField = $derived.by(() => {
+    if (selectedFieldPath === null) return undefined;
+    for (let index = currentHistory.length - 1; index >= 0; index -= 1) {
+      const payload = currentHistory[index].payload;
+      if (payload.kind !== "json") continue;
+      const resolved = resolveJsonPath(payload.value, selectedFieldPath);
+      if (resolved) return resolved;
+    }
+    return undefined;
+  });
+  let selectedJsonId = $derived(selectedFieldPath ?? "");
   let checkableJson = $derived.by(() => {
     const ids = new Set<string>();
     if (currentMessage?.payload.kind !== "json" || !jsonSnapshot) return ids;
@@ -231,11 +234,11 @@
     });
   });
   let selectedFieldLabel = $derived(
-    route.fieldPath === null
+    selectedFieldPath === null
       ? undefined
       : activeField
         ? fieldLabel(activeField)
-        : route.fieldPath,
+        : selectedFieldPath,
   );
   let topicWarning = $derived(
     [
@@ -259,37 +262,15 @@
 
   $effect(() => {
     const topic = selectedTopic;
-    if (!topic) {
-      selectedField = undefined;
-      return;
-    }
-    const path =
-      route.selectedTopic === topic
-        ? route.fieldPath
-        : (fieldByTopic.get(topic) ?? null);
+    const path = selectedFieldPath;
+    if (!topic) return;
     fieldByTopic.set(topic, path);
-    if (path === null) {
-      selectedField = undefined;
-      return;
-    }
-    let resolved: JsonPath | undefined;
-    for (let index = currentHistory.length - 1; index >= 0; index -= 1) {
-      const payload = currentHistory[index].payload;
-      if (payload.kind !== "json") continue;
-      resolved = resolveJsonPath(payload.value, path);
-      if (resolved) break;
-    }
-    if (resolved) {
-      if (!selectedField || jsonPath(resolved) !== jsonPath(selectedField))
-        selectedField = resolved;
-      const id = jsonPath(resolved);
-      const revealKey = `${topic}\0${path}`;
-      if (jsonSnapshot?.nodes.has(id) && revealedFieldKey !== revealKey) {
-        revealedFieldKey = revealKey;
-        revealJson(id);
-      }
-    } else {
-      selectedField = undefined;
+    if (path === null || !activeField) return;
+    const id = jsonPath(activeField);
+    const revealKey = `${topic}\0${path}`;
+    if (jsonSnapshot?.nodes.has(id) && revealedFieldKey !== revealKey) {
+      revealedFieldKey = revealKey;
+      revealJson(id);
     }
   });
 
@@ -539,7 +520,6 @@
     revision += 1;
     selectedTopicId = "";
     selectedMessageId = null;
-    selectedField = undefined;
     fieldByTopic = new Map();
     revealedFieldKey = "";
     topicExpanded = new Set();
@@ -765,7 +745,6 @@
     }
     if (reset) {
       selectedMessageId = null;
-      selectedField = undefined;
       revealedFieldKey = "";
     }
   }
@@ -820,7 +799,6 @@
     const path = jsonSnapshot?.paths.get(id);
     if (!path) return;
     const fieldPath = jsonPath(path);
-    selectedField = path;
     fieldByTopic.set(selectedTopic, fieldPath);
     revealedFieldKey = `${selectedTopic}\0${fieldPath}`;
     revealJson(id);
