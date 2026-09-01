@@ -1,10 +1,11 @@
 import { jsonPath, parseJsonPath, type DisplayTimeZone } from "./model";
 import {
-  DEFAULT_PLOT_WINDOW_MS,
   MAX_HISTORY_AGE_SECONDS,
   MAX_HISTORY_LIMIT,
   MAX_PLOTS,
+  defaultRoute,
   type AppRoute,
+  type LaunchRoute,
   type PlotRef,
 } from "./routes";
 
@@ -27,6 +28,62 @@ export type Dashboard = {
   };
   plots: PlotRef[];
 };
+
+export type InlineDashboard =
+  | { kind: "absent" }
+  | { kind: "valid"; dashboard: Dashboard }
+  | { kind: "invalid"; error: string };
+
+export function readInlineDashboard(hash: string): InlineDashboard {
+  const parameters = new URLSearchParams(hash.replace(/^#/, ""));
+  if (!parameters.has(DASHBOARD_FRAGMENT)) return { kind: "absent" };
+  try {
+    return {
+      kind: "valid",
+      dashboard: parseDashboardJson(
+        parameters.get(DASHBOARD_FRAGMENT) as string,
+      ),
+    };
+  } catch (caught) {
+    return {
+      kind: "invalid",
+      error: caught instanceof Error ? caught.message : String(caught),
+    };
+  }
+}
+
+export function resolveStartupRoute(
+  inline: InlineDashboard,
+  launch: LaunchRoute,
+  stored?: AppRoute,
+): { route: AppRoute; error: string } {
+  if (inline.kind === "valid")
+    return { route: routeFromDashboard(inline.dashboard), error: "" };
+  if (inline.kind === "invalid")
+    return { route: defaultRoute(), error: inline.error };
+  if (launch.kind === "valid")
+    return {
+      route:
+        stored && sameLaunchConfiguration(stored, launch.route)
+          ? stored
+          : launch.route,
+      error: "",
+    };
+  if (launch.kind === "invalid")
+    return { route: defaultRoute(), error: launch.error };
+  return { route: stored ?? defaultRoute(), error: "" };
+}
+
+function sameLaunchConfiguration(left: AppRoute, right: AppRoute): boolean {
+  return (
+    left.broker === right.broker &&
+    left.historyLimit === right.historyLimit &&
+    left.historyAgeMs === right.historyAgeMs &&
+    left.plotWindowMs === right.plotWindowMs &&
+    left.filters.length === right.filters.length &&
+    left.filters.every((filter, index) => filter === right.filters[index])
+  );
+}
 
 export function dashboardFromRoute(route: AppRoute): Dashboard {
   return {
@@ -119,9 +176,7 @@ export function parseDashboard(value: unknown): Dashboard {
         : undefined;
   if (!timeZone) throw new Error("Dashboard display time zone is invalid.");
   const plotWindowSeconds =
-    display?.plotWindowSeconds === undefined
-      ? DEFAULT_PLOT_WINDOW_MS / 1000
-      : display.plotWindowSeconds;
+    display?.plotWindowSeconds === undefined ? null : display.plotWindowSeconds;
   if (
     plotWindowSeconds !== null &&
     !integerBetween(plotWindowSeconds, 1, MAX_HISTORY_AGE_SECONDS)

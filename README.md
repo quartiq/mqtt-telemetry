@@ -4,17 +4,21 @@ A read-only MQTT JSON telemetry browser with bounded history and up to eight liv
 
 ## Use
 
-Start with the [live EMQX `dt/#` view with one-hour history](https://telemetry.quartiq.de/?broker=wss://broker.emqx.io:8084/mqtt&sub=dt/%23&history=1000&age=1h), which connects and subscribes immediately.
+Start with a [live public broker `dt/#` view](https://telemetry.quartiq.de/?broker=wss://broker.emqx.io:8084/mqtt&sub=dt/%23), which connects and subscribes immediately.
 
 For another broker, open <https://telemetry.quartiq.de/> and enter its MQTT-over-WebSocket URL, with one subscription filter per line. MQTT excludes `$` topics from `#`; subscribe to `$SYS/#` explicitly when needed.
 
-Launch URLs accept `broker`, repeated `sub`, `history`, and an optional `age` using `s`, `m`, `h`, or `d`. Encode MQTT wildcards as `%23` and `%2B`. These URLs omit plots and credentials; use dashboard JSON to share a complete dashboard.
+The address bar is a compact, bookmarkable launch URL: `broker`, repeated `sub`, `history`, and optional `age` and `window` durations using `s`, `m`, `h`, or `d`. `age` discards older local samples; `window` only limits the plotted interval and defaults to `all`. Encode MQTT wildcards as `%23` and `%2B`.
 
-Select a value to inspect its history. Toggle the square beside a numeric field to plot it. Topic search is a case-insensitive substring search unless it contains MQTT `+` or `#` wildcards.
+Dashboard fragments and launch queries replace rather than merge; a dashboard fragment wins. On reload, matching same-tab state restores dashboard-only details from the cleaned URL, but never overrides a different query. With neither source, same-tab state then defaults are used. Loading a dashboard file replaces the current configuration.
+
+Launch parameters are ordinary query data and may appear in browser or hosting logs. For sensitive broker or topic names, load a dashboard file locally instead.
+
+A topic count is buffered history on that exact topic; nodes without a count are structural branches. Select a counted topic, then toggle the square beside a numeric field to plot it. Topic search is a case-insensitive substring search unless it contains MQTT `+` or `#` wildcards.
 
 Receipt times use a consistent 24-hour clock. Choose Local or UTC from the connected header; saved dashboards retain that choice.
 
-Save a dashboard to keep its broker, subscriptions, retention limits, and plots as JSON; credentials and message history are never included. Load that file to restore it. **Copy link** creates an explicit self-contained bookmark/share link; opening it imports the dashboard and immediately removes the embedded JSON from the address bar.
+A dashboard contains every durable option: launch settings, timezone, and plots. Current selection, tree expansion, credentials, and message history are transient and never included. **Save** writes JSON; **Copy dashboard** creates a self-contained link whose embedded JSON is removed after import.
 
 Browsers require `ws://` or `wss://`; ordinary `mqtt://` TCP endpoints do not work. The hosted HTTPS page requires `wss://` with a browser-trusted certificate. Chromium may additionally request Local Network Access permission for a private or loopback broker.
 

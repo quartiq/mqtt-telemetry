@@ -34,12 +34,12 @@
       type="number"
       {value}
     />
-    live/topic
+    /topic
   </label>
   <label
     title="Discard locally buffered live messages older than this; retained snapshots are kept separately"
   >
-    maximum age
+    Age
     <DurationSelect
       ariaLabel="Maximum live history age"
       noneLabel="none"
@@ -67,6 +67,6 @@
   input {
     height: var(--line);
     padding-block: 0;
-    width: 5.5rem;
+    width: 5rem;
   }
 </style>

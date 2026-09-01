@@ -68,14 +68,24 @@ textarea:focus-visible {
   outline-offset: 1px;
 }
 
-.time-zone {
+.display-options,
+.display-option {
   align-items: baseline;
   display: flex;
-  gap: var(--space-tight);
   white-space: nowrap;
 }
 
-.time-zone select {
+.display-options {
+  flex: none;
+  font-size: var(--text-small);
+  gap: var(--space);
+}
+
+.display-option {
+  gap: var(--space-tight);
+}
+
+.display-option select {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -194,6 +204,49 @@ pre {
   min-width: 0;
 }
 
+.connection-disclosure {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: flex;
+  font: inherit;
+  font-weight: inherit;
+  gap: var(--space-tight);
+  margin: 0;
+  max-width: 100%;
+  min-height: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.connection-disclosure:not(:disabled) {
+  cursor: pointer;
+}
+
+.connection-disclosure:not(:disabled):hover .broker-label {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 0.2em;
+}
+
+.connection-disclosure:disabled {
+  opacity: 1;
+}
+
+.broker-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.disclosure-mark {
+  color: var(--muted);
+  flex: none;
+  font-size: var(--text-small);
+}
+
 .breadcrumb {
   display: flex;
   gap: var(--space-tight);
@@ -307,15 +360,6 @@ pre {
 .topic-actions > .meta {
   flex: 0 0 3.4rem;
   margin-left: 0;
-}
-
-.plot-window {
-  align-items: baseline;
-  color: var(--muted);
-  display: flex;
-  font-size: var(--text-small);
-  gap: var(--space-tight);
-  white-space: nowrap;
 }
 
 .count {

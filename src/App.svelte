@@ -25,12 +25,13 @@
   import { MqttSession, type SessionStatus } from "./lib/mqtt-session";
   import { randomId } from "./lib/random-id";
   import {
-    DASHBOARD_FRAGMENT,
     dashboardFromRoute,
     dashboardJson,
     dashboardShareUrl,
     parseDashboard,
     parseDashboardJson,
+    readInlineDashboard,
+    resolveStartupRoute,
     routeFromDashboard,
     type Dashboard,
   } from "./lib/dashboard";
@@ -64,13 +65,12 @@
   const inlineDashboard = readInlineDashboard(location.hash);
   const launchRoute = readLaunchRoute(location);
   const storedRoute = routeFromViewState(history.state);
-  const initialRoute = inlineDashboard.dashboard
-    ? routeFromDashboard(inlineDashboard.dashboard)
-    : launchRoute.kind === "valid"
-      ? launchRoute.route
-      : launchRoute.kind === "invalid"
-        ? defaultRoute()
-        : (storedRoute ?? defaultRoute());
+  const startup = resolveStartupRoute(
+    inlineDashboard,
+    launchRoute,
+    storedRoute,
+  );
+  const initialRoute = startup.route;
   let route = $state(initialRoute);
   let formBroker = $state(initialRoute.broker);
   let formFilters = $state(initialRoute.filters.join("\n"));
@@ -89,18 +89,13 @@
   let fieldByTopic = new Map<string, string | null>();
   let revealedFieldKey = "";
   let topicExpanded = $state(new Set<string>());
+  let autoExpandedTopicRoots = new Set<string>();
   let topicActivity = $state.raw(new Map<string, TreeActivity>());
   let topicSearch = $state("");
   let jsonExpanded = $state(new Set<string>(["$"]));
   const jsonExpandedByTopic = new Map<string, Set<string>>();
   let status = $state("Idle");
-  let error = $state(
-    inlineDashboard.present
-      ? (inlineDashboard.error ?? "")
-      : launchRoute.kind === "invalid"
-        ? launchRoute.error
-        : "",
-  );
+  let error = $state(startup.error);
   let dashboardNotice = $state("");
   let editingConnection = $state(false);
   let dashboardFileInput: HTMLInputElement;
@@ -117,7 +112,7 @@
     history.replaceState(
       historyState(null),
       "",
-      launchRoute.kind === "invalid" && !inlineDashboard.present
+      launchRoute.kind === "invalid" && inlineDashboard.kind === "absent"
         ? location.href
         : launchUrl(initialRoute, location),
     );
@@ -379,28 +374,6 @@
     };
   });
 
-  function readInlineDashboard(hash: string): {
-    present: boolean;
-    dashboard?: Dashboard;
-    error?: string;
-  } {
-    const parameters = new URLSearchParams(hash.replace(/^#/, ""));
-    if (!parameters.has(DASHBOARD_FRAGMENT)) return { present: false };
-    try {
-      return {
-        present: true,
-        dashboard: parseDashboardJson(
-          parameters.get(DASHBOARD_FRAGMENT) as string,
-        ),
-      };
-    } catch (caught) {
-      return {
-        present: true,
-        error: caught instanceof Error ? caught.message : String(caught),
-      };
-    }
-  }
-
   function routeFromViewState(state: unknown): AppRoute | undefined {
     if (
       typeof state !== "object" ||
@@ -573,6 +546,7 @@
     fieldByTopic = new Map();
     revealedFieldKey = "";
     topicExpanded = new Set();
+    autoExpandedTopicRoots = new Set();
     topicActivity = new Map();
     topicSearch = "";
     jsonExpanded = new Set(["$"]);
@@ -664,6 +638,11 @@
             plotNow = Date.now();
             scheduleRender();
             if (!added) return;
+            const root = store.ancestorIds(added.nodeId).at(-1);
+            if (root && !autoExpandedTopicRoots.has(root)) {
+              autoExpandedTopicRoots.add(root);
+              topicExpanded = new Set([...topicExpanded, root]);
+            }
             const activity = {
               at: performance.now(),
             };
@@ -1081,7 +1060,22 @@
   <main class="browser">
     <header class="app-header panel">
       <div class="identity">
-        <h1 title={route.broker}>{route.broker}</h1>
+        <h1>
+          <button
+            aria-label={`Connection settings for ${route.broker}`}
+            aria-expanded={editingConnection}
+            class="connection-disclosure"
+            disabled={status === "Connecting" || status === "Resubscribing"}
+            title={`Connection settings: ${route.broker}`}
+            type="button"
+            onclick={editingConnection ? cancelConnectionEdit : editConnection}
+          >
+            <span class="broker-label">{route.broker}</span>
+            <span aria-hidden="true" class="disclosure-mark"
+              >{editingConnection ? "▾" : "▸"}</span
+            >
+          </button>
+        </h1>
         {#if selectedTopic}
           <div class="breadcrumb" aria-label="Selected topic">
             <span>{selectedTopic}</span>
@@ -1092,30 +1086,42 @@
         <span aria-live="polite" class:problem={status !== "Connected"}
           >{status}</span
         >
+        <div class="display-options" aria-label="Display">
+          <label class="display-option">
+            <span class="meta">Time</span>
+            <select
+              aria-label="Displayed time zone"
+              title="Display receipt times in the browser time zone or UTC"
+              value={route.timeZone}
+              onchange={changeTimeZone}
+            >
+              <option value="local">Local</option>
+              <option value="utc">UTC</option>
+            </select>
+          </label>
+          <label
+            class="display-option"
+            title="Only changes the visible plot interval and its statistics; buffered history is not deleted"
+          >
+            <span class="meta">Show</span>
+            <DurationSelect
+              ariaLabel="Plot time window"
+              noneLabel="all history"
+              prefix="last "
+              value={route.plotWindowMs}
+              onchange={changePlotWindow}
+            />
+          </label>
+        </div>
         <div class="dashboard-actions" aria-label="Dashboard">
           <button type="button" onclick={saveDashboard}>Save</button>
           <button type="button" onclick={openDashboardFile}>Load…</button>
-          <button type="button" onclick={copyDashboardLink}>Copy link</button>
-        </div>
-        <label class="time-zone">
-          <span class="meta">Time</span>
-          <select
-            aria-label="Displayed time zone"
-            title="Display receipt times in the browser time zone or UTC"
-            value={route.timeZone}
-            onchange={changeTimeZone}
+          <button
+            title="Copy a self-contained link for the complete dashboard"
+            type="button"
+            onclick={copyDashboardLink}>Copy dashboard</button
           >
-            <option value="local">Local</option>
-            <option value="utc">UTC</option>
-          </select>
-        </label>
-        <button
-          aria-expanded={editingConnection}
-          disabled={status === "Connecting" || status === "Resubscribing"}
-          type="button"
-          onclick={editingConnection ? cancelConnectionEdit : editConnection}
-          >Connection…</button
-        >
+        </div>
       </div>
       {#if error}<strong class="header-error">{error}</strong>{/if}
       {#if dashboardNotice}
@@ -1181,19 +1187,19 @@
                 disabled={!currentHistory.length}
                 title="Clear local history for the selected topic only. Broker-retained messages are unchanged."
                 type="button"
-                onclick={clearTopicHistory}>Clear topic</button
+                onclick={clearTopicHistory}>Topic</button
               >
               <button
                 disabled={!selectedSubtreeCount}
                 title="Clear local history for the selected topic and its subtopics. Broker-retained messages are unchanged."
                 type="button"
-                onclick={clearTopicSubtree}>Clear subtree</button
+                onclick={clearTopicSubtree}>Subtree</button
               >
               <button
                 disabled={!topicSnapshot.bufferedMessages}
                 title="Clear all locally buffered messages. Topics, plots, settings, and broker-retained messages are unchanged."
                 type="button"
-                onclick={clearAllHistory}>Clear all</button
+                onclick={clearAllHistory}>All</button
               >
             </div>
             <HistoryLimit
@@ -1208,33 +1214,23 @@
               <span class="meta">Plots</span>
               <button
                 disabled={!selectedTopicPlotCount}
+                title="Remove plots for the selected topic"
                 type="button"
-                onclick={removeTopicPlots}>Remove topic</button
+                onclick={removeTopicPlots}>Topic</button
               >
               <button
                 disabled={!selectedTopicSubtreePlotCount}
+                title="Remove plots for the selected topic and its subtopics"
                 type="button"
-                onclick={removeTopicSubtreePlots}>Remove subtree</button
+                onclick={removeTopicSubtreePlots}>Subtree</button
               >
               <button
                 disabled={!route.plots.length}
+                title="Remove every plot"
                 type="button"
-                onclick={() => removePlots(() => true)}>Remove all</button
+                onclick={() => removePlots(() => true)}>All</button
               >
             </div>
-            <label
-              class="plot-window"
-              title="Only changes the visible plot interval and its statistics; buffered history is not deleted"
-            >
-              <span>Show</span>
-              <DurationSelect
-                ariaLabel="Plot time window"
-                noneLabel="all history"
-                prefix="last "
-                value={route.plotWindowMs}
-                onchange={changePlotWindow}
-              />
-            </label>
           </div>
         </div>
       </div>
@@ -1243,7 +1239,8 @@
           aria-label="Search topic paths"
           id="topic-search"
           onkeydown={topicSearchKeydown}
-          placeholder="Search or MQTT filter  /"
+          placeholder="Substring or MQTT filter"
+          title="Plain text matches anywhere in a topic path; + and # use MQTT filter syntax. Press / to focus."
           type="search"
           bind:value={topicSearch}
         />
@@ -1276,7 +1273,7 @@
         {:else if topicSearch.trim()}
           <p class="empty">No matching topics.</p>
         {:else}
-          <p class="empty">Waiting for messages…</p>
+          <p class="empty">Waiting for subscribed messages…</p>
         {/if}
       </div>
     </aside>
@@ -1294,6 +1291,8 @@
         checked={checkedJson}
         checkDisabled={plotLimitReached}
         subtreePlotCount={selectedValuePlotCount}
+        subtreeMessages={selectedSubtreeCount}
+        showPlotHint={Boolean(checkableJson.size && !route.plots.length)}
         timeZone={route.timeZone}
         onselect={selectJson}
         ontoggle={toggleJson}
