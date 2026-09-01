@@ -10,13 +10,15 @@ For another broker, open <https://telemetry.quartiq.de/> and enter its MQTT-over
 
 The address bar is a compact, bookmarkable launch URL: `broker`, repeated `sub`, `history`, and optional `age` and `window` durations using `s`, `m`, `h`, or `d`. `age` discards older local samples; `window` only limits the plotted interval and defaults to `all`. Encode MQTT wildcards as `%23` and `%2B`.
 
+Dashboard fragments and launch queries replace rather than merge; a dashboard fragment wins. On reload, matching same-tab state restores dashboard-only details from the cleaned URL, but never overrides a different query. With neither source, same-tab state then defaults are used. Loading a dashboard file replaces the current configuration.
+
 Launch parameters are ordinary query data and may appear in browser or hosting logs. For sensitive broker or topic names, load a dashboard file locally instead.
 
 Select a value to inspect its history. Toggle the square beside a numeric field to plot it. Topic search is a case-insensitive substring search unless it contains MQTT `+` or `#` wildcards.
 
 Receipt times use a consistent 24-hour clock. Choose Local or UTC from the connected header; saved dashboards retain that choice.
 
-Save a dashboard to keep the launch settings plus timezone and plots as JSON; credentials and message history are never included. **Copy dashboard** creates a self-contained link; opening it imports the dashboard and replaces the embedded JSON with its compact launch URL.
+A dashboard contains every durable option: launch settings, timezone, and plots. Current selection, tree expansion, credentials, and message history are transient and never included. **Save** writes JSON; **Copy dashboard** creates a self-contained link whose embedded JSON is removed after import.
 
 Browsers require `ws://` or `wss://`; ordinary `mqtt://` TCP endpoints do not work. The hosted HTTPS page requires `wss://` with a browser-trusted certificate. Chromium may additionally request Local Network Access permission for a private or loopback broker.
 

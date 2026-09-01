@@ -25,12 +25,13 @@
   import { MqttSession, type SessionStatus } from "./lib/mqtt-session";
   import { randomId } from "./lib/random-id";
   import {
-    DASHBOARD_FRAGMENT,
     dashboardFromRoute,
     dashboardJson,
     dashboardShareUrl,
     parseDashboard,
     parseDashboardJson,
+    readInlineDashboard,
+    resolveStartupRoute,
     routeFromDashboard,
     type Dashboard,
   } from "./lib/dashboard";
@@ -64,13 +65,12 @@
   const inlineDashboard = readInlineDashboard(location.hash);
   const launchRoute = readLaunchRoute(location);
   const storedRoute = routeFromViewState(history.state);
-  const initialRoute = inlineDashboard.dashboard
-    ? routeFromDashboard(inlineDashboard.dashboard)
-    : launchRoute.kind === "valid"
-      ? launchRoute.route
-      : launchRoute.kind === "invalid"
-        ? defaultRoute()
-        : (storedRoute ?? defaultRoute());
+  const startup = resolveStartupRoute(
+    inlineDashboard,
+    launchRoute,
+    storedRoute,
+  );
+  const initialRoute = startup.route;
   let route = $state(initialRoute);
   let formBroker = $state(initialRoute.broker);
   let formFilters = $state(initialRoute.filters.join("\n"));
@@ -89,18 +89,13 @@
   let fieldByTopic = new Map<string, string | null>();
   let revealedFieldKey = "";
   let topicExpanded = $state(new Set<string>());
+  let autoExpandedTopicRoots = new Set<string>();
   let topicActivity = $state.raw(new Map<string, TreeActivity>());
   let topicSearch = $state("");
   let jsonExpanded = $state(new Set<string>(["$"]));
   const jsonExpandedByTopic = new Map<string, Set<string>>();
   let status = $state("Idle");
-  let error = $state(
-    inlineDashboard.present
-      ? (inlineDashboard.error ?? "")
-      : launchRoute.kind === "invalid"
-        ? launchRoute.error
-        : "",
-  );
+  let error = $state(startup.error);
   let dashboardNotice = $state("");
   let editingConnection = $state(false);
   let dashboardFileInput: HTMLInputElement;
@@ -117,7 +112,7 @@
     history.replaceState(
       historyState(null),
       "",
-      launchRoute.kind === "invalid" && !inlineDashboard.present
+      launchRoute.kind === "invalid" && inlineDashboard.kind === "absent"
         ? location.href
         : launchUrl(initialRoute, location),
     );
@@ -379,28 +374,6 @@
     };
   });
 
-  function readInlineDashboard(hash: string): {
-    present: boolean;
-    dashboard?: Dashboard;
-    error?: string;
-  } {
-    const parameters = new URLSearchParams(hash.replace(/^#/, ""));
-    if (!parameters.has(DASHBOARD_FRAGMENT)) return { present: false };
-    try {
-      return {
-        present: true,
-        dashboard: parseDashboardJson(
-          parameters.get(DASHBOARD_FRAGMENT) as string,
-        ),
-      };
-    } catch (caught) {
-      return {
-        present: true,
-        error: caught instanceof Error ? caught.message : String(caught),
-      };
-    }
-  }
-
   function routeFromViewState(state: unknown): AppRoute | undefined {
     if (
       typeof state !== "object" ||
@@ -573,6 +546,7 @@
     fieldByTopic = new Map();
     revealedFieldKey = "";
     topicExpanded = new Set();
+    autoExpandedTopicRoots = new Set();
     topicActivity = new Map();
     topicSearch = "";
     jsonExpanded = new Set(["$"]);
@@ -664,6 +638,11 @@
             plotNow = Date.now();
             scheduleRender();
             if (!added) return;
+            const root = store.ancestorIds(added.nodeId).at(-1);
+            if (root && !autoExpandedTopicRoots.has(root)) {
+              autoExpandedTopicRoots.add(root);
+              topicExpanded = new Set([...topicExpanded, root]);
+            }
             const activity = {
               at: performance.now(),
             };
@@ -1185,19 +1164,19 @@
                 disabled={!currentHistory.length}
                 title="Clear local history for the selected topic only. Broker-retained messages are unchanged."
                 type="button"
-                onclick={clearTopicHistory}>Clear topic</button
+                onclick={clearTopicHistory}>Topic</button
               >
               <button
                 disabled={!selectedSubtreeCount}
                 title="Clear local history for the selected topic and its subtopics. Broker-retained messages are unchanged."
                 type="button"
-                onclick={clearTopicSubtree}>Clear subtree</button
+                onclick={clearTopicSubtree}>Subtree</button
               >
               <button
                 disabled={!topicSnapshot.bufferedMessages}
                 title="Clear all locally buffered messages. Topics, plots, settings, and broker-retained messages are unchanged."
                 type="button"
-                onclick={clearAllHistory}>Clear all</button
+                onclick={clearAllHistory}>All</button
               >
             </div>
             <HistoryLimit
@@ -1212,18 +1191,21 @@
               <span class="meta">Plots</span>
               <button
                 disabled={!selectedTopicPlotCount}
+                title="Remove plots for the selected topic"
                 type="button"
-                onclick={removeTopicPlots}>Remove topic</button
+                onclick={removeTopicPlots}>Topic</button
               >
               <button
                 disabled={!selectedTopicSubtreePlotCount}
+                title="Remove plots for the selected topic and its subtopics"
                 type="button"
-                onclick={removeTopicSubtreePlots}>Remove subtree</button
+                onclick={removeTopicSubtreePlots}>Subtree</button
               >
               <button
                 disabled={!route.plots.length}
+                title="Remove every plot"
                 type="button"
-                onclick={() => removePlots(() => true)}>Remove all</button
+                onclick={() => removePlots(() => true)}>All</button
               >
             </div>
             <label
@@ -1247,7 +1229,8 @@
           aria-label="Search topic paths"
           id="topic-search"
           onkeydown={topicSearchKeydown}
-          placeholder="Search or MQTT filter  /"
+          placeholder="Substring or MQTT filter"
+          title="Plain text matches anywhere in a topic path; + and # use MQTT filter syntax. Press / to focus."
           type="search"
           bind:value={topicSearch}
         />

@@ -5,9 +5,11 @@ import {
   dashboardShareUrl,
   parseDashboard,
   parseDashboardJson,
+  readInlineDashboard,
+  resolveStartupRoute,
   routeFromDashboard,
 } from "./dashboard";
-import type { AppRoute } from "./routes";
+import { defaultRoute, type AppRoute } from "./routes";
 
 const route: AppRoute = {
   broker: "wss://broker.example/mqtt",
@@ -50,10 +52,15 @@ describe("dashboard files", () => {
       plots: route.plots,
     });
     expect(routeFromDashboard(dashboard)).toMatchObject({
+      broker: route.broker,
+      filters: route.filters,
+      historyLimit: route.historyLimit,
+      historyAgeMs: route.historyAgeMs,
       timeZone: "utc",
       plotWindowMs: 600_000,
       selectedTopic: "sensors/room",
       fieldPath: "$.temperature",
+      plots: route.plots,
     });
     expect(dashboardJson(route)).not.toContain("unshared");
   });
@@ -116,5 +123,55 @@ describe("dashboard files", () => {
       broker: route.broker,
       plots: route.plots,
     });
+  });
+
+  it("resolves dashboard, matching tab state, launch, and default startup", () => {
+    const launchRoute: AppRoute = {
+      ...defaultRoute(),
+      broker: "wss://launch.example",
+      filters: ["launch/#"],
+    };
+    const storedRoute: AppRoute = {
+      ...defaultRoute(),
+      broker: "wss://stored.example",
+      filters: ["stored/#"],
+    };
+    const inline = readInlineDashboard(
+      new URL(
+        dashboardShareUrl(route, {
+          href: "https://telemetry.example/",
+        } as Location),
+      ).hash,
+    );
+    const launch = { kind: "valid", route: launchRoute } as const;
+
+    expect(resolveStartupRoute(inline, launch, storedRoute).route.broker).toBe(
+      route.broker,
+    );
+    expect(
+      resolveStartupRoute(
+        { kind: "invalid", error: "Broken dashboard" },
+        launch,
+        storedRoute,
+      ),
+    ).toEqual({ route: defaultRoute(), error: "Broken dashboard" });
+    expect(
+      resolveStartupRoute({ kind: "absent" }, launch, storedRoute).route.broker,
+    ).toBe(launchRoute.broker);
+    const matchingStored = {
+      ...launchRoute,
+      timeZone: "utc" as const,
+      plots: [{ topic: "launch/value", path: "$.temperature" }],
+    };
+    expect(
+      resolveStartupRoute({ kind: "absent" }, launch, matchingStored).route,
+    ).toEqual(matchingStored);
+    expect(
+      resolveStartupRoute({ kind: "absent" }, { kind: "absent" }, storedRoute)
+        .route.broker,
+    ).toBe(storedRoute.broker);
+    expect(
+      resolveStartupRoute({ kind: "absent" }, { kind: "absent" }).route,
+    ).toEqual(defaultRoute());
   });
 });
