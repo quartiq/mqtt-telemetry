@@ -61,8 +61,12 @@
   let statistics = $derived.by(() => {
     if (!message) return [];
     const items = [
-      following ? "Following latest" : "Historical",
-      `received ${formatTelemetryTime(message.receivedAt, { timeZone, date: true, milliseconds: true })}`,
+      following ? "Latest" : "Historical",
+      formatTelemetryTime(message.receivedAt, {
+        timeZone,
+        date: true,
+        milliseconds: true,
+      }),
     ];
     if (message.retained) items.push("retained");
     if (message.duplicate) items.push("possible duplicate");
@@ -72,6 +76,32 @@
     if (message.unsafeIntegers) items.push("unsafe integer precision");
     return items;
   });
+  let tagline = $derived(statistics.join(" · "));
+
+  function titleWhenClipped(node: HTMLElement, initial: string) {
+    let value = initial;
+    let frame = 0;
+    const update = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (node.scrollWidth > node.clientWidth) node.title = value;
+        else node.removeAttribute("title");
+      });
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    update();
+    return {
+      update(next: string) {
+        value = next;
+        update();
+      },
+      destroy() {
+        cancelAnimationFrame(frame);
+        observer.disconnect();
+      },
+    };
+  }
 </script>
 
 <section class="panel message-panel">
@@ -106,7 +136,7 @@
       {/if}
     </div>
     {#if statistics.length}
-      <div class="panel-stats meta">
+      <div class="panel-stats meta" use:titleWhenClipped={tagline}>
         {#each statistics as statistic}<span>{statistic}</span>{/each}
       </div>
     {/if}

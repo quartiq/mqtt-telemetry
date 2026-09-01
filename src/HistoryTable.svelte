@@ -18,7 +18,6 @@
     messages: readonly TelemetryMessage[];
     selectedId: number | null;
     field: JsonPath | undefined;
-    fieldLabel?: string;
     timeZone: DisplayTimeZone;
     canClearTopic: boolean;
     canClearSubtree: boolean;
@@ -36,7 +35,6 @@
     messages,
     selectedId,
     field,
-    fieldLabel,
     timeZone,
     canClearTopic,
     canClearSubtree,
@@ -87,6 +85,9 @@
   let showDate = $derived.by(() => {
     return historyNeedsDate(messages, Date.now(), timeZone);
   });
+  let hasStatistics = $derived(
+    Boolean(frequency || span || retained || duplicates || gapBefore.size),
+  );
 
   function timestamp(value: number): string {
     return formatTelemetryTime(value, {
@@ -172,29 +173,27 @@
         >
       </div>
     </div>
-    <div class="panel-stats meta">
-      <span>{messages.length.toLocaleString()} messages</span>
-      {#if frequency}<span>{frequency}</span>{/if}
-      {#if span}<span>{span}</span>{/if}
-      {#if retained}<span>{retained.toLocaleString()} retained</span>{/if}
-      {#if duplicates}
-        <span
-          >{duplicates.toLocaleString()} possible {duplicates === 1
-            ? "redelivery"
-            : "redeliveries"}</span
-        >
-      {/if}
-      {#if gapBefore.size}
-        <span
-          >{gapBefore.size.toLocaleString()} reconnect {gapBefore.size === 1
-            ? "gap"
-            : "gaps"}</span
-        >
-      {/if}
-      <span title={fieldLabel ?? "Full payload summary"}
-        >{fieldLabel ? `field ${fieldLabel}` : "payload"}</span
-      >
-    </div>
+    {#if hasStatistics}
+      <div class="panel-stats meta">
+        {#if frequency}<span>{frequency}</span>{/if}
+        {#if span}<span>{span}</span>{/if}
+        {#if retained}<span>{retained.toLocaleString()} retained</span>{/if}
+        {#if duplicates}
+          <span
+            >{duplicates.toLocaleString()} possible {duplicates === 1
+              ? "redelivery"
+              : "redeliveries"}</span
+          >
+        {/if}
+        {#if gapBefore.size}
+          <span
+            >{gapBefore.size.toLocaleString()} reconnect {gapBefore.size === 1
+              ? "gap"
+              : "gaps"}</span
+          >
+        {/if}
+      </div>
+    {/if}
   </header>
   {#if expanded}
     <div class="history-body" id="history-body">
@@ -262,6 +261,7 @@
 
 <style>
   .history-panel {
+    container-type: inline-size;
     display: grid;
     grid-template-rows: auto;
     min-height: 0;
@@ -276,12 +276,7 @@
   }
 
   .history-panel > .panel-header {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .history-panel > .panel-header h2 {
-    grid-column: 1;
-    grid-row: 1;
+    column-gap: var(--space-tight);
   }
 
   .history-disclosure {
@@ -308,19 +303,13 @@
   }
 
   .controls {
-    grid-column: 1;
-    grid-row: 2;
+    font-size: var(--text-small);
     justify-content: flex-end;
-    gap: var(--space);
+    gap: var(--space-tight);
   }
 
   .clear-controls {
     gap: var(--space-tight);
-  }
-
-  .panel-stats {
-    grid-column: 1;
-    grid-row: 3;
   }
 
   .history-body {
@@ -407,6 +396,38 @@
   @media (max-width: 800px) {
     .history-panel.expanded {
       height: clamp(16rem, 40svh, 24rem);
+    }
+  }
+
+  @media (max-width: 420px) {
+    .history-panel > .panel-header {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .controls {
+      grid-column: 1;
+      grid-row: 2;
+    }
+
+    .panel-stats {
+      grid-column: 1;
+      grid-row: 3;
+    }
+  }
+
+  @container (max-width: 19rem) {
+    .history-panel > .panel-header {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .controls {
+      grid-column: 1;
+      grid-row: 2;
+    }
+
+    .panel-stats {
+      grid-column: 1;
+      grid-row: 3;
     }
   }
 </style>

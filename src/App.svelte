@@ -1285,7 +1285,6 @@
       messages={currentHistory}
       selectedId={selectedMessageId}
       field={activeField}
-      fieldLabel={selectedFieldLabel}
       timeZone={route.timeZone}
       canClearTopic={Boolean(currentHistory.length)}
       canClearSubtree={Boolean(selectedSubtreeCount)}
