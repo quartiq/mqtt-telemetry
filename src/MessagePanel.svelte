@@ -22,6 +22,8 @@
     checked: Set<string>;
     checkDisabled: boolean;
     subtreePlotCount: number;
+    subtreeMessages: number;
+    showPlotHint: boolean;
     timeZone: DisplayTimeZone;
     onselect: (id: string) => void;
     ontoggle: (id: string, open: boolean) => void;
@@ -41,6 +43,8 @@
     checked,
     checkDisabled,
     subtreePlotCount,
+    subtreeMessages,
+    showPlotHint,
     timeZone,
     onselect,
     ontoggle,
@@ -61,6 +65,7 @@
     items.push(`QoS ${message.qos}`, `${message.bytes.toLocaleString()} bytes`);
     if (snapshot)
       items.push(`${snapshot.nodes.size.toLocaleString()} JSON nodes`);
+    if (showPlotHint) items.push("check a numeric field to plot");
     if (message.unsafeIntegers) items.push("unsafe integer precision");
     return items;
   });
@@ -112,8 +117,15 @@
     </div>
   {:else if message}
     <pre>{formatPayload(message.payload)}</pre>
+  {:else if topic && subtreeMessages}
+    <p class="empty">
+      No buffered message on this exact topic. Expand it and select a descendant
+      with a message count.
+    </p>
+  {:else if topic}
+    <p class="empty">No buffered message on this topic.</p>
   {:else}
-    <p class="empty">Select a topic with messages.</p>
+    <p class="empty">Select a topic with a message count.</p>
   {/if}
 </section>
 

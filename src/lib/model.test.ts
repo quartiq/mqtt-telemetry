@@ -252,7 +252,7 @@ describe("topic history", () => {
     const updated = store.snapshot();
     expect(updated.nodes.get(a)).not.toBe(initialA);
     expect(updated.nodes.get(leaf)).not.toBe(initialLeaf);
-    expect(updated.nodes.get(a)?.suffix).toBe("(3)");
+    expect(updated.nodes.get(a)?.suffix).toBeUndefined();
     expect(updated.nodes.get(leaf)?.suffix).toBe("(3)");
   });
 
@@ -420,7 +420,7 @@ describe("topic history", () => {
     expect(store.subtreeMessageCount(store.nodeId("a") as string)).toBe(0);
     expect(
       store.snapshot().nodes.get(store.nodeId("a") as string)?.suffix,
-    ).toBe("(0)");
+    ).toBeUndefined();
   });
 
   it("evicts the globally oldest history within the shared byte budget", () => {
@@ -489,7 +489,7 @@ describe("topic history", () => {
     expect(after.nodes).toBe(before.nodes);
     expect(after.revision).toBeGreaterThan(before.revision);
     expect(after.topicCount).toBe(1);
-    expect(after.nodes.get(leaf)?.suffix).toBe("(0)");
+    expect(after.nodes.get(leaf)?.suffix).toBeUndefined();
   });
 
   it("represents topics that are also branches and preserves empty levels", () => {
@@ -501,8 +501,9 @@ describe("topic history", () => {
     const a = store.nodeId("a") as string;
     expect(store.history(a)).toHaveLength(1);
     expect(snapshot.nodes.get(a)?.children).toHaveLength(1);
-    expect(snapshot.nodes.get(a)?.suffix).toBe("(2)");
-    expect(snapshot.nodes.get(a)?.title).toContain("1 direct; 2 total");
+    expect(snapshot.nodes.get(a)?.suffix).toBe("(1)");
+    expect(snapshot.nodes.get(a)?.title).toContain("Buffered here: 1");
+    expect(snapshot.nodes.get(a)?.title).toContain("Buffered in subtree: 2");
     expect(snapshot.nodes.get(store.nodeId("a/b") as string)?.suffix).toBe(
       "(1)",
     );

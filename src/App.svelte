@@ -1060,7 +1060,22 @@
   <main class="browser">
     <header class="app-header panel">
       <div class="identity">
-        <h1 title={route.broker}>{route.broker}</h1>
+        <h1>
+          <button
+            aria-label={`Connection settings for ${route.broker}`}
+            aria-expanded={editingConnection}
+            class="connection-disclosure"
+            disabled={status === "Connecting" || status === "Resubscribing"}
+            title={`Connection settings: ${route.broker}`}
+            type="button"
+            onclick={editingConnection ? cancelConnectionEdit : editConnection}
+          >
+            <span class="broker-label">{route.broker}</span>
+            <span aria-hidden="true" class="disclosure-mark"
+              >{editingConnection ? "▾" : "▸"}</span
+            >
+          </button>
+        </h1>
         {#if selectedTopic}
           <div class="breadcrumb" aria-label="Selected topic">
             <span>{selectedTopic}</span>
@@ -1071,6 +1086,33 @@
         <span aria-live="polite" class:problem={status !== "Connected"}
           >{status}</span
         >
+        <div class="display-options" aria-label="Display">
+          <label class="display-option">
+            <span class="meta">Time</span>
+            <select
+              aria-label="Displayed time zone"
+              title="Display receipt times in the browser time zone or UTC"
+              value={route.timeZone}
+              onchange={changeTimeZone}
+            >
+              <option value="local">Local</option>
+              <option value="utc">UTC</option>
+            </select>
+          </label>
+          <label
+            class="display-option"
+            title="Only changes the visible plot interval and its statistics; buffered history is not deleted"
+          >
+            <span class="meta">Show</span>
+            <DurationSelect
+              ariaLabel="Plot time window"
+              noneLabel="all history"
+              prefix="last "
+              value={route.plotWindowMs}
+              onchange={changePlotWindow}
+            />
+          </label>
+        </div>
         <div class="dashboard-actions" aria-label="Dashboard">
           <button type="button" onclick={saveDashboard}>Save</button>
           <button type="button" onclick={openDashboardFile}>Load…</button>
@@ -1080,25 +1122,6 @@
             onclick={copyDashboardLink}>Copy dashboard</button
           >
         </div>
-        <label class="time-zone">
-          <span class="meta">Time</span>
-          <select
-            aria-label="Displayed time zone"
-            title="Display receipt times in the browser time zone or UTC"
-            value={route.timeZone}
-            onchange={changeTimeZone}
-          >
-            <option value="local">Local</option>
-            <option value="utc">UTC</option>
-          </select>
-        </label>
-        <button
-          aria-expanded={editingConnection}
-          disabled={status === "Connecting" || status === "Resubscribing"}
-          type="button"
-          onclick={editingConnection ? cancelConnectionEdit : editConnection}
-          >Connection…</button
-        >
       </div>
       {#if error}<strong class="header-error">{error}</strong>{/if}
       {#if dashboardNotice}
@@ -1208,19 +1231,6 @@
                 onclick={() => removePlots(() => true)}>All</button
               >
             </div>
-            <label
-              class="plot-window"
-              title="Only changes the visible plot interval and its statistics; buffered history is not deleted"
-            >
-              <span>Show</span>
-              <DurationSelect
-                ariaLabel="Plot time window"
-                noneLabel="all history"
-                prefix="last "
-                value={route.plotWindowMs}
-                onchange={changePlotWindow}
-              />
-            </label>
           </div>
         </div>
       </div>
@@ -1263,7 +1273,7 @@
         {:else if topicSearch.trim()}
           <p class="empty">No matching topics.</p>
         {:else}
-          <p class="empty">Waiting for messages…</p>
+          <p class="empty">Waiting for subscribed messages…</p>
         {/if}
       </div>
     </aside>
@@ -1281,6 +1291,8 @@
         checked={checkedJson}
         checkDisabled={plotLimitReached}
         subtreePlotCount={selectedValuePlotCount}
+        subtreeMessages={selectedSubtreeCount}
+        showPlotHint={Boolean(checkableJson.size && !route.plots.length)}
         timeZone={route.timeZone}
         onselect={selectJson}
         ontoggle={toggleJson}

@@ -94,7 +94,15 @@ export function filterTopicTree(
 ): TreeFilter {
   const value = query.trim();
   if (!value) return { roots, nodes, matches: [], expanded: new Set() };
-  if (!/[+#]/.test(value)) return filterTree(roots, nodes, value);
+  if (!/[+#]/.test(value)) {
+    const needle = value.toLocaleLowerCase();
+    return filterTreeBy(roots, nodes, (node) =>
+      (node.title ?? node.label)
+        .split("\n", 1)[0]
+        .toLocaleLowerCase()
+        .includes(needle),
+    );
+  }
   const error = mqttFilterError(value);
   if (error)
     return {

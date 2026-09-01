@@ -1079,10 +1079,12 @@ export class TelemetryStore {
       label: node.label,
       ...(node.parent ? { parent: node.parent } : {}),
       children: node.children,
-      suffix: `(${node.messageCount.toLocaleString()})`,
-      title: node.children.length
-        ? `${node.topic}\n${direct.toLocaleString()} direct; ${node.messageCount.toLocaleString()} total`
-        : node.topic,
+      ...(direct ? { suffix: `(${direct.toLocaleString()})` } : {}),
+      title: `${node.topic}\nBuffered here: ${direct.toLocaleString()}${
+        node.children.length
+          ? `\nBuffered in subtree: ${node.messageCount.toLocaleString()}`
+          : ""
+      }`,
     };
   }
 

@@ -14,7 +14,7 @@ Dashboard fragments and launch queries replace rather than merge; a dashboard fr
 
 Launch parameters are ordinary query data and may appear in browser or hosting logs. For sensitive broker or topic names, load a dashboard file locally instead.
 
-Select a value to inspect its history. Toggle the square beside a numeric field to plot it. Topic search is a case-insensitive substring search unless it contains MQTT `+` or `#` wildcards.
+A topic count is buffered history on that exact topic; nodes without a count are structural branches. Select a counted topic, then toggle the square beside a numeric field to plot it. Topic search is a case-insensitive substring search unless it contains MQTT `+` or `#` wildcards.
 
 Receipt times use a consistent 24-hour clock. Choose Local or UTC from the connected header; saved dashboards retain that choice.
 
