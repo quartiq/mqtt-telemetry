@@ -2,7 +2,6 @@
 
 <script lang="ts">
   import { onMount } from "svelte";
-  import ConnectionForm from "./ConnectionForm.svelte";
   import ConnectionFields from "./ConnectionFields.svelte";
   import DurationSelect from "./DurationSelect.svelte";
   import HistoryLimit from "./HistoryLimit.svelte";
@@ -71,6 +70,14 @@
     storedRoute,
   );
   const initialRoute = startup.route;
+  const buildCommit = __BUILD_COMMIT__;
+  const exactBuildCommit = /^[0-9a-f]{40}$/i.test(buildCommit);
+  const buildLabel = exactBuildCommit
+    ? `build ${buildCommit.slice(0, 8)}`
+    : "local build";
+  const buildUrl = exactBuildCommit
+    ? `https://github.com/quartiq/mqtt-telemetry/commit/${buildCommit}`
+    : undefined;
   let route = $state(initialRoute);
   let formBroker = $state(initialRoute.broker);
   let formFilters = $state(initialRoute.filters.join("\n"));
@@ -94,10 +101,10 @@
   let topicSearch = $state("");
   let jsonExpanded = $state(new Set<string>(["$"]));
   const jsonExpandedByTopic = new Map<string, Set<string>>();
-  let status = $state("Idle");
+  let status = $state(initialRoute.broker ? "Connecting" : "Not connected");
   let error = $state(startup.error);
   let dashboardNotice = $state("");
-  let editingConnection = $state(false);
+  let editingConnection = $state(!initialRoute.broker);
   let dashboardFileInput: HTMLInputElement;
   let connectSerial = 0;
   let activeUsername = "";
@@ -144,6 +151,11 @@
   );
   let canResubscribe = $derived(
     Boolean(session) && status === "Connected" && connectionDraftMatches,
+  );
+  let statusProblem = $derived(
+    status === "Disconnected" ||
+      status === "Connection error" ||
+      status === "Connection failed",
   );
   let selectedSubtreeCount = $derived.by(() => {
     revision;
@@ -363,8 +375,11 @@
     const brokerError = route.broker
       ? isWebSocketBroker(route.broker)
       : undefined;
-    if (brokerError) error = brokerError;
-    else if (route.broker) void startConnection(route);
+    if (brokerError) {
+      status = "Connection error";
+      error = brokerError;
+      editingConnection = true;
+    } else if (route.broker) void startConnection(route);
     return () => {
       removeEventListener("popstate", popstate);
       removeEventListener("keydown", browserKeydown);
@@ -561,8 +576,9 @@
     connectSerial += 1;
     session?.close();
     session = undefined;
-    status = "Idle";
+    status = "Not connected";
     error = "";
+    editingConnection = true;
     resetData(route.historyLimit);
   }
 
@@ -671,6 +687,7 @@
       if (serial !== connectSerial) return;
       status = "Connection failed";
       error = caught instanceof Error ? caught.message : String(caught);
+      editingConnection = true;
     }
   }
 
@@ -1044,110 +1061,123 @@
   onchange={loadDashboardFile}
 />
 
-{#if !session}
-  <ConnectionForm
-    bind:broker={formBroker}
-    bind:filters={formFilters}
-    bind:username
-    bind:password
-    bind:historyLimit={formHistoryLimit}
-    bind:historyAgeMs={formHistoryAgeMs}
-    {status}
-    {error}
-    connecting={status === "Connecting"}
-    onconnect={connectFromForm}
-    onload={openDashboardFile}
-  />
-{:else}
-  <main class="browser">
-    <header class="app-header panel">
-      <div class="identity">
-        <h1>
-          <button
-            aria-label={`Connection settings for ${route.broker}`}
-            aria-expanded={editingConnection}
-            class="connection-disclosure"
-            disabled={status === "Connecting" || status === "Resubscribing"}
-            title={`Connection settings: ${route.broker}`}
-            type="button"
-            onclick={editingConnection ? cancelConnectionEdit : editConnection}
+<main class="browser">
+  <header class="app-header panel">
+    <div class="identity">
+      <h1>
+        <button
+          aria-label={route.broker
+            ? `Connection settings for ${route.broker}`
+            : "Open connection settings"}
+          aria-expanded={editingConnection}
+          class="connection-disclosure"
+          disabled={status === "Connecting" ||
+            status === "Resubscribing" ||
+            (editingConnection && !route.broker)}
+          title={route.broker
+            ? `Connection settings: ${route.broker}`
+            : "Connect to an MQTT broker"}
+          type="button"
+          onclick={editingConnection && route.broker
+            ? cancelConnectionEdit
+            : editConnection}
+        >
+          <span class="broker-label">{route.broker || "Connect to MQTT"}</span>
+          <span aria-hidden="true" class="disclosure-mark"
+            >{editingConnection ? "▾" : "▸"}</span
           >
-            <span class="broker-label">{route.broker}</span>
-            <span aria-hidden="true" class="disclosure-mark"
-              >{editingConnection ? "▾" : "▸"}</span
-            >
-          </button>
-        </h1>
-        {#if selectedTopic}
-          <div class="breadcrumb" aria-label="Selected topic">
-            <span>{selectedTopic}</span>
-          </div>
+        </button>
+      </h1>
+      {#if selectedTopic}
+        <div class="breadcrumb" aria-label="Selected topic">
+          <span>{selectedTopic}</span>
+        </div>
+      {/if}
+    </div>
+    <div class="header-controls">
+      <div class="connection-state">
+        <span aria-live="polite" class:problem={statusProblem}>{status}</span>
+        <span aria-hidden="true" class="build-separator">·</span>
+        {#if buildUrl}
+          <a
+            class="build-id"
+            href={buildUrl}
+            rel="noreferrer"
+            target="_blank"
+            title={`Open source commit ${buildCommit}`}>{buildLabel}</a
+          >
+        {:else}
+          <span
+            class="build-id"
+            title="No source commit was supplied at build time"
+            >{buildLabel}</span
+          >
         {/if}
       </div>
-      <div class="header-controls">
-        <span aria-live="polite" class:problem={status !== "Connected"}
-          >{status}</span
-        >
-        <div class="display-options" aria-label="Display">
-          <label class="display-option">
-            <span class="meta">Time</span>
-            <select
-              aria-label="Displayed time zone"
-              title="Display receipt times in the browser time zone or UTC"
-              value={route.timeZone}
-              onchange={changeTimeZone}
-            >
-              <option value="local">Local</option>
-              <option value="utc">UTC</option>
-            </select>
-          </label>
-          <label
-            class="display-option"
-            title="Only changes the visible plot interval and its statistics; buffered history is not deleted"
+      <div class="display-options" aria-label="Display">
+        <label class="display-option">
+          <span class="meta">Time</span>
+          <select
+            aria-label="Displayed time zone"
+            title="Display receipt times in the browser time zone or UTC"
+            value={route.timeZone}
+            onchange={changeTimeZone}
           >
-            <span class="meta">Show</span>
-            <DurationSelect
-              ariaLabel="Plot time window"
-              noneLabel="all history"
-              prefix="last "
-              value={route.plotWindowMs}
-              onchange={changePlotWindow}
-            />
-          </label>
-        </div>
-        <div class="dashboard-actions" aria-label="Dashboard">
-          <button type="button" onclick={saveDashboard}>Save</button>
-          <button type="button" onclick={openDashboardFile}>Load…</button>
-          <button
-            title="Copy a self-contained link for the complete dashboard"
-            type="button"
-            onclick={copyDashboardLink}>Copy dashboard</button
-          >
-        </div>
-      </div>
-      {#if error}<strong class="header-error">{error}</strong>{/if}
-      {#if dashboardNotice}
-        <span class="header-notice meta" aria-live="polite"
-          >{dashboardNotice}</span
+            <option value="local">Local</option>
+            <option value="utc">UTC</option>
+          </select>
+        </label>
+        <label
+          class="display-option"
+          title="Only changes the visible plot interval and its statistics; buffered history is not deleted"
         >
-      {/if}
-      {#if editingConnection}
-        <form
-          autocomplete="on"
-          class="connection-editor"
-          onsubmit={submitConnectionEdit}
-        >
-          <ConnectionFields
-            bind:broker={formBroker}
-            bind:filters={formFilters}
-            bind:username
-            bind:password
+          <span class="meta">Show</span>
+          <DurationSelect
+            ariaLabel="Plot time window"
+            noneLabel="all history"
+            prefix="last "
+            value={route.plotWindowMs}
+            onchange={changePlotWindow}
           />
-          <div class="connection-editor-actions">
-            <button
-              title="Apply these settings and open a new MQTT connection"
-              type="submit">Reconnect</button
-            >
+        </label>
+      </div>
+      <div class="dashboard-actions" aria-label="Dashboard">
+        <button disabled={!route.broker} type="button" onclick={saveDashboard}
+          >Save</button
+        >
+        <button type="button" onclick={openDashboardFile}>Load…</button>
+        <button
+          disabled={!route.broker}
+          title="Copy a self-contained link for the complete dashboard"
+          type="button"
+          onclick={copyDashboardLink}>Copy dashboard</button
+        >
+      </div>
+    </div>
+    {#if error}<strong class="header-error">{error}</strong>{/if}
+    {#if dashboardNotice}
+      <span class="header-notice meta" aria-live="polite"
+        >{dashboardNotice}</span
+      >
+    {/if}
+    {#if editingConnection}
+      <form
+        autocomplete="on"
+        class="connection-editor"
+        onsubmit={submitConnectionEdit}
+      >
+        <ConnectionFields
+          bind:broker={formBroker}
+          bind:filters={formFilters}
+          bind:username
+          bind:password
+        />
+        <div class="connection-editor-actions">
+          <button
+            title="Apply these settings and open a new MQTT connection"
+            type="submit">{session ? "Reconnect" : "Connect"}</button
+          >
+          {#if session}
             <button
               disabled={!canResubscribe}
               title={!connectionDraftMatches
@@ -1158,169 +1188,175 @@
               type="button"
               onclick={resubscribeFromForm}>Resubscribe</button
             >
+          {/if}
+          {#if route.broker}
             <button type="button" onclick={cancelConnectionEdit}>Cancel</button>
-          </div>
-        </form>
+          {/if}
+        </div>
+      </form>
+    {/if}
+  </header>
+
+  <aside class="topics panel">
+    <header>
+      <h2>
+        Topics <span class="count"
+          >({topicSnapshot.topicCount.toLocaleString()})</span
+        >
+      </h2>
+      <span class="meta" title={route.filters.join("\n")}
+        >{route.filters.join(", ")}</span
+      >
+      {#if topicWarning}
+        <span class="meta problem" title="Browser safety limits applied">
+          {topicWarning}
+        </span>
       {/if}
     </header>
-
-    <aside class="topics panel">
-      <header>
-        <h2>
-          Topics <span class="count"
-            >({topicSnapshot.topicCount.toLocaleString()})</span
-          >
-        </h2>
-        <span class="meta" title={route.filters.join("\n")}
-          >{route.filters.join(", ")}</span
-        >
-        {#if topicWarning}
-          <span class="meta problem" title="Browser safety limits applied">
-            {topicWarning}
-          </span>
-        {/if}
-      </header>
-      <div class="topic-policy">
-        <div class="topic-action-groups">
-          <div class="topic-policy-group">
-            <div class="topic-actions">
-              <span class="meta">History</span>
-              <button
-                disabled={!currentHistory.length}
-                title="Clear local history for the selected topic only. Broker-retained messages are unchanged."
-                type="button"
-                onclick={clearTopicHistory}>Topic</button
-              >
-              <button
-                disabled={!selectedSubtreeCount}
-                title="Clear local history for the selected topic and its subtopics. Broker-retained messages are unchanged."
-                type="button"
-                onclick={clearTopicSubtree}>Subtree</button
-              >
-              <button
-                disabled={!topicSnapshot.bufferedMessages}
-                title="Clear all locally buffered messages. Topics, plots, settings, and broker-retained messages are unchanged."
-                type="button"
-                onclick={clearAllHistory}>All</button
-              >
-            </div>
-            <HistoryLimit
-              value={route.historyLimit}
-              onchange={changeHistoryLimit}
-              ageMs={route.historyAgeMs}
-              onagechange={changeHistoryAge}
-            />
+    <div class="topic-policy">
+      <div class="topic-action-groups">
+        <div class="topic-policy-group">
+          <div class="topic-actions">
+            <span class="meta">History</span>
+            <button
+              disabled={!currentHistory.length}
+              title="Clear local history for the selected topic only. Broker-retained messages are unchanged."
+              type="button"
+              onclick={clearTopicHistory}>Topic</button
+            >
+            <button
+              disabled={!selectedSubtreeCount}
+              title="Clear local history for the selected topic and its subtopics. Broker-retained messages are unchanged."
+              type="button"
+              onclick={clearTopicSubtree}>Subtree</button
+            >
+            <button
+              disabled={!topicSnapshot.bufferedMessages}
+              title="Clear all locally buffered messages. Topics, plots, settings, and broker-retained messages are unchanged."
+              type="button"
+              onclick={clearAllHistory}>All</button
+            >
           </div>
-          <div class="topic-policy-group">
-            <div class="topic-actions">
-              <span class="meta">Plots</span>
-              <button
-                disabled={!selectedTopicPlotCount}
-                title="Remove plots for the selected topic"
-                type="button"
-                onclick={removeTopicPlots}>Topic</button
-              >
-              <button
-                disabled={!selectedTopicSubtreePlotCount}
-                title="Remove plots for the selected topic and its subtopics"
-                type="button"
-                onclick={removeTopicSubtreePlots}>Subtree</button
-              >
-              <button
-                disabled={!route.plots.length}
-                title="Remove every plot"
-                type="button"
-                onclick={() => removePlots(() => true)}>All</button
-              >
-            </div>
+          <HistoryLimit
+            value={route.historyLimit}
+            onchange={changeHistoryLimit}
+            ageMs={route.historyAgeMs}
+            onagechange={changeHistoryAge}
+          />
+        </div>
+        <div class="topic-policy-group">
+          <div class="topic-actions">
+            <span class="meta">Plots</span>
+            <button
+              disabled={!selectedTopicPlotCount}
+              title="Remove plots for the selected topic"
+              type="button"
+              onclick={removeTopicPlots}>Topic</button
+            >
+            <button
+              disabled={!selectedTopicSubtreePlotCount}
+              title="Remove plots for the selected topic and its subtopics"
+              type="button"
+              onclick={removeTopicSubtreePlots}>Subtree</button
+            >
+            <button
+              disabled={!route.plots.length}
+              title="Remove every plot"
+              type="button"
+              onclick={() => removePlots(() => true)}>All</button
+            >
           </div>
         </div>
       </div>
-      <div class="topic-search">
-        <input
-          aria-label="Search topic paths"
-          id="topic-search"
-          onkeydown={topicSearchKeydown}
-          placeholder="Substring or MQTT filter"
-          title="Plain text matches anywhere in a topic path; + and # use MQTT filter syntax. Press / to focus."
-          type="search"
-          bind:value={topicSearch}
-        />
-        {#if topicSearch.trim()}
-          {#if topicFilter.error}
-            <span class="meta problem" title={topicFilter.error}
-              >Invalid filter</span
-            >
-          {:else}
-            <span class="meta">
-              {topicFilter.matches.length.toLocaleString()}
-              {topicFilter.matches.length === 1 ? "match" : "matches"}
-            </span>
-          {/if}
-        {/if}
-      </div>
-      <div class="topic-tree">
-        {#if visibleTopics.roots.length}
-          <TreeView
-            roots={visibleTopics.roots}
-            nodes={visibleTopics.nodes}
-            revision={topicSnapshot.revision}
-            selected={selectedTopicId}
-            expanded={visibleTopicExpanded}
-            activity={topicActivity}
-            label="MQTT topics"
-            onselect={selectTopic}
-            ontoggle={toggleTopic}
-          />
-        {:else if topicSearch.trim()}
-          <p class="empty">No matching topics.</p>
+    </div>
+    <div class="topic-search">
+      <input
+        aria-label="Search topic paths"
+        id="topic-search"
+        onkeydown={topicSearchKeydown}
+        placeholder="Substring or MQTT filter"
+        title="Plain text matches anywhere in a topic path; + and # use MQTT filter syntax. Press / to focus."
+        type="search"
+        bind:value={topicSearch}
+      />
+      {#if topicSearch.trim()}
+        {#if topicFilter.error}
+          <span class="meta problem" title={topicFilter.error}
+            >Invalid filter</span
+          >
         {:else}
-          <p class="empty">Waiting for subscribed messages…</p>
+          <span class="meta">
+            {topicFilter.matches.length.toLocaleString()}
+            {topicFilter.matches.length === 1 ? "match" : "matches"}
+          </span>
         {/if}
-      </div>
-    </aside>
+      {/if}
+    </div>
+    <div class="topic-tree">
+      {#if visibleTopics.roots.length}
+        <TreeView
+          roots={visibleTopics.roots}
+          nodes={visibleTopics.nodes}
+          revision={topicSnapshot.revision}
+          selected={selectedTopicId}
+          expanded={visibleTopicExpanded}
+          activity={topicActivity}
+          label="MQTT topics"
+          onselect={selectTopic}
+          ontoggle={toggleTopic}
+        />
+      {:else if topicSearch.trim()}
+        <p class="empty">No matching topics.</p>
+      {:else}
+        <p class="empty">
+          {route.broker
+            ? "Waiting for subscribed messages…"
+            : "Connect to a broker to browse topics."}
+        </p>
+      {/if}
+    </div>
+  </aside>
 
-    <section class="details">
-      <MessagePanel
-        message={currentMessage}
-        topic={selectedTopic}
-        snapshot={jsonSnapshot}
-        selected={selectedJsonId}
-        selectedLabel={selectedFieldLabel}
-        following={selectedMessageId === null}
-        expanded={jsonExpanded}
-        checkable={checkableJson}
-        checked={checkedJson}
-        checkDisabled={plotLimitReached}
-        subtreePlotCount={selectedValuePlotCount}
-        subtreeMessages={selectedSubtreeCount}
-        showPlotHint={Boolean(checkableJson.size && !route.plots.length)}
-        timeZone={route.timeZone}
-        onselect={selectJson}
-        ontoggle={toggleJson}
-        oncheck={togglePlot}
-        onremoveplots={removeSelectedValuePlots}
-      />
-      <HistoryTable
-        messages={currentHistory}
-        selectedId={selectedMessageId}
-        field={activeField}
-        fieldLabel={selectedFieldLabel}
-        timeZone={route.timeZone}
-        onselect={selectHistory}
-        onlatest={selectLatest}
-      />
-      <PlotDashboard
-        plots={dashboardPlots}
-        now={plotNow}
-        windowMs={route.plotWindowMs}
-        timeZone={route.timeZone}
-        onfocus={focusPlot}
-        onmove={movePlot}
-        onremove={(plot) =>
-          removePlots((current) => plotKey(current) === plotKey(plot))}
-        onshowall={() => changePlotWindow(null)}
-      />
-    </section>
-  </main>
-{/if}
+  <section class="details">
+    <MessagePanel
+      message={currentMessage}
+      topic={selectedTopic}
+      snapshot={jsonSnapshot}
+      selected={selectedJsonId}
+      selectedLabel={selectedFieldLabel}
+      following={selectedMessageId === null}
+      expanded={jsonExpanded}
+      checkable={checkableJson}
+      checked={checkedJson}
+      checkDisabled={plotLimitReached}
+      subtreePlotCount={selectedValuePlotCount}
+      subtreeMessages={selectedSubtreeCount}
+      showPlotHint={Boolean(checkableJson.size && !route.plots.length)}
+      timeZone={route.timeZone}
+      onselect={selectJson}
+      ontoggle={toggleJson}
+      oncheck={togglePlot}
+      onremoveplots={removeSelectedValuePlots}
+    />
+    <HistoryTable
+      messages={currentHistory}
+      selectedId={selectedMessageId}
+      field={activeField}
+      fieldLabel={selectedFieldLabel}
+      timeZone={route.timeZone}
+      onselect={selectHistory}
+      onlatest={selectLatest}
+    />
+    <PlotDashboard
+      plots={dashboardPlots}
+      now={plotNow}
+      windowMs={route.plotWindowMs}
+      timeZone={route.timeZone}
+      onfocus={focusPlot}
+      onmove={movePlot}
+      onremove={(plot) =>
+        removePlots((current) => plotKey(current) === plotKey(plot))}
+      onshowall={() => changePlotWindow(null)}
+    />
+  </section>
+</main>

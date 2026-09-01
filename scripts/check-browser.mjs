@@ -50,8 +50,16 @@ try {
       `${browser} exited with status ${result.status}.\n${result.stderr}`,
     );
   }
-  if (!result.stdout.includes("<h1>MQTT Telemetry</h1>")) {
-    throw new Error("The local-file build did not render the connection view.");
+  if (
+    !result.stdout.includes("Connect to MQTT") ||
+    !result.stdout.includes('name="broker"')
+  ) {
+    throw new Error(
+      "The local-file build did not render the application shell.",
+    );
+  }
+  if (!/(?:local build|build [a-f0-9]{8})/.test(result.stdout)) {
+    throw new Error("The local-file build did not expose its build identity.");
   }
   const consoleErrors = result.stderr
     .split(/\r?\n/)
