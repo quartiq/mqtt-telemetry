@@ -7,7 +7,6 @@ import {
   isWebSocketBroker,
   launchUrl,
   readLaunchRoute,
-  uniqueFilters,
 } from "./routes";
 
 const launch = (href: string) => readLaunchRoute(new URL(href));
@@ -47,10 +46,6 @@ describe("route configuration", () => {
     );
   });
 
-  it("removes only exact duplicate and empty filters", () => {
-    expect(uniqueFilters(["a/#", "a/#", "", " a/#"])).toEqual(["a/#", " a/#"]);
-  });
-
   it("accepts WebSockets and explains browser transport constraints", () => {
     expect(
       isWebSocketBroker("ws://localhost:9001/mqtt", "http:"),
@@ -76,7 +71,7 @@ describe("route configuration", () => {
   it("reads a complete launch query with repeated subscriptions", () => {
     expect(
       launch(
-        "https://telemetry.example/?broker=wss://broker.example/mqtt&sub=dt/%23&sub=$SYS/%23&history=250&age=1h&window=10m",
+        "https://telemetry.example/?broker=wss://broker.example/mqtt&sub=dt/%23&sub=dt/%23&sub=$SYS/%23&history=250&age=1h&window=all",
       ),
     ).toMatchObject({
       kind: "valid",
@@ -85,7 +80,7 @@ describe("route configuration", () => {
         filters: ["dt/#", "$SYS/#"],
         historyLimit: 250,
         historyAgeMs: 3_600_000,
-        plotWindowMs: 600_000,
+        plotWindowMs: null,
         plots: [],
       },
     });
@@ -151,13 +146,5 @@ describe("route configuration", () => {
         "https://telemetry.example/?broker=wss://broker.example&history=1000",
       ),
     ).toMatchObject({ kind: "invalid", error: expect.any(String) });
-  });
-
-  it("accepts an explicit all-history plot window", () => {
-    expect(
-      launch(
-        "https://telemetry.example/?broker=wss://broker.example&sub=dt/%23&window=all",
-      ),
-    ).toMatchObject({ kind: "valid", route: { plotWindowMs: null } });
   });
 });

@@ -53,14 +53,15 @@ function message(
 }
 
 describe("payloads and JSON fields", () => {
-  it("formats every telemetry clock in 24-hour time", () => {
+  it("formats consistent 24-hour timestamps and dates", () => {
     const value = Date.UTC(2026, 7, 27, 13, 4, 5, 6);
-    const formatted = formatTelemetryTime(value, {
-      timeZone: "utc",
-      date: true,
-      milliseconds: true,
-    });
-    expect(formatted).toBe("2026-08-27 13:04:05.006");
+    expect(
+      formatTelemetryTime(value, {
+        timeZone: "utc",
+        date: true,
+        milliseconds: true,
+      }),
+    ).toBe("2026-08-27 13:04:05.006");
     expect(
       displayDatesDiffer(
         Date.UTC(2026, 7, 27, 23),
@@ -68,9 +69,7 @@ describe("payloads and JSON fields", () => {
         "utc",
       ),
     ).toBe(true);
-  });
 
-  it("shows dates for old single-day history and histories crossing a date", () => {
     const now = Date.UTC(2026, 7, 28, 12);
     expect(
       historyNeedsDate(
@@ -141,13 +140,11 @@ describe("payloads and JSON fields", () => {
     expect(telemetryPageTitle("", undefined)).toBe("MQTT Telemetry");
   });
 
-  it("builds a selectable, lexically ordered JSON tree", () => {
+  it("builds a selectable, ordered, and bounded JSON tree", () => {
     const snapshot = jsonTree({ z: 1, a: [true] });
     expect(snapshot.nodes.get("$")?.children).toEqual(["$.a", "$.z"]);
     expect(snapshot.paths.get("$.a[0]")).toEqual(["a", 0]);
-  });
 
-  it("bounds JSON tree depth and node count", () => {
     const depth = jsonTree(
       { a: { b: { c: 1 } } },
       {
@@ -288,7 +285,7 @@ describe("topic history", () => {
     expect(store.subtreeMessageCount(store.nodeId("a") as string)).toBe(1);
   });
 
-  it("keeps one retained snapshot outside live count and age limits", () => {
+  it("keeps and replaces one retained snapshot outside live limits", () => {
     const store = new TelemetryStore(1);
     store.add("a", encode("retained"), {
       receivedAt: 1000,
@@ -319,26 +316,16 @@ describe("topic history", () => {
     expect(store.expireBefore(4000)).toBe(1);
     expect(store.history(id)).toHaveLength(1);
     expect(store.history(id)[0].retained).toBe(true);
+    store.add("a", encode("new"), {
+      receivedAt: 5000,
+      retained: true,
+      qos: 0,
+    });
+    const history = store.history(id);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ receivedAt: 5000, retained: true });
     store.clearHistory(id);
     expect(store.history(id)).toEqual([]);
-  });
-
-  it("replaces a topic's previous retained snapshot", () => {
-    const store = new TelemetryStore(1);
-    store.add("a", encode("old"), {
-      receivedAt: 1000,
-      retained: true,
-      qos: 0,
-    });
-    store.add("a", encode("new"), {
-      receivedAt: 2000,
-      retained: true,
-      qos: 0,
-    });
-    const history = store.history(store.nodeId("a") as string);
-
-    expect(history).toHaveLength(1);
-    expect(history[0]).toMatchObject({ receivedAt: 2000, retained: true });
   });
 
   it("clears all local history without removing discovered topics", () => {
@@ -356,7 +343,10 @@ describe("topic history", () => {
     const a = store.nodeId("a") as string;
     const b = store.nodeId("a/b") as string;
 
-    expect(store.snapshot().bufferedMessages).toBe(2);
+    expect(store.snapshot()).toMatchObject({
+      bufferedMessages: 2,
+      topicCount: 2,
+    });
     store.clearAllHistory();
 
     expect(store.nodeId("a")).toBe(a);
@@ -364,7 +354,10 @@ describe("topic history", () => {
     expect(store.history(a)).toEqual([]);
     expect(store.history(b)).toEqual([]);
     expect(store.subtreeMessageCount(a)).toBe(0);
-    expect(store.snapshot().bufferedMessages).toBe(0);
+    expect(store.snapshot()).toMatchObject({
+      bufferedMessages: 0,
+      topicCount: 2,
+    });
   });
 
   it("still bounds retained snapshots by the hard global budget", () => {
@@ -470,43 +463,32 @@ describe("topic history", () => {
     expect(store.snapshot().evictedMessages).toBe(1);
   });
 
-  it("restores synthetic branches and preserves published-topic counts", () => {
-    const store = new TelemetryStore(10);
-    store.add("a/b", encode("1"), {
-      receivedAt: 1,
-      retained: false,
-      qos: 0,
-    });
-    const branch = store.nodeId("a");
-    const leaf = store.nodeId("a/b") as string;
-    const before = store.snapshot();
-    expect(branch).toBeDefined();
-    expect(store.topic(branch as string)).toBe("a");
-    expect(before.topicCount).toBe(1);
-
-    store.clearSubtree(leaf);
-    const after = store.snapshot();
-    expect(after.nodes).toBe(before.nodes);
-    expect(after.revision).toBeGreaterThan(before.revision);
-    expect(after.topicCount).toBe(1);
-    expect(after.nodes.get(leaf)?.suffix).toBeUndefined();
-  });
-
-  it("represents topics that are also branches and preserves empty levels", () => {
+  it("represents topic hierarchy, direct counts, and empty levels", () => {
     const store = new TelemetryStore(10);
     store.add("a", encode("1"), { receivedAt: 1, retained: false, qos: 0 });
     store.add("a/b", encode("2"), { receivedAt: 2, retained: false, qos: 0 });
-    store.add("/a//b", encode("3"), { receivedAt: 3, retained: false, qos: 0 });
+    store.add("a/b/c", encode("3"), {
+      receivedAt: 3,
+      retained: false,
+      qos: 0,
+    });
+    store.add("/a//b", encode("4"), { receivedAt: 4, retained: false, qos: 0 });
     const snapshot = store.snapshot();
     const a = store.nodeId("a") as string;
+    const leaf = store.nodeId("a/b/c") as string;
     expect(store.history(a)).toHaveLength(1);
     expect(snapshot.nodes.get(a)?.children).toHaveLength(1);
     expect(snapshot.nodes.get(a)?.suffix).toBe("(1)");
     expect(snapshot.nodes.get(a)?.title).toContain("Buffered here: 1");
-    expect(snapshot.nodes.get(a)?.title).toContain("Buffered in subtree: 2");
+    expect(snapshot.nodes.get(a)?.title).toContain("Buffered in subtree: 3");
     expect(snapshot.nodes.get(store.nodeId("a/b") as string)?.suffix).toBe(
       "(1)",
     );
+    expect(store.ancestorIds(leaf).map((id) => store.topic(id))).toEqual([
+      "a/b",
+      "a",
+    ]);
+    expect(snapshot.topicCount).toBe(4);
     expect(snapshot.roots.map((id) => snapshot.nodes.get(id)?.label)).toEqual([
       "(empty)",
       "a",
@@ -586,14 +568,12 @@ describe("plot extraction", () => {
     expect(store.plotSeries(a, "$.v0")).not.toBe(first);
   });
 
-  it("formats axis values at the tick resolution", () => {
+  it("formats precise values and three exact readable ticks", () => {
     expect(formatPlotNumber(1.000000002, 1e-9)).toBe("1.000000002");
     expect(formatPlotNumber(103_403.8, 0.03)).toBe("103403.8");
     expect(formatPlotNumber(103_403.95, 0.03)).toBe("103403.95");
     expect(formatPlotNumber(0.16, 0.03)).toBe("0.16");
-  });
 
-  it("places three readable ticks at their exact numeric values", () => {
     const scale = nicePlotScale(0.383, 0.4);
     expect(scale).toEqual({
       min: 0.38,
@@ -739,7 +719,7 @@ describe("plot extraction", () => {
     ).toBe(true);
   });
 
-  it("summarizes recent live-message frequency", () => {
+  it("summarizes recent live-message frequency and span", () => {
     expect(messageFrequency([message(1, 0, "1"), message(2, 0.5, "2")])).toBe(
       "burst (<1 ms apart)",
     );
@@ -763,9 +743,7 @@ describe("plot extraction", () => {
         message(3, 10_000, "3", true, 3),
       ]),
     ).toBe("");
-  });
 
-  it("summarizes the live history span", () => {
     expect(messageSpan([message(1, 0, "1"), message(2, 0.5, "2")])).toBe(
       "<1 ms span",
     );

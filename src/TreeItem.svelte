@@ -216,9 +216,9 @@
   .activity-dot {
     background: currentColor;
     border-radius: 50%;
-    height: 0.3rem;
+    height: 0.4rem;
     opacity: 0;
-    width: 0.3rem;
+    width: 0.4rem;
   }
 
   .caret,

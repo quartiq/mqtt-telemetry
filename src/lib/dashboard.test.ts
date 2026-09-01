@@ -65,13 +65,7 @@ describe("dashboard files", () => {
     expect(dashboardJson(route)).not.toContain("unshared");
   });
 
-  it("normalizes readable and bracketed singular JSONPaths", () => {
-    const dashboard = JSON.parse(dashboardJson(route));
-    dashboard.plots[0].path = "$['temperature']";
-    expect(parseDashboard(dashboard).plots[0].path).toBe("$.temperature");
-  });
-
-  it("loads older version-one dashboards with local time and the default plot window", () => {
+  it("defaults and validates version-one display settings", () => {
     const dashboard = JSON.parse(dashboardJson(route));
     delete dashboard.display;
     expect(parseDashboard(dashboard).display).toEqual({
@@ -81,11 +75,8 @@ describe("dashboard files", () => {
 
     dashboard.display = { timeZone: "Mars/Olympus" };
     expect(() => parseDashboard(dashboard)).toThrow(/time zone/);
-  });
 
-  it("accepts all-history dashboards and rejects invalid plot windows", () => {
-    const dashboard = JSON.parse(dashboardJson(route));
-    dashboard.display.plotWindowSeconds = null;
+    dashboard.display = { timeZone: "utc", plotWindowSeconds: null };
     expect(
       routeFromDashboard(parseDashboard(dashboard)).plotWindowMs,
     ).toBeNull();

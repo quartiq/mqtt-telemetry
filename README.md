@@ -24,6 +24,8 @@ Browsers require `ws://` or `wss://`; ordinary `mqtt://` TCP endpoints do not wo
 
 For a LAN broker that only provides `ws://`, save the hosted page as **Webpage, HTML Only**, then open that file. It is a complete offline application and can connect directly to a private `ws://` endpoint.
 
+The muted build link in the header identifies the exact source commit embedded in hosted and downloaded copies. Builds made without source metadata are labeled `local build`.
+
 ### Data and reconnect behavior
 
 History exists only in the current tab. It defaults to 1,000 live messages per topic and is also globally bounded; payloads over 1 MiB are omitted. The latest retained snapshot for each topic is kept outside the count and age limits, but not plotted because its original publication time is unknown. History count and maximum age delete local samples; the independent plot window only limits the visible interval and its statistics. Clear actions affect only this tab.

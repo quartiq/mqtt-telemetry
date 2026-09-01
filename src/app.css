@@ -261,8 +261,18 @@ pre {
   gap: var(--space-tight);
 }
 
-.header-controls > span {
+.connection-state {
+  align-items: baseline;
+  display: flex;
+  gap: var(--space-tight);
   margin-right: var(--space-tight);
+  white-space: nowrap;
+}
+
+.build-id,
+.build-separator {
+  color: var(--muted);
+  font-size: var(--text-small);
 }
 
 .dashboard-file {
