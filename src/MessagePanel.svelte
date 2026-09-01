@@ -76,7 +76,7 @@
 
 <section class="panel message-panel">
   <header class="panel-header">
-    <h2 title={topic}>{topic || "No topic selected"}</h2>
+    <h2>Value</h2>
     <div class="panel-controls">
       {#if fieldMissing}
         <span

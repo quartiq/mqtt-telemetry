@@ -99,6 +99,7 @@
   let autoExpandedTopicRoots = new Set<string>();
   let topicActivity = $state.raw(new Map<string, TreeActivity>());
   let topicSearch = $state("");
+  let historyExpanded = $state(false);
   let jsonExpanded = $state(new Set<string>(["$"]));
   const jsonExpandedByTopic = new Map<string, Set<string>>();
   let status = $state(initialRoute.broker ? "Connecting" : "Not connected");
@@ -767,13 +768,26 @@
       jsonExpanded = new Set(jsonExpandedByTopic.get(nextTopic) ?? ["$"]);
     }
     selectedTopicId = id;
-    if (changed || reset)
+    if (changed || reset) {
       topicExpanded = new Set([...topicExpanded, ...store.ancestorIds(id)]);
+      revealTopic(id);
+    }
     if (reset) {
       selectedMessageId = null;
       selectedField = undefined;
       revealedFieldKey = "";
     }
+  }
+
+  function revealTopic(id: string) {
+    if (topicSearch.trim() && !topicFilter.nodes.has(id)) topicSearch = "";
+    requestAnimationFrame(() =>
+      document
+        .querySelector<HTMLElement>(
+          `.topic-tree [data-tree-id="${CSS.escape(id)}"]`,
+        )
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" }),
+    );
   }
 
   function selectTopic(id: string) {
@@ -1057,13 +1071,13 @@
             ? cancelConnectionEdit
             : editConnection}
         >
+          <span aria-hidden="true" class="disclosure-mark"
+            >{editingConnection ? "▾" : "▸"}</span
+          >
           <span class="broker-label">{route.broker || "Connect to MQTT"}</span>
           {#if route.broker}
             <span class="subscription-label">{route.filters.join(", ")}</span>
           {/if}
-          <span aria-hidden="true" class="disclosure-mark"
-            >{editingConnection ? "▾" : "▸"}</span
-          >
         </button>
       </h1>
     </div>
@@ -1178,68 +1192,72 @@
     {/if}
   </header>
 
-  <aside class="topics panel">
-    <header class="topics-header">
-      <h2>
-        Topics <span class="count"
-          >({topicSnapshot.topicCount.toLocaleString()})</span
-        >
-      </h2>
-      <div class="topic-search">
-        <input
-          aria-label="Search topic paths"
-          id="topic-search"
-          onkeydown={topicSearchKeydown}
-          placeholder="Substring or MQTT filter"
-          title="Plain text matches anywhere in a topic path; + and # use MQTT filter syntax. Press / to focus."
-          type="search"
-          bind:value={topicSearch}
-        />
-        {#if topicSearch.trim()}
-          {#if topicFilter.error}
-            <span class="meta problem" title={topicFilter.error}
-              >Invalid filter</span
-            >
-          {:else}
-            <span class="meta">
-              {topicFilter.matches.length.toLocaleString()}
-              {topicFilter.matches.length === 1 ? "match" : "matches"}
-            </span>
+  <section
+    aria-label="Telemetry browsers"
+    class:history-expanded={historyExpanded}
+    class="browsers"
+  >
+    <aside class="topics panel">
+      <header class="topics-header">
+        <h2>
+          Topics <span class="count"
+            >({topicSnapshot.topicCount.toLocaleString()})</span
+          >
+        </h2>
+        <div class="topic-search">
+          <input
+            aria-label="Search topic paths"
+            id="topic-search"
+            onkeydown={topicSearchKeydown}
+            placeholder="Substring or MQTT filter"
+            title="Plain text matches anywhere in a topic path; + and # use MQTT filter syntax. Press / to focus."
+            type="search"
+            bind:value={topicSearch}
+          />
+          {#if topicSearch.trim()}
+            {#if topicFilter.error}
+              <span class="meta problem" title={topicFilter.error}
+                >Invalid filter</span
+              >
+            {:else}
+              <span class="meta">
+                {topicFilter.matches.length.toLocaleString()}
+                {topicFilter.matches.length === 1 ? "match" : "matches"}
+              </span>
+            {/if}
           {/if}
+        </div>
+        {#if topicWarning}
+          <span class="meta problem" title="Browser safety limits applied">
+            {topicWarning}
+          </span>
+        {/if}
+      </header>
+      <div class="topic-tree">
+        {#if visibleTopics.roots.length}
+          <TreeView
+            roots={visibleTopics.roots}
+            nodes={visibleTopics.nodes}
+            revision={topicSnapshot.revision}
+            selected={selectedTopicId}
+            expanded={visibleTopicExpanded}
+            activity={topicActivity}
+            label="MQTT topics"
+            onselect={selectTopic}
+            ontoggle={toggleTopic}
+          />
+        {:else if topicSearch.trim()}
+          <p class="empty">No matching topics.</p>
+        {:else}
+          <p class="empty">
+            {route.broker
+              ? "Waiting for subscribed messages…"
+              : "Connect to a broker to browse topics."}
+          </p>
         {/if}
       </div>
-      {#if topicWarning}
-        <span class="meta problem" title="Browser safety limits applied">
-          {topicWarning}
-        </span>
-      {/if}
-    </header>
-    <div class="topic-tree">
-      {#if visibleTopics.roots.length}
-        <TreeView
-          roots={visibleTopics.roots}
-          nodes={visibleTopics.nodes}
-          revision={topicSnapshot.revision}
-          selected={selectedTopicId}
-          expanded={visibleTopicExpanded}
-          activity={topicActivity}
-          label="MQTT topics"
-          onselect={selectTopic}
-          ontoggle={toggleTopic}
-        />
-      {:else if topicSearch.trim()}
-        <p class="empty">No matching topics.</p>
-      {:else}
-        <p class="empty">
-          {route.broker
-            ? "Waiting for subscribed messages…"
-            : "Connect to a broker to browse topics."}
-        </p>
-      {/if}
-    </div>
-  </aside>
+    </aside>
 
-  <section class="details">
     <MessagePanel
       message={currentMessage}
       topic={selectedTopic}
@@ -1263,6 +1281,7 @@
       onremoveallplots={() => removePlots(() => true)}
     />
     <HistoryTable
+      expanded={historyExpanded}
       messages={currentHistory}
       selectedId={selectedMessageId}
       field={activeField}
@@ -1276,17 +1295,18 @@
       oncleartopic={clearTopicHistory}
       onclearsubtree={clearTopicSubtree}
       onclearall={clearAllHistory}
-    />
-    <PlotDashboard
-      plots={dashboardPlots}
-      now={plotNow}
-      windowMs={route.plotWindowMs}
-      timeZone={route.timeZone}
-      onfocus={focusPlot}
-      onmove={movePlot}
-      onremove={(plot) =>
-        removePlots((current) => plotKey(current) === plotKey(plot))}
-      onshowall={() => changePlotWindow(null)}
+      ontoggle={() => (historyExpanded = !historyExpanded)}
     />
   </section>
+  <PlotDashboard
+    plots={dashboardPlots}
+    now={plotNow}
+    windowMs={route.plotWindowMs}
+    timeZone={route.timeZone}
+    onfocus={focusPlot}
+    onmove={movePlot}
+    onremove={(plot) =>
+      removePlots((current) => plotKey(current) === plotKey(plot))}
+    onshowall={() => changePlotWindow(null)}
+  />
 </main>

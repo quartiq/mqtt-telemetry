@@ -80,7 +80,6 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     display: grid;
-    grid-column: 1 / -1;
     min-height: 0;
     overflow: hidden;
   }

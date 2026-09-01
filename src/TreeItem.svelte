@@ -135,7 +135,7 @@
         disabled={checkBlocked}
         tabindex="-1"
         title={checkBlocked
-          ? "The eight-plot limit is reached"
+          ? "The plot limit is reached"
           : checked
             ? "Remove plot"
             : "Add plot"}

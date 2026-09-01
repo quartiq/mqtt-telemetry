@@ -1,6 +1,6 @@
 # MQTT Telemetry
 
-A read-only MQTT JSON telemetry browser with bounded history and up to eight live plots.
+A read-only MQTT JSON telemetry browser with bounded history and up to ten live plots.
 
 ## Use
 

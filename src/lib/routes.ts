@@ -4,7 +4,7 @@ export const DEFAULT_HISTORY_LIMIT = 1000;
 export const DEFAULT_PLOT_WINDOW_MS: number | null = null;
 export const MAX_HISTORY_LIMIT = 10_000;
 export const MAX_HISTORY_AGE_SECONDS = 365 * 24 * 60 * 60;
-export const MAX_PLOTS = 8;
+export const MAX_PLOTS = 10;
 export const DEFAULT_FILTER = "#";
 
 export type PlotRef = { topic: string; path: string };

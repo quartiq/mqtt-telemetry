@@ -9,7 +9,7 @@ import {
   resolveStartupRoute,
   routeFromDashboard,
 } from "./dashboard";
-import { defaultRoute, type AppRoute } from "./routes";
+import { defaultRoute, MAX_PLOTS, type AppRoute } from "./routes";
 
 const route: AppRoute = {
   broker: "wss://broker.example/mqtt",
@@ -99,6 +99,21 @@ describe("dashboard files", () => {
       { topic: "a", path: "$['value']" },
     ];
     expect(() => parseDashboard(dashboard)).toThrow(/duplicate/);
+  });
+
+  it("accepts the plot limit and rejects one more", () => {
+    const dashboard = JSON.parse(dashboardJson(route));
+    dashboard.plots = Array.from({ length: MAX_PLOTS }, (_, index) => ({
+      topic: "sensors/room",
+      path: `$.value${index}`,
+    }));
+    expect(parseDashboard(dashboard).plots).toHaveLength(MAX_PLOTS);
+
+    dashboard.plots.push({
+      topic: "sensors/room",
+      path: `$.value${MAX_PLOTS}`,
+    });
+    expect(() => parseDashboard(dashboard)).toThrow(`at most ${MAX_PLOTS}`);
   });
 
   it("puts an explicit share payload in the fragment and removes query state", () => {
