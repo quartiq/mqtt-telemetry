@@ -81,8 +81,6 @@
   let route = $state(initialRoute);
   let formBroker = $state(initialRoute.broker);
   let formFilters = $state(initialRoute.filters.join("\n"));
-  let formHistoryLimit = $state(initialRoute.historyLimit);
-  let formHistoryAgeMs = $state(initialRoute.historyAgeMs);
   let username = $state("");
   let password = $state("");
   let authBroker = initialRoute.broker;
@@ -328,8 +326,6 @@
       if (connectionKey(next) !== connectionKey(route)) {
         route = next;
         formFilters = next.filters.join("\n");
-        formHistoryLimit = next.historyLimit;
-        formHistoryAgeMs = next.historyAgeMs;
         if (next.broker !== authBroker) {
           username = "";
           password = "";
@@ -345,8 +341,6 @@
         const historyLimitChanged = next.historyLimit !== route.historyLimit;
         const historyAgeChanged = next.historyAgeMs !== route.historyAgeMs;
         route = next;
-        formHistoryLimit = next.historyLimit;
-        formHistoryAgeMs = next.historyAgeMs;
         if (historyLimitChanged) {
           store.setHistoryLimit(next.historyLimit);
           revision += 1;
@@ -479,8 +473,6 @@
     }
     formBroker = next.broker;
     formFilters = next.filters.join("\n");
-    formHistoryLimit = next.historyLimit;
-    formHistoryAgeMs = next.historyAgeMs;
     writeRoute(next, null);
     const brokerError = isWebSocketBroker(next.broker);
     if (brokerError) {
@@ -637,7 +629,6 @@
               segment: historySegment,
               retained: packet.retain,
               duplicate: packet.dup,
-              qos: packet.qos,
             });
             if (route.historyAgeMs !== null)
               store.expireBefore(receivedAt - route.historyAgeMs);
@@ -693,8 +684,8 @@
     const next: AppRoute = {
       broker,
       filters,
-      historyLimit: formHistoryLimit,
-      historyAgeMs: formHistoryAgeMs,
+      historyLimit: route.historyLimit,
+      historyAgeMs: route.historyAgeMs,
       plotWindowMs: route.plotWindowMs,
       timeZone: route.timeZone,
       selectedTopic: "",
@@ -878,7 +869,6 @@
   function changeHistoryLimit(limit: number): boolean {
     if (limit === route.historyLimit) return true;
     store.setHistoryLimit(limit);
-    formHistoryLimit = limit;
     revision += 1;
     const id = selectedMessageId;
     const nextMessageId = currentHistory.some((message) => message.id === id)
@@ -891,7 +881,6 @@
 
   function changeHistoryAge(ageMs: number | null): boolean {
     if (ageMs === route.historyAgeMs) return true;
-    formHistoryAgeMs = ageMs;
     plotNow = Date.now();
     if (ageMs !== null && store.expireBefore(plotNow - ageMs)) revision += 1;
     writeRoute({ ...route, historyAgeMs: ageMs }, selectedMessageId);

@@ -18,7 +18,6 @@ export type TelemetryMessage = {
   segment: number;
   retained: boolean;
   duplicate: boolean;
-  qos: 0 | 1 | 2;
   bytes: number;
   unsafeIntegers: boolean;
   payload: Payload;
@@ -781,7 +780,7 @@ function truncate(value: string, limit = 256): string {
 }
 
 const MAX_HISTORY_CACHE_ENTRIES = 8;
-const MAX_PLOT_CACHE_ENTRIES = 8;
+const MAX_PLOT_CACHE_ENTRIES = 16;
 
 export class TelemetryStore {
   private readonly nodes = new Map<string, TopicNode>();
@@ -830,7 +829,6 @@ export class TelemetryStore {
       segment?: number;
       retained: boolean;
       duplicate?: boolean;
-      qos: 0 | 1 | 2;
     },
   ): { nodeId: string; message: TelemetryMessage } | undefined {
     const nodeId = this.topicIds.get(topic) ?? this.addTopic(topic);

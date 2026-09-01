@@ -77,31 +77,6 @@
     return items;
   });
   let tagline = $derived(statistics.join(" · "));
-
-  function titleWhenClipped(node: HTMLElement, initial: string) {
-    let value = initial;
-    let frame = 0;
-    const update = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        if (node.scrollWidth > node.clientWidth) node.title = value;
-        else node.removeAttribute("title");
-      });
-    };
-    const observer = new ResizeObserver(update);
-    observer.observe(node);
-    update();
-    return {
-      update(next: string) {
-        value = next;
-        update();
-      },
-      destroy() {
-        cancelAnimationFrame(frame);
-        observer.disconnect();
-      },
-    };
-  }
 </script>
 
 <section class="panel message-panel">
@@ -136,7 +111,7 @@
       {/if}
     </div>
     {#if statistics.length}
-      <div class="panel-stats meta" use:titleWhenClipped={tagline}>
+      <div class="panel-stats meta" title={tagline}>
         {#each statistics as statistic}<span>{statistic}</span>{/each}
       </div>
     {/if}
