@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const candidates = [
@@ -10,9 +11,7 @@ const candidates = [
   "chromium",
   "chromium-browser",
 ].filter(Boolean);
-const profileRoot = resolve(".codex");
-mkdirSync(profileRoot, { recursive: true });
-const profile = mkdtempSync(resolve(profileRoot, "browser-smoke-"));
+const profile = mkdtempSync(join(tmpdir(), "mqtt-telemetry-browser-"));
 const page = pathToFileURL(resolve("dist/index.html")).href;
 
 try {
