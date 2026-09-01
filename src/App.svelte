@@ -1217,7 +1217,7 @@
       <div class="topic-action-groups">
         <div class="topic-policy-group">
           <div class="topic-actions">
-            <span class="meta">History</span>
+            <span class="meta">Clear history</span>
             <button
               disabled={!currentHistory.length}
               title="Clear local history for the selected topic only. Broker-retained messages are unchanged."
@@ -1246,7 +1246,7 @@
         </div>
         <div class="topic-policy-group">
           <div class="topic-actions">
-            <span class="meta">Plots</span>
+            <span class="meta">Remove plots</span>
             <button
               disabled={!selectedTopicPlotCount}
               title="Remove plots for the selected topic"

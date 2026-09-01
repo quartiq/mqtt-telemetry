@@ -16,8 +16,5 @@ export default defineConfig(({ command, mode }) => {
     },
     define: { __BUILD_COMMIT__: JSON.stringify(buildCommit) },
     plugins: [svelte(), ...(command === "build" ? [viteSingleFile()] : [])],
-    server: {
-      watch: { ignored: ["**/.codex/**"] },
-    },
   };
 });

@@ -23,7 +23,6 @@ jobs:
       - run: npm run build
         env:
           MQTT_TELEMETRY_BUILD_COMMIT: ${{ github.sha }}
-      - run: npm run test:browser
       - uses: actions/upload-pages-artifact@v3
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         with:

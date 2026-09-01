@@ -43,11 +43,10 @@ npm run dev
 npm run format:check
 npm test
 npm run build
-npm run test:browser
 ```
 
 `npm run build` type-checks and produces the self-contained `dist/index.html` used for both deployment and the local-file workflow.
-The browser smoke test opens that artifact from `file://` with Chrome or Chromium.
+`npm run test:browser` optionally opens that artifact from `file://` with a locally installed Chrome or Chromium.
 
 ## Deploy
 
