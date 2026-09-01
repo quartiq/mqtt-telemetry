@@ -4,7 +4,7 @@
   import { onMount } from "svelte";
   import ConnectionFields from "./ConnectionFields.svelte";
   import DurationSelect from "./DurationSelect.svelte";
-  import HistoryLimit from "./HistoryLimit.svelte";
+  import HistoryPolicy from "./HistoryPolicy.svelte";
   import HistoryTable from "./HistoryTable.svelte";
   import MessagePanel from "./MessagePanel.svelte";
   import PlotDashboard, { type DashboardPlot } from "./PlotDashboard.svelte";
@@ -215,17 +215,6 @@
       (plot) => plot.topic === selectedTopic && pathContains(path, plot.path),
     ).length;
   });
-  let selectedTopicPlotCount = $derived(
-    selectedTopicId
-      ? route.plots.filter((plot) => plot.topic === selectedTopic).length
-      : 0,
-  );
-  let selectedTopicSubtreePlotCount = $derived(
-    selectedTopicId
-      ? route.plots.filter((plot) => topicContains(selectedTopic, plot.topic))
-          .length
-      : 0,
-  );
   let dashboardPlots = $derived.by(() => {
     revision;
     return route.plots.map<DashboardPlot>((plot) => {
@@ -917,10 +906,6 @@
     );
   }
 
-  function topicContains(parent: string, candidate: string): boolean {
-    return candidate === parent || candidate.startsWith(`${parent}/`);
-  }
-
   function togglePlot(id: string) {
     const path = jsonSnapshot?.paths.get(id);
     if (!path || !selectedTopic) return;
@@ -956,16 +941,6 @@
     removePlots(
       (plot) => plot.topic === selectedTopic && pathContains(path, plot.path),
     );
-  }
-
-  function removeTopicPlots() {
-    if (!selectedTopicId) return;
-    removePlots((plot) => plot.topic === selectedTopic);
-  }
-
-  function removeTopicSubtreePlots() {
-    if (!selectedTopicId) return;
-    removePlots((plot) => topicContains(selectedTopic, plot.topic));
   }
 
   function focusPlot(plot: PlotRef) {
@@ -1129,7 +1104,7 @@
         </label>
         <label
           class="display-option"
-          title="Only changes the visible plot interval and its statistics; buffered history is not deleted"
+          title="Only changes the visible plot interval and its statistics; history is not deleted"
         >
           <span class="meta">Show</span>
           <DurationSelect
@@ -1214,60 +1189,14 @@
       {/if}
     </header>
     <div class="topic-policy">
-      <div class="topic-action-groups">
-        <div class="topic-policy-group">
-          <div class="topic-actions">
-            <span class="meta">Clear history</span>
-            <button
-              disabled={!currentHistory.length}
-              title="Clear local history for the selected topic only. Broker-retained messages are unchanged."
-              type="button"
-              onclick={clearTopicHistory}>Topic</button
-            >
-            <button
-              disabled={!selectedSubtreeCount}
-              title="Clear local history for the selected topic and its subtopics. Broker-retained messages are unchanged."
-              type="button"
-              onclick={clearTopicSubtree}>Subtree</button
-            >
-            <button
-              disabled={!topicSnapshot.bufferedMessages}
-              title="Clear all locally buffered messages. Topics, plots, settings, and broker-retained messages are unchanged."
-              type="button"
-              onclick={clearAllHistory}>All</button
-            >
-          </div>
-          <HistoryLimit
-            value={route.historyLimit}
-            onchange={changeHistoryLimit}
-            ageMs={route.historyAgeMs}
-            onagechange={changeHistoryAge}
-          />
-        </div>
-        <div class="topic-policy-group">
-          <div class="topic-actions">
-            <span class="meta">Remove plots</span>
-            <button
-              disabled={!selectedTopicPlotCount}
-              title="Remove plots for the selected topic"
-              type="button"
-              onclick={removeTopicPlots}>Topic</button
-            >
-            <button
-              disabled={!selectedTopicSubtreePlotCount}
-              title="Remove plots for the selected topic and its subtopics"
-              type="button"
-              onclick={removeTopicSubtreePlots}>Subtree</button
-            >
-            <button
-              disabled={!route.plots.length}
-              title="Remove every plot"
-              type="button"
-              onclick={() => removePlots(() => true)}>All</button
-            >
-          </div>
-        </div>
-      </div>
+      <HistoryPolicy
+        value={route.historyLimit}
+        onchange={changeHistoryLimit}
+        ageMs={route.historyAgeMs}
+        onagechange={changeHistoryAge}
+        canClear={Boolean(topicSnapshot.bufferedMessages)}
+        onclear={clearAllHistory}
+      />
     </div>
     <div class="topic-search">
       <input
@@ -1344,8 +1273,12 @@
       field={activeField}
       fieldLabel={selectedFieldLabel}
       timeZone={route.timeZone}
+      canClearTopic={Boolean(currentHistory.length)}
+      canClearSubtree={Boolean(selectedSubtreeCount)}
       onselect={selectHistory}
       onlatest={selectLatest}
+      oncleartopic={clearTopicHistory}
+      onclearsubtree={clearTopicSubtree}
     />
     <PlotDashboard
       plots={dashboardPlots}
@@ -1356,6 +1289,7 @@
       onmove={movePlot}
       onremove={(plot) =>
         removePlots((current) => plotKey(current) === plotKey(plot))}
+      onremoveall={() => removePlots(() => true)}
       onshowall={() => changePlotWindow(null)}
     />
   </section>

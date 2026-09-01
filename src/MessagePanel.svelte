@@ -119,11 +119,11 @@
     <pre>{formatPayload(message.payload)}</pre>
   {:else if topic && subtreeMessages}
     <p class="empty">
-      No buffered message on this exact topic. Expand it and select a descendant
-      with a message count.
+      No message in history on this exact topic. Expand it and select a
+      descendant with a message count.
     </p>
   {:else if topic}
-    <p class="empty">No buffered message on this topic.</p>
+    <p class="empty">No message in history on this topic.</p>
   {:else}
     <p class="empty">Select a topic with a message count.</p>
   {/if}

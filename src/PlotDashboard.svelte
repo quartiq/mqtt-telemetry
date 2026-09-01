@@ -25,6 +25,7 @@
     onfocus: (plot: PlotRef) => void;
     onmove: (plot: PlotRef, offset: -1 | 1) => void;
     onremove: (plot: PlotRef) => void;
+    onremoveall: () => void;
     onshowall: () => void;
   };
 
@@ -36,6 +37,7 @@
     onfocus,
     onmove,
     onremove,
+    onremoveall,
     onshowall,
   }: Props = $props();
   let domain = $derived(plotTimeDomain(plots, now, windowMs));
@@ -45,8 +47,13 @@
   let inspectTime = $state<number | undefined>();
 </script>
 
-<section class="plot-dashboard">
+<section class:with-actions={plots.length > 1} class="plot-dashboard">
   {#if plots.length}
+    {#if plots.length > 1}
+      <div class="dashboard-actions">
+        <button type="button" onclick={onremoveall}>Remove all</button>
+      </div>
+    {/if}
     <div class:two-columns={plots.length > 4} class="plot-grid">
       {#each plots as plot, index (plot.key)}
         <TelemetryPlot
@@ -83,6 +90,16 @@
     grid-column: 1 / -1;
     min-height: 0;
     overflow: hidden;
+  }
+
+  .plot-dashboard.with-actions {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .dashboard-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding: var(--space) var(--space) 0;
   }
 
   .plot-grid {

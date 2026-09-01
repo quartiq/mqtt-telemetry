@@ -194,7 +194,7 @@ pre {
 
 .app-header h1,
 .breadcrumb span,
-.topics .meta {
+.topics > header .meta {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -320,16 +320,6 @@ pre {
   margin-bottom: var(--space-tight);
 }
 
-.topic-action-groups {
-  display: grid;
-  gap: var(--space-tight);
-}
-
-.topic-policy-group {
-  display: grid;
-  gap: var(--space-tight);
-}
-
 .topic-search {
   align-items: baseline;
   display: flex;
@@ -358,18 +348,6 @@ pre {
 .topic-tree {
   min-height: 0;
   overflow: auto;
-}
-
-.topic-actions {
-  align-items: baseline;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-tight);
-}
-
-.topic-actions > .meta {
-  flex: 0 0 3.4rem;
-  margin-left: 0;
 }
 
 .count {
