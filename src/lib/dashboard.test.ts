@@ -69,7 +69,7 @@ describe("dashboard files", () => {
     delete dashboard.display;
     expect(parseDashboard(dashboard).display).toEqual({
       timeZone: "local",
-      plotWindowSeconds: 600,
+      plotWindowSeconds: null,
     });
 
     dashboard.display = { timeZone: "Mars/Olympus" };

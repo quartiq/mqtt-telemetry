@@ -1,7 +1,7 @@
 import type { DisplayTimeZone } from "./model";
 
 export const DEFAULT_HISTORY_LIMIT = 1000;
-export const DEFAULT_PLOT_WINDOW_MS = 10 * 60 * 1000;
+export const DEFAULT_PLOT_WINDOW_MS: number | null = null;
 export const MAX_HISTORY_LIMIT = 10_000;
 export const MAX_HISTORY_AGE_SECONDS = 365 * 24 * 60 * 60;
 export const MAX_PLOTS = 8;
@@ -75,7 +75,7 @@ export function readLaunchRoute(
   location: Pick<Location, "href" | "search" | "hash" | "protocol">,
 ): LaunchRoute {
   const parameters = new URLSearchParams(location.search);
-  const names = ["broker", "sub", "history", "age"];
+  const names = ["broker", "sub", "history", "age", "window"];
   const present = names.some((name) => parameters.has(name));
   if (!present) return { kind: "absent" };
 
@@ -87,7 +87,7 @@ export function readLaunchRoute(
     return launchError(
       "Encode MQTT + wildcards in subscription parameters as %2B.",
     );
-  for (const name of ["broker", "history", "age"])
+  for (const name of ["broker", "history", "age", "window"])
     if (parameters.getAll(name).length > 1)
       return launchError(`URL parameter ${name} may appear only once.`);
 
@@ -121,6 +121,16 @@ export function readLaunchRoute(
       "URL age must be a positive duration such as 10m, 1h, or 7d.",
     );
 
+  const windowValue = parameters.get("window");
+  const plotWindowMs =
+    windowValue === null || windowValue === "all"
+      ? null
+      : parseAge(windowValue);
+  if (plotWindowMs === undefined)
+    return launchError(
+      "URL window must be all or a positive duration such as 10m, 1h, or 7d.",
+    );
+
   return {
     kind: "valid",
     route: {
@@ -129,6 +139,7 @@ export function readLaunchRoute(
       filters: uniqueFilters(filters),
       historyLimit,
       historyAgeMs: historyAgeMs ?? null,
+      plotWindowMs,
     },
   };
 }
@@ -149,6 +160,8 @@ export function launchUrl(
   parameters.set("history", String(route.historyLimit));
   if (route.historyAgeMs !== null)
     parameters.set("age", formatAge(route.historyAgeMs));
+  if (route.plotWindowMs !== null)
+    parameters.set("window", formatAge(route.plotWindowMs));
   url.search = readableSearch(parameters);
   return url.href;
 }

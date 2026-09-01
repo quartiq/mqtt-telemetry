@@ -76,7 +76,7 @@ describe("route configuration", () => {
   it("reads a complete launch query with repeated subscriptions", () => {
     expect(
       launch(
-        "https://telemetry.example/?broker=wss://broker.example/mqtt&sub=dt/%23&sub=$SYS/%23&history=250&age=1h",
+        "https://telemetry.example/?broker=wss://broker.example/mqtt&sub=dt/%23&sub=$SYS/%23&history=250&age=1h&window=10m",
       ),
     ).toMatchObject({
       kind: "valid",
@@ -85,6 +85,7 @@ describe("route configuration", () => {
         filters: ["dt/#", "$SYS/#"],
         historyLimit: 250,
         historyAgeMs: 3_600_000,
+        plotWindowMs: 600_000,
         plots: [],
       },
     });
@@ -99,11 +100,12 @@ describe("route configuration", () => {
           filters: ["dt/+/#", "$SYS/#", "room one/#"],
           historyLimit: 250,
           historyAgeMs: 3_600_000,
+          plotWindowMs: 600_000,
         },
         new URL("https://telemetry.example/old?discard=1#old"),
       ),
     ).toBe(
-      "https://telemetry.example/old?broker=wss://broker.example/mqtt?token=a/b&sub=dt/%2B/%23&sub=$SYS/%23&sub=room%20one/%23&history=250&age=1h",
+      "https://telemetry.example/old?broker=wss://broker.example/mqtt?token=a/b&sub=dt/%2B/%23&sub=$SYS/%23&sub=room%20one/%23&history=250&age=1h&window=10m",
     );
   });
 
@@ -133,6 +135,14 @@ describe("route configuration", () => {
         "https://telemetry.example/?broker=wss://broker.example&sub=dt/%23&age=1week",
       ),
     ).toMatchObject({ kind: "invalid", error: expect.stringContaining("age") });
+    expect(
+      launch(
+        "https://telemetry.example/?broker=wss://broker.example&sub=dt/%23&window=recent",
+      ),
+    ).toMatchObject({
+      kind: "invalid",
+      error: expect.stringContaining("window"),
+    });
   });
 
   it("does not turn an incomplete query into a wildcard connection", () => {
@@ -141,5 +151,13 @@ describe("route configuration", () => {
         "https://telemetry.example/?broker=wss://broker.example&history=1000",
       ),
     ).toMatchObject({ kind: "invalid", error: expect.any(String) });
+  });
+
+  it("accepts an explicit all-history plot window", () => {
+    expect(
+      launch(
+        "https://telemetry.example/?broker=wss://broker.example&sub=dt/%23&window=all",
+      ),
+    ).toMatchObject({ kind: "valid", route: { plotWindowMs: null } });
   });
 });

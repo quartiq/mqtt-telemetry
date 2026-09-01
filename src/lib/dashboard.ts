@@ -1,6 +1,5 @@
 import { jsonPath, parseJsonPath, type DisplayTimeZone } from "./model";
 import {
-  DEFAULT_PLOT_WINDOW_MS,
   MAX_HISTORY_AGE_SECONDS,
   MAX_HISTORY_LIMIT,
   MAX_PLOTS,
@@ -119,9 +118,7 @@ export function parseDashboard(value: unknown): Dashboard {
         : undefined;
   if (!timeZone) throw new Error("Dashboard display time zone is invalid.");
   const plotWindowSeconds =
-    display?.plotWindowSeconds === undefined
-      ? DEFAULT_PLOT_WINDOW_MS / 1000
-      : display.plotWindowSeconds;
+    display?.plotWindowSeconds === undefined ? null : display.plotWindowSeconds;
   if (
     plotWindowSeconds !== null &&
     !integerBetween(plotWindowSeconds, 1, MAX_HISTORY_AGE_SECONDS)

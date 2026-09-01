@@ -1095,7 +1095,11 @@
         <div class="dashboard-actions" aria-label="Dashboard">
           <button type="button" onclick={saveDashboard}>Save</button>
           <button type="button" onclick={openDashboardFile}>Load…</button>
-          <button type="button" onclick={copyDashboardLink}>Copy link</button>
+          <button
+            title="Copy a self-contained link for the complete dashboard"
+            type="button"
+            onclick={copyDashboardLink}>Copy dashboard</button
+          >
         </div>
         <label class="time-zone">
           <span class="meta">Time</span>
