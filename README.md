@@ -4,7 +4,7 @@ A read-only MQTT JSON telemetry browser with bounded history and up to ten live 
 
 ## Use
 
-Start with a [live public broker `dt/#` view](https://telemetry.quartiq.de/?broker=wss://broker.emqx.io:8084/mqtt&sub=dt/%23), which connects and subscribes immediately.
+Start with a [live public broker example](https://telemetry.quartiq.de/?broker=wss://test.mosquitto.org:8081/&sub=$SYS/%23), which connects and subscribes immediately. If you are adventurous, subscribe to the wildcard topic '#'.
 
 For another broker, open <https://telemetry.quartiq.de/> and enter its MQTT-over-WebSocket URL, with one subscription filter per line. MQTT excludes `$` topics from `#`; subscribe to `$SYS/#` explicitly when needed.
 
