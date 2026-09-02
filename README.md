@@ -2,6 +2,8 @@
 
 A read-only MQTT JSON telemetry browser with bounded history and up to ten live plots.
 
+Many ideas and the fundamental concept are adopted from the fabulous [`mqttui`](https://github.com/EdJoPaTo/mqttui).
+
 ## Use
 
 Start with a [live public broker example](https://telemetry.quartiq.de/?broker=wss://test.mosquitto.org:8081/&sub=$SYS/%23), which connects and subscribes immediately. If you are adventurous, subscribe to the wildcard topic '#'.
@@ -48,6 +50,6 @@ npm run build
 `npm run build` type-checks and produces the self-contained `dist/index.html` used for both deployment and the local-file workflow.
 `npm run test:browser` optionally opens that artifact from `file://` with a locally installed Chrome or Chromium.
 
-## Deploy
+## License
 
-GitHub Actions verifies pushes and pull requests, then deploys successful `main` builds to GitHub Pages. Pages must use GitHub Actions as its source, with `telemetry.quartiq.de` configured as the HTTPS custom domain and the `telemetry` DNS CNAME pointing to `quartiq.github.io`.
+Licensed under either Apache-2.0 or MIT.
