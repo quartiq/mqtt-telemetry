@@ -151,7 +151,6 @@ export function parseDashboard(value: unknown): Dashboard {
     );
   if (
     !Array.isArray(value.subscriptions) ||
-    !value.subscriptions.length ||
     value.subscriptions.some(
       (filter) => typeof filter !== "string" || !filter.length,
     )
@@ -216,7 +215,7 @@ export function parseDashboard(value: unknown): Dashboard {
     format: DASHBOARD_FORMAT,
     version: DASHBOARD_VERSION,
     broker: value.broker,
-    subscriptions: [...new Set(subscriptions)],
+    subscriptions,
     retention: {
       messagesPerTopic: messages,
       maxAgeSeconds: age,

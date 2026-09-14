@@ -111,6 +111,10 @@ describe("dashboard files", () => {
     const dashboard = JSON.parse(dashboardJson(route));
     dashboard.subscriptions = ["a/+/ ", "a/+/ ", "b//#"];
     expect(parseDashboard(dashboard).subscriptions).toEqual(["a/+/ ", "b//#"]);
+    dashboard.subscriptions = [];
+    expect(parseDashboard(dashboard).subscriptions).toEqual([]);
+    dashboard.subscriptions = [""];
+    expect(() => parseDashboard(dashboard)).toThrow(/non-empty strings/);
     dashboard.subscriptions = ["ok", "ok", "a/#/b"];
     expect(() => parseDashboard(dashboard)).toThrow(/Dashboard subscription 3/);
   });

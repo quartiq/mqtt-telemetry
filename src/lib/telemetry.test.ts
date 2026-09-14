@@ -202,7 +202,9 @@ describe("topic history", () => {
       ["-3.5", true],
     ] as const) {
       store.add("a", encode(value), { receivedAt: 2, retained: false });
-      expect(store.snapshot().nodes.get(a)?.numeric).toBe(numeric);
+      const view = store.snapshot().nodes.get(a);
+      expect(view?.numeric).toBe(numeric);
+      expect(view?.value).toBe(numeric ? value : undefined);
     }
     store.clearHistory(a);
     expect(store.snapshot().nodes.get(a)?.numeric).toBe(false);
@@ -290,17 +292,17 @@ describe("topic history", () => {
     expect(store.history(b)).toHaveLength(1);
   });
 
-  it("expires messages across topics by receipt time", () => {
+  it("expires older history while preserving each topic’s latest value", () => {
     const store = new TelemetryStore(10);
     store.add("a", encode("1"), { receivedAt: 1000, retained: false });
     store.add("b", encode("2"), { receivedAt: 2000, retained: false });
     store.add("a", encode("3"), { receivedAt: 3000, retained: false });
 
-    expect(store.expireBefore(2500)).toBe(2);
+    expect(store.expireBefore(2500)).toBe(1);
     expect(
       store.history(store.nodeId("a") as string).map(({ id }) => id),
     ).toEqual([3]);
-    expect(store.history(store.nodeId("b") as string)).toEqual([]);
+    expect(store.history(store.nodeId("b") as string)).toHaveLength(1);
     expect(store.subtreeMessageCount(store.nodeId("a") as string)).toBe(1);
   });
 
@@ -329,13 +331,14 @@ describe("topic history", () => {
       { retained: true, receivedAt: 1000 },
       { retained: false, receivedAt: 3000 },
     ]);
-    expect(store.expireBefore(4000)).toBe(1);
-    expect(store.history(id)).toHaveLength(1);
-    expect(store.history(id)[0].retained).toBe(true);
+    expect(store.expireBefore(4000)).toBe(0);
+    expect(store.history(id)).toHaveLength(2);
+    expect(store.history(id).at(-1)?.retained).toBe(false);
     store.add("a", encode("new"), {
       receivedAt: 5000,
       retained: true,
     });
+    expect(store.expireBefore(4000)).toBe(1);
     const history = store.history(id);
     expect(history).toHaveLength(1);
     expect(history[0]).toMatchObject({ receivedAt: 5000, retained: true });
@@ -373,25 +376,63 @@ describe("topic history", () => {
     });
   });
 
-  it("still bounds retained snapshots by the hard global budget", () => {
-    const store = new TelemetryStore(1, {
-      maxHistoryBytes: Number.MAX_SAFE_INTEGER,
-      maxHistoryMessages: 1,
-    });
+  it("stops collection when the latest values alone exceed the budget", () => {
+    const store = new TelemetryStore(10, { maxHistoryBytes: 512 });
     store.add("a", encode("1"), { receivedAt: 1, retained: true });
-    store.add("b", encode("live"), {
-      receivedAt: 2,
+    store.add("b", encode("2"), { receivedAt: 2, retained: false });
+    expect(
+      store.add("a", encode('"' + "x".repeat(100) + '"'), {
+        receivedAt: 3,
+        retained: false,
+      }),
+    ).toBeUndefined();
+    expect(store.snapshot().collectionStopped).toBe(true);
+    expect(store.history(store.nodeId("a")!)[0].payload).toEqual({
+      kind: "json",
+      value: 1,
+    });
+    expect(
+      store.add("b", encode("3"), { receivedAt: 4, retained: false }),
+    ).toBeUndefined();
+    expect(store.history(store.nodeId("b")!)[0].payload).toEqual({
+      kind: "json",
+      value: 2,
+    });
+  });
+
+  it("prunes superseded retained values before losing current payloads", () => {
+    const store = new TelemetryStore(1000, { maxHistoryMessages: 3 });
+    store.add("quiet", encode("42"), { receivedAt: 1, retained: false });
+    store.add("changing", encode("1"), { receivedAt: 2, retained: true });
+    store.add("changing", encode('{"value":2}'), {
+      receivedAt: 3,
       retained: false,
     });
-
-    expect(store.history(store.nodeId("a") as string)).toHaveLength(1);
-    expect(store.history(store.nodeId("b") as string)).toEqual([]);
-
-    store.add("b", encode("2"), { receivedAt: 3, retained: true });
-
-    expect(store.history(store.nodeId("a") as string)).toEqual([]);
-    expect(store.history(store.nodeId("b") as string)).toHaveLength(1);
-    expect(store.snapshot().evictedMessages).toBe(2);
+    for (let time = 4; time < 10; time++)
+      store.add("busy", encode(String(time)), {
+        receivedAt: time,
+        retained: false,
+      });
+    expect(store.snapshot()).toMatchObject({
+      bufferedMessages: 3,
+      historyLimited: true,
+      collectionStopped: false,
+    });
+    expect(store.history(store.nodeId("quiet")!)[0].payload).toEqual({
+      kind: "json",
+      value: 42,
+    });
+    expect(store.history(store.nodeId("changing")!)[0].payload).toEqual({
+      kind: "json",
+      value: { value: 2 },
+    });
+    expect(store.snapshot().nodes.get(store.nodeId("changing")!)?.numeric).toBe(
+      false,
+    );
+    store.clearAllHistory();
+    expect(
+      store.add("changing", encode("3"), { receivedAt: 10, retained: false }),
+    ).toBeDefined();
   });
 
   it("clears one topic without clearing descendants", () => {
@@ -442,7 +483,7 @@ describe("topic history", () => {
     expect(
       store.history(store.nodeId("b") as string).map(({ id }) => id),
     ).toEqual([2]);
-    expect(store.snapshot().evictedMessages).toBe(1);
+    expect(store.snapshot().historyLimited).toBe(true);
   });
 
   it("bounds the total message count after per-topic rolling", () => {
@@ -465,10 +506,10 @@ describe("topic history", () => {
       retained: false,
     });
 
-    expect(store.history(store.nodeId("rolling") as string)).toEqual([]);
+    expect(store.history(store.nodeId("rolling") as string)).toHaveLength(1);
     expect(store.history(store.nodeId("a") as string)).toHaveLength(1);
-    expect(store.history(store.nodeId("b") as string)).toHaveLength(1);
-    expect(store.snapshot().evictedMessages).toBe(1);
+    expect(store.history(store.nodeId("b") as string)).toHaveLength(0);
+    expect(store.snapshot().collectionStopped).toBe(true);
   });
 
   it("represents topic hierarchy, direct counts, and empty levels", () => {
@@ -518,8 +559,11 @@ describe("topic history", () => {
       }),
     ).toBeUndefined();
     const snapshot = store.snapshot();
-    expect(snapshot.omittedPayloads).toBe(1);
-    expect(snapshot.droppedMessages).toBe(1);
+    expect(snapshot.payloadsOmitted).toBe(true);
+    expect(snapshot.topicLimitReached).toBe(true);
+    expect(
+      store.add("a/b", encode("2"), { receivedAt: 3, retained: false }),
+    ).toBeDefined();
     expect(store.history(store.nodeId("a/b") as string)[0].payload.kind).toBe(
       "omitted",
     );
@@ -617,10 +661,23 @@ describe("plot extraction", () => {
     expect(plotSeries(history, ["v"])).toEqual({
       points: [
         { x: 1, y: 1, segment: 0 },
-        { x: 5, y: 5, segment: 0 },
+        { x: 5, y: 5, segment: 0, run: 1 },
       ],
       retainedExcluded: 1,
     });
+  });
+
+  it("preserves schema interruptions through downsampling", () => {
+    const history = [message(1, 1, "1"), message(2, 2, '"offline"')];
+    expect(plotSeries(history, []).unavailable).toBe(true);
+    history.push(message(3, 3, "2"));
+    expect(plotSeries(history, []).points[1].run).toBe(1);
+    const dense = Array.from({ length: 100 }, (_, i) =>
+      message(i, i, i === 50 ? '"offline"' : String(i)),
+    );
+    const reduced = downsamplePlotPoints(plotSeries(dense, []).points, 12);
+    expect(new Set(reduced.map((point) => point.run ?? 0)).size).toBe(2);
+    expect(reduced.length).toBeLessThanOrEqual(12);
   });
 
   it("preserves reconnect boundaries in plot points", () => {

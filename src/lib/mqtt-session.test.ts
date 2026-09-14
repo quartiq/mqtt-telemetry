@@ -109,6 +109,24 @@ describe("MQTT session", () => {
   beforeEach(() => mocks.connect.mockReset());
   afterEach(() => vi.useRealTimers());
 
+  it("connects without filters and unsubscribes all without sending an empty SUBSCRIBE", async () => {
+    const client = new FakeClient();
+    mocks.connect.mockReturnValue(client);
+    const opening = MqttSession.connect("ws://broker.example", [], {
+      status: vi.fn(),
+      message: vi.fn(),
+    });
+    client.emit("connect");
+    const session = await opening;
+    expect(client.subscribeResult).not.toHaveBeenCalled();
+    await session.setFilters(["a/#"]);
+    await session.setFilters([]);
+    expect(client.unsubscribeAsync).toHaveBeenCalledWith(["a/#"]);
+    const calls = client.subscribeResult.mock.calls.length;
+    await session.resubscribe();
+    expect(client.subscribeResult).toHaveBeenCalledTimes(calls);
+  });
+
   it("uses clean sessions and passes optional credentials", () => {
     const options = clientOptions({ username: "user", password: "secret" });
     expect(options).toMatchObject({

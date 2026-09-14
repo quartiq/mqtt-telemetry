@@ -28,7 +28,7 @@ describe("route configuration", () => {
 
   it("validates subscription lines without changing meaningful spaces or empty levels", () => {
     expect(subscriptionLines("\r\n#\r\n#\r\n")).toEqual(["#"]);
-    expect(subscriptionLines("\n")).toEqual(["#"]);
+    expect(subscriptionLines("\n")).toEqual([]);
     expect(subscriptionLines(" a/+/ ")).toEqual([" a/+/ "]);
     expect(subscriptionLines("a//+\n$SYS/#\na/温度\na/😀")).toEqual([
       "a//+",
@@ -145,11 +145,22 @@ describe("route configuration", () => {
     });
   });
 
-  it("does not turn an incomplete query into a wildcard connection", () => {
+  it("round-trips an empty subscription list without a wildcard fallback", () => {
     expect(
       launch(
         "https://telemetry.example/?broker=wss://broker.example&history=1000",
       ),
-    ).toMatchObject({ kind: "invalid", error: expect.any(String) });
+    ).toMatchObject({ kind: "valid", route: { filters: [] } });
+    const empty = {
+      ...defaultRoute(),
+      broker: "wss://broker.example",
+      filters: [],
+    };
+    expect(
+      launch(launchUrl(empty, new URL("https://telemetry.example/"))),
+    ).toMatchObject({ kind: "valid", route: { filters: [] } });
+    expect(
+      launch("https://telemetry.example/?broker=wss://broker.example&sub="),
+    ).toMatchObject({ kind: "invalid" });
   });
 });

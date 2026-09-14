@@ -87,6 +87,7 @@ export class MqttSession {
   }
 
   private subscribe(filters = this.desiredFilters): Promise<string[]> {
+    if (!filters.length) return Promise.resolve([]);
     // subscribeAsync rejects partial SUBACKs and loses the grant list.
     return subscriptionAck(
       new Promise((resolve, reject) => {

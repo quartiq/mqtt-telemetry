@@ -1,8 +1,18 @@
 import { getJsonPath, parseJsonPath, type JsonPath } from "./json";
 import type { TelemetryMessage } from "./telemetry";
 
-export type PlotPoint = { x: number; y: number; segment: number };
-export type PlotSeries = { points: PlotPoint[]; retainedExcluded: number };
+export type PlotPoint = {
+  x: number;
+  y: number;
+  segment: number;
+  // Numeric run within a reception segment; survives downsampling across missing values.
+  run?: number;
+};
+export type PlotSeries = {
+  points: PlotPoint[];
+  retainedExcluded: number;
+  unavailable?: boolean;
+};
 export type PlotTimeDomain = { min: number; max: number };
 export type PlotScale = {
   min: number;
@@ -39,19 +49,36 @@ function plotSeriesAtPath(
 ): PlotSeries {
   const points: PlotPoint[] = [];
   let retainedExcluded = 0;
+  let unavailable = false;
+  let interrupted = false;
+  let run = 0;
   for (const message of history) {
-    if (message.payload.kind !== "json") continue;
-    const value = getJsonPath(message.payload.value, path);
-    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    const value =
+      message.payload.kind === "json"
+        ? getJsonPath(message.payload.value, path)
+        : undefined;
+    unavailable = typeof value !== "number" || !Number.isFinite(value);
+    if (unavailable) {
+      interrupted = true;
+      continue;
+    }
     if (message.retained) retainedExcluded += 1;
-    else
+    else {
+      if (interrupted) run += 1;
       points.push({
         x: message.receivedAt,
-        y: value,
+        y: value as number,
         segment: message.segment,
+        ...(run ? { run } : {}),
       });
+      interrupted = false;
+    }
   }
-  return { points, retainedExcluded };
+  return {
+    points,
+    retainedExcluded,
+    ...(unavailable ? { unavailable: true } : {}),
+  };
 }
 
 function emptyPlotSeries(): PlotSeries {

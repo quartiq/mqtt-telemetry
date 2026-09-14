@@ -42,8 +42,7 @@ export function defaultRoute(): AppRoute {
 }
 
 export function uniqueFilters(filters: Iterable<string>): string[] {
-  const unique = [...new Set([...filters].filter((filter) => filter !== ""))];
-  return unique.length ? unique : [DEFAULT_FILTER];
+  return [...new Set([...filters].filter((filter) => filter !== ""))];
 }
 
 export function subscriptionLines(text: string): string[] {
@@ -106,10 +105,7 @@ export function readLaunchRoute(
 
   const broker = parameters.get("broker") ?? "";
   const filters = parameters.getAll("sub");
-  if (!broker || !filters.length || filters.some((filter) => !filter))
-    return launchError(
-      "A launch URL needs one broker and at least one non-empty sub parameter.",
-    );
+  if (!broker) return launchError("A launch URL needs a broker.");
   const brokerError = isWebSocketBroker(broker, location.protocol);
   if (brokerError) return launchError(brokerError);
 

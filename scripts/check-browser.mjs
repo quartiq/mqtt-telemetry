@@ -29,6 +29,7 @@ broker.on("connection", (socket) => {
   socket.on("message", (bytes) => parser.parse(bytes));
   parser.on("packet", (message) => {
     if (message.cmd === "connect") {
+      client = socket;
       connections.push(message.username ?? "");
       socket.send(packet.generate({ cmd: "connack", returnCode: 0 }));
     } else if (message.cmd === "subscribe") {
@@ -90,7 +91,12 @@ function command(method, params = {}, session = sessionId) {
     }, 10_000);
     pending.set(id, { resolve, reject, timer });
     chrome.stdio[3].write(
-      JSON.stringify({ id, method, params, sessionId: session }) + "\0",
+      JSON.stringify({
+        id,
+        method,
+        params,
+        ...(session ? { sessionId: session } : {}),
+      }) + "\0",
     );
   });
 }
@@ -281,6 +287,16 @@ try {
     await until("document.querySelector('.topic-tree .plot-toggle')");
     await click(".topic-tree .plot-toggle");
     await until("document.querySelectorAll('.plot-panel').length === 1");
+    assert.equal(
+      await evaluate("document.querySelector('.plot-title').innerText.trim()"),
+      "sample",
+    );
+    assert.equal(
+      await evaluate(
+        "document.querySelector('.topic-tree [role=treeitem]').textContent.trim().replace(/\\s+/g, ' ')",
+      ),
+      "✓ sample (1) = 1",
+    );
     assert(
       await evaluate("!document.querySelector('[aria-label=\"JSON fields\"]')"),
       "Pinning a topic must not change selection",
@@ -309,6 +325,28 @@ try {
     );
     await click(".topic-tree .plot-toggle");
     publish("sample", { value: 3 });
+    await until("document.querySelector('.message-tree .caret')");
+    assert(
+      await evaluate(
+        "!document.querySelector('.topic-tree [role=treeitem]').querySelector(':scope > .value')",
+      ),
+      "A nonnumeric payload must remove the topic preview",
+    );
+    await until(
+      "document.querySelector('.plot-panel').innerText.includes('field absent or nonnumeric')",
+    );
+    publish("sample", 4);
+    await until(
+      "document.querySelector('.topic-tree [role=treeitem] > .value')?.textContent === '4'",
+    );
+    assert.equal(
+      await evaluate(
+        "document.querySelectorAll('.plot-panel svg circle').length",
+      ),
+      2,
+      "Schema interruption must render separate sample runs",
+    );
+    publish("sample", { value: 5 });
     await until("document.querySelector('.message-tree .caret')");
     assert(
       await evaluate(
@@ -654,6 +692,69 @@ try {
       "another-user",
       "Recovery applied an unsubmitted credential draft",
     );
+    // Exercise the real shared budget with a small number of large current values.
+    for (let index = 0; index < 19; index++)
+      publish(`load/${index}`, { value: "x".repeat(900_000) });
+    await until(
+      "document.querySelector('.topics-header').innerText.includes('Collection stopped')",
+    );
+    assert(
+      await evaluate("document.querySelector('.plot-panel') !== null"),
+      "Storage pressure must preserve plots",
+    );
+    const beforeEmptyConnections = connections.length;
+    const beforeResetPlots = await evaluate(
+      "document.querySelectorAll('.plot-panel').length",
+    );
+    const beforeEmptyTopics = await evaluate(
+      "document.querySelectorAll('.topic-tree [role=treeitem]').length",
+    );
+    await click(".connection-disclosure");
+    await fill(".subscriptions textarea", "");
+    await click(".connection-editor button[type=submit]");
+    await until(
+      "document.querySelector('.subscription-label')?.innerText === 'No subscriptions' && document.querySelector('.connection-state').innerText.includes('Connected')",
+    );
+    assert.equal(
+      connections.length,
+      beforeEmptyConnections,
+      "Unsubscribing all must not reconnect",
+    );
+    assert.equal(requests.at(-1).cmd, "unsubscribe");
+    assert.equal(
+      await evaluate(
+        "document.querySelectorAll('.topic-tree [role=treeitem]').length",
+      ),
+      beforeEmptyTopics,
+    );
+    const beforeResetRequests = requests.length;
+    await click(
+      'button[title="Clear collected messages and topics; keep subscriptions and plots"]',
+    );
+    await until("!document.querySelector('.topic-tree [role=treeitem]')");
+    assert.equal(
+      await evaluate("document.querySelectorAll('.plot-panel').length"),
+      beforeResetPlots,
+    );
+    assert.equal(
+      connections.length,
+      beforeEmptyConnections,
+      "Reset must not reconnect",
+    );
+    assert.equal(
+      requests.length,
+      beforeResetRequests,
+      "Reset must not alter subscriptions",
+    );
+    await command("Page.reload");
+    await until(
+      "document.querySelector('.subscription-label')?.innerText === 'No subscriptions' && document.querySelector('.connection-state').innerText.includes('Connected')",
+    );
+    assert.equal(
+      requests.length,
+      beforeResetRequests,
+      "Reload must not replace no subscriptions with #",
+    );
     await click(".connection-disclosure");
     await fill("input[name=broker]", `ws://127.0.0.1:${port}/another-broker`);
     assert(
@@ -685,7 +786,7 @@ try {
   server.close();
   if (chrome && chrome.exitCode === null) {
     const exited = once(chrome, "exit");
-    chrome.kill();
+    await command("Browser.close", {}, null).catch(() => chrome.kill());
     await exited;
   }
   rmSync(profile, {

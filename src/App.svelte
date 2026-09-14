@@ -121,6 +121,7 @@
   let viewToken = randomId();
   let lastReceivedAt = 0;
   let lastSegment = 0;
+  const segments = new Map<string, { transport: number; id: number }>();
   let renderFrame = 0;
   let plotNow = $state(Date.now());
 
@@ -167,6 +168,7 @@
   let canResubscribe = $derived(
     Boolean(session) &&
       connectionState === "connected" &&
+      route.filters.length > 0 &&
       connectionDraftMatches,
   );
   let statusProblem = $derived(
@@ -280,19 +282,13 @@
         : selectedFieldPath,
   );
   let topicWarning = $derived(
-    [
-      topicSnapshot.droppedMessages
-        ? `${topicSnapshot.droppedMessages.toLocaleString()} dropped`
-        : "",
-      topicSnapshot.evictedMessages
-        ? `${topicSnapshot.evictedMessages.toLocaleString()} globally evicted`
-        : "",
-      topicSnapshot.omittedPayloads
-        ? `${topicSnapshot.omittedPayloads.toLocaleString()} payloads omitted`
-        : "",
-    ]
-      .filter(Boolean)
-      .join(" · "),
+    topicSnapshot.collectionStopped
+      ? "Collection stopped: latest values exceed storage capacity. Narrow subscriptions, then reset collected data."
+      : topicSnapshot.topicLimitReached
+        ? "Topic capacity reached: new topics are ignored. Narrow subscriptions, then reset collected data."
+        : topicSnapshot.historyLimited
+          ? "Storage limit reached: older history was trimmed; latest values are kept."
+          : "",
   );
 
   $effect(() => {
@@ -519,6 +515,7 @@
     viewToken = randomId();
     lastReceivedAt = 0;
     lastSegment = 0;
+    segments.clear();
     plotNow = Date.now();
   }
 
@@ -584,7 +581,7 @@
       session = undefined;
       resetData(nextRoute.historyLimit);
     }
-    const segments = new Map<string, { transport: number; id: number }>();
+    segments.clear();
     connectionState = "connecting";
     connectionError = "";
     error = "";
@@ -976,6 +973,11 @@
     replaceRoute(route, null);
   }
 
+  function resetCollectedData() {
+    resetData(route.historyLimit);
+    replaceRoute({ ...route, selectedTopic: "", fieldPath: null }, null);
+  }
+
   function clearAllHistory() {
     if (!topicSnapshot.bufferedMessages) return;
     store.clearAllHistory();
@@ -1038,13 +1040,13 @@
       <h1>
         <button
           aria-label={route.broker
-            ? `Connection settings for ${route.broker}; subscriptions ${route.filters.join(", ")}`
+            ? `Connection settings for ${route.broker}; subscriptions ${route.filters.join(", ") || "No subscriptions"}`
             : "Open connection settings"}
           aria-expanded={editingConnection}
           class="connection-disclosure"
           disabled={connectionBusy || (editingConnection && !route.broker)}
           title={route.broker
-            ? `Connection settings: ${route.broker}\nSubscriptions: ${route.filters.join(", ")}`
+            ? `Connection settings: ${route.broker}\nSubscriptions: ${route.filters.join(", ") || "No subscriptions"}`
             : "Connect to an MQTT broker"}
           type="button"
           onclick={editingConnection && route.broker
@@ -1058,7 +1060,9 @@
             <span class="broker-label">{route.broker || "Connect to MQTT"}</span
             >
             {#if route.broker}
-              <span class="subscription-label">{route.filters.join(", ")}</span>
+              <span class="subscription-label"
+                >{route.filters.join(", ") || "No subscriptions"}</span
+              >
             {/if}
           </span>
         </button>
@@ -1217,6 +1221,14 @@
             >({topicSnapshot.topicCount.toLocaleString()})</span
           >
         </h2>
+        <button
+          type="button"
+          onclick={resetCollectedData}
+          disabled={!topicSnapshot.nodes.size &&
+            !topicSnapshot.collectionStopped}
+          title="Clear collected messages and topics; keep subscriptions and plots"
+          >Reset collected data</button
+        >
         <div class="topic-search">
           <input
             aria-label="Search topic paths"
@@ -1241,9 +1253,17 @@
           {/if}
         </div>
         {#if topicWarning}
-          <span class="meta problem" title="Browser safety limits applied">
+          <span
+            class="meta"
+            class:problem={topicSnapshot.collectionStopped ||
+              topicSnapshot.topicLimitReached}
+            role="status"
+          >
             {topicWarning}
           </span>
+        {/if}
+        {#if topicSnapshot.payloadsOmitted}
+          <span class="meta">Payloads over 1 MiB were omitted.</span>
         {/if}
       </header>
       <div class="topic-tree">
@@ -1271,7 +1291,9 @@
         {:else}
           <p class="empty">
             {route.broker
-              ? "Waiting for subscribed messages…"
+              ? route.filters.length
+                ? "Waiting for subscribed messages…"
+                : "No subscriptions. Edit connection settings to add topics."
               : "Connect to a broker to browse topics."}
           </p>
         {/if}

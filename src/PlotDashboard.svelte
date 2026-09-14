@@ -12,6 +12,7 @@
     label: string;
     points: PlotPoint[];
     retainedExcluded: number;
+    unavailable?: boolean;
   };
 
   type Props = {
@@ -51,6 +52,7 @@
           topic={plot.topic}
           label={plot.label}
           retainedExcluded={plot.retainedExcluded}
+          unavailable={plot.unavailable}
           xMin={domain.min}
           xMax={domain.max}
           {timeZone}
