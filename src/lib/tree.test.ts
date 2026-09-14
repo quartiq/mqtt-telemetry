@@ -1,3 +1,4 @@
+import { topicMatchesFilter } from "./mqtt-filter";
 import { describe, expect, it } from "vitest";
 import type { TreeNodeView } from "./tree";
 import {
@@ -6,7 +7,6 @@ import {
   moveTreeSelection,
   selectionAfterCollapse,
   treeTabStopId,
-  topicMatchesFilter,
   visibleTreeIds,
 } from "./tree";
 

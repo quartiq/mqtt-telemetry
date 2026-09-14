@@ -205,7 +205,7 @@
       items.push(`${retainedExcluded.toLocaleString()} retained excluded`);
     if (gaps)
       items.push(
-        `${gaps.toLocaleString()} reconnect ${gaps === 1 ? "gap" : "gaps"}`,
+        `${gaps.toLocaleString()} observation ${gaps === 1 ? "gap" : "gaps"}`,
       );
     return items;
   });

@@ -107,6 +107,14 @@ describe("dashboard files", () => {
     expect(() => parseDashboard(dashboard)).toThrow(/duplicate/);
   });
 
+  it("validates imported subscriptions and deduplicates exact filters", () => {
+    const dashboard = JSON.parse(dashboardJson(route));
+    dashboard.subscriptions = ["a/+/ ", "a/+/ ", "b//#"];
+    expect(parseDashboard(dashboard).subscriptions).toEqual(["a/+/ ", "b//#"]);
+    dashboard.subscriptions = ["ok", "ok", "a/#/b"];
+    expect(() => parseDashboard(dashboard)).toThrow(/Dashboard subscription 3/);
+  });
+
   it("accepts the plot limit and rejects one more", () => {
     const dashboard = JSON.parse(dashboardJson(route));
     dashboard.plots = Array.from({ length: MAX_PLOTS }, (_, index) => ({

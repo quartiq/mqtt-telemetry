@@ -32,13 +32,13 @@
     type Dashboard,
   } from "./lib/dashboard";
   import {
-    connectionKey,
     defaultRoute,
     isWebSocketBroker,
     launchUrl,
     MAX_PLOTS,
     readLaunchRoute,
     uniqueFilters,
+    subscriptionLines,
     type AppRoute,
     type PlotRef,
   } from "./lib/routes";
@@ -100,8 +100,8 @@
   let editingConnection = $state(!initialRoute.broker);
   let dashboardFileInput: HTMLInputElement;
   let connectSerial = 0;
-  let activeUsername = "";
-  let activePassword = "";
+  let activeUsername = $state("");
+  let activePassword = $state("");
   let viewToken = randomId();
   let lastReceivedAt = 0;
   let lastSegment = 0;
@@ -133,14 +133,20 @@
       : topicExpanded,
   );
   let selectedTopic = $derived(store.topic(selectedTopicId) ?? "");
-  let connectionDraftMatches = $derived(
-    connectionKey({
-      ...route,
-      broker: formBroker.trim(),
-      filters: uniqueFilters(formFilters.split(/\r?\n/)),
-    }) === connectionKey(route) &&
+  let transportDraftMatches = $derived(
+    formBroker.trim() === route.broker &&
       username === activeUsername &&
       password === activePassword,
+  );
+  let connectionDraftMatches = $derived(
+    transportDraftMatches &&
+      JSON.stringify(uniqueFilters(formFilters.split(/\r?\n/))) ===
+        JSON.stringify(route.filters),
+  );
+  let connectionBusy = $derived(
+    status === "Connecting" ||
+      status === "Restoring subscriptions" ||
+      status === "Updating subscriptions",
   );
   let canResubscribe = $derived(
     Boolean(session) && status === "Connected" && connectionDraftMatches,
@@ -300,7 +306,7 @@
     const popstate = (event: PopStateEvent) => {
       editingConnection = false;
       const next = routeFromViewState(event.state) ?? defaultRoute();
-      if (connectionKey(next) !== connectionKey(route)) {
+      if (next.broker !== route.broker) {
         route = next;
         formFilters = next.filters.join("\n");
         if (next.broker !== authBroker) {
@@ -317,7 +323,11 @@
       } else {
         const historyLimitChanged = next.historyLimit !== route.historyLimit;
         const historyAgeChanged = next.historyAgeMs !== route.historyAgeMs;
+        const filtersChanged =
+          JSON.stringify(next.filters) !== JSON.stringify(route.filters);
         route = next;
+        formFilters = next.filters.join("\n");
+        if (filtersChanged) void updateSubscriptions();
         if (historyLimitChanged) {
           store.setHistoryLimit(next.historyLimit);
           revision += 1;
@@ -392,8 +402,7 @@
   function applyDashboard(dashboard: Dashboard) {
     editingConnection = false;
     const next = routeFromDashboard(dashboard);
-    const sameConnection =
-      Boolean(session) && connectionKey(next) === connectionKey(route);
+    const sameConnection = Boolean(session) && next.broker === route.broker;
     if (next.broker !== authBroker) {
       username = "";
       password = "";
@@ -407,6 +416,7 @@
       stopConnection();
       error = brokerError;
     } else if (sameConnection) {
+      void updateSubscriptions();
       store.setHistoryLimit(next.historyLimit);
       if (next.historyAgeMs !== null)
         store.expireBefore(Date.now() - next.historyAgeMs);
@@ -513,6 +523,9 @@
         connectionInterrupted = true;
         connectionNotice =
           "Connection interrupted · messages may be missed while reconnecting.";
+        break;
+      case "updating":
+        status = "Updating subscriptions";
         break;
       case "restoring":
         status = "Restoring subscriptions";
@@ -626,32 +639,45 @@
       error = brokerError;
       return;
     }
-    const filters = uniqueFilters(formFilters.split(/\r?\n/));
-    authBroker = broker;
-    const next: AppRoute = {
-      broker,
-      filters,
-      historyLimit: route.historyLimit,
-      historyAgeMs: route.historyAgeMs,
-      plotWindowMs: route.plotWindowMs,
-      timeZone: route.timeZone,
-      selectedTopic: "",
-      fieldPath: null,
-      plots: [],
-    };
-    if (
-      session &&
-      connectionKey(next) === connectionKey(route) &&
-      username === activeUsername &&
-      password === activePassword
-    ) {
-      editingConnection = false;
-      void startConnection(route, true);
+    let filters: string[];
+    try {
+      filters = subscriptionLines(formFilters);
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : String(caught);
       return;
     }
+    authBroker = broker;
+    const sameBroker = broker === route.broker;
+    const sameTransport =
+      Boolean(session) &&
+      sameBroker &&
+      transportDraftMatches &&
+      status !== "Connection failed";
+    const next: AppRoute = {
+      ...route,
+      broker,
+      filters,
+      ...(sameBroker ? {} : { selectedTopic: "", fieldPath: null, plots: [] }),
+    };
     editingConnection = false;
-    writeRoute(next, null);
-    void startConnection(next);
+    writeRoute(next, sameBroker ? selectedMessageId : null);
+    if (sameTransport) void updateSubscriptions();
+    else void startConnection(next, sameBroker);
+  }
+
+  async function updateSubscriptions() {
+    const current = session;
+    if (!current || status === "Connection failed") {
+      if (route.broker) await startConnection(route, true);
+      return;
+    }
+    try {
+      await current.setFilters(route.filters);
+    } catch (caught) {
+      if (session !== current) return;
+      status = "Connection failed";
+      error = caught instanceof Error ? caught.message : String(caught);
+    }
   }
 
   function editConnection() {
@@ -988,9 +1014,7 @@
             : "Open connection settings"}
           aria-expanded={editingConnection}
           class="connection-disclosure"
-          disabled={status === "Connecting" ||
-            status === "Restoring subscriptions" ||
-            (editingConnection && !route.broker)}
+          disabled={connectionBusy || (editingConnection && !route.broker)}
           title={route.broker
             ? `Connection settings: ${route.broker}\nSubscriptions: ${route.filters.join(", ")}`
             : "Connect to an MQTT broker"}
@@ -1109,21 +1133,40 @@
           bind:username
           bind:password
         />
+        {#if route.broker && formBroker.trim() !== route.broker}
+          <p class="meta">
+            Changing broker clears this tab's history and plots.
+          </p>
+        {:else if route.broker && !transportDraftMatches}
+          <p class="meta">
+            Changing credentials reconnects and keeps history and plots.
+          </p>
+        {/if}
         <div class="connection-editor-actions">
           <button
-            title="Apply these settings and open a new MQTT connection"
-            type="submit">{session ? "Reconnect" : "Connect"}</button
+            disabled={connectionBusy ||
+              (status === "Connected" && connectionDraftMatches)}
+            type="submit">{session ? "Apply" : "Connect"}</button
           >
           {#if session}
             <button
+              disabled={connectionBusy || !connectionDraftMatches}
+              type="button"
+              title="Open a new connection without clearing history or plots"
+              onclick={() => {
+                editingConnection = false;
+                void startConnection(route, true);
+              }}>Reconnect</button
+            >
+            <button
               disabled={!canResubscribe}
               title={!connectionDraftMatches
-                ? "Reconnect to apply the changed settings first"
+                ? "Apply the changed settings first"
                 : status !== "Connected"
                   ? "Available while connected"
                   : "Refresh subscriptions and retained messages without disconnecting"}
               type="button"
-              onclick={resubscribeFromForm}>Resubscribe</button
+              onclick={resubscribeFromForm}>Refresh retained</button
             >
           {/if}
           {#if route.broker}

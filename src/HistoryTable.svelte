@@ -189,7 +189,7 @@
         {/if}
         {#if gapBefore.size}
           <span
-            >{gapBefore.size.toLocaleString()} reconnect {gapBefore.size === 1
+            >{gapBefore.size.toLocaleString()} observation {gapBefore.size === 1
               ? "gap"
               : "gaps"}</span
           >
@@ -241,7 +241,7 @@
                 {#if gapBefore.has(message.id)}
                   <tr class="gap-row">
                     <td colspan="3"
-                      >Reconnected · messages during gap unavailable</td
+                      >Observation boundary · messages may be missing</td
                     >
                   </tr>
                 {/if}

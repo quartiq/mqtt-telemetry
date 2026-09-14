@@ -19,6 +19,7 @@ const server = createServer((_request, response) => {
 const broker = new WebSocketServer({ server });
 let client;
 let subscriptions = 0;
+const requests = [];
 let subscriptionReply = "accept";
 let acknowledge;
 broker.on("connection", (socket) => {
@@ -30,6 +31,10 @@ broker.on("connection", (socket) => {
       socket.send(packet.generate({ cmd: "connack", returnCode: 0 }));
     } else if (message.cmd === "subscribe") {
       subscriptions += 1;
+      requests.push({
+        cmd: "subscribe",
+        filters: message.subscriptions.map(({ topic }) => topic),
+      });
       acknowledge = () =>
         socket.send(
           packet.generate({
@@ -45,6 +50,11 @@ broker.on("connection", (socket) => {
         );
       client = socket;
       if (subscriptionReply !== "hold") acknowledge();
+    } else if (message.cmd === "unsubscribe") {
+      requests.push({ cmd: "unsubscribe", filters: message.unsubscriptions });
+      socket.send(
+        packet.generate({ cmd: "unsuback", messageId: message.messageId }),
+      );
     } else if (message.cmd === "pingreq") {
       socket.send(packet.generate({ cmd: "pingresp" }));
     }
@@ -127,6 +137,13 @@ async function tap(selector) {
     type: "touchEnd",
     touchPoints: [],
   });
+}
+async function fill(selector, value) {
+  await evaluate(`(() => {
+    const element = document.querySelector(${JSON.stringify(selector)});
+    element.value = ${JSON.stringify(value)};
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
 }
 async function dimensions() {
   return evaluate(`(() => {
@@ -454,8 +471,86 @@ try {
         "document.querySelectorAll('[aria-label=\"MQTT topics\"] [role=treeitem]').length >= 46",
       ),
     );
+    const established = client;
+    const previousRequests = requests.length;
+    await click(".connection-disclosure");
+    await fill(".subscriptions textarea", "#\n\nbad/#/path");
+    await click(".connection-editor button[type=submit]");
+    await until(
+      "document.querySelector('.header-error')?.innerText.includes('line 3')",
+    );
+    assert.equal(
+      requests.length,
+      previousRequests,
+      "Invalid filters reached the broker",
+    );
+    assert.equal(client, established);
+    await fill(".subscriptions textarea", "#\nalerts/+\nextra/#");
+    await click(".connection-editor button[type=submit]");
+    await until(
+      "document.querySelector('.connection-state').innerText.includes('Connected') && !document.querySelector('.connection-editor')",
+    );
+    assert.equal(client, established, "Adding a subscription reconnected");
+    assert.deepEqual(requests.at(-1), {
+      cmd: "subscribe",
+      filters: ["extra/#"],
+    });
+    assert(
+      await evaluate("document.querySelectorAll('.plot-panel').length === 9"),
+    );
+    await click(".connection-disclosure");
+    await fill(".subscriptions textarea", "#\nalerts/+");
+    await click(".connection-editor button[type=submit]");
+    await until(
+      "document.querySelector('.connection-state').innerText.includes('Connected') && !document.querySelector('.connection-editor')",
+    );
+    assert.equal(client, established, "Removing a subscription reconnected");
+    assert.deepEqual(requests.at(-1), {
+      cmd: "unsubscribe",
+      filters: ["extra/#"],
+    });
+    await evaluate("history.back()");
+    await until(
+      "document.querySelector('.subscription-label').innerText.includes('extra/#') && document.querySelector('.connection-state').innerText.includes('Connected')",
+    );
+    assert.deepEqual(requests.at(-1), {
+      cmd: "subscribe",
+      filters: ["extra/#"],
+    });
+    assert.equal(client, established, "Back navigation reconnected");
+    await click(".connection-disclosure");
+    await fill("input[name=username]", "another-user");
+    await click(".connection-editor button[type=submit]");
+    await until(
+      "document.querySelector('.connection-state').innerText.includes('Connected') && !document.querySelector('.connection-editor')",
+    );
+    assert.notEqual(client, established, "Credential changes must reconnect");
+    assert(
+      await evaluate("document.querySelectorAll('.plot-panel').length === 9"),
+    );
+    assert(
+      await evaluate(
+        "document.querySelectorAll('[aria-label=\"MQTT topics\"] [role=treeitem]').length >= 46",
+      ),
+    );
+    await click(".connection-disclosure");
+    await fill("input[name=broker]", `ws://127.0.0.1:${port}/another-broker`);
+    assert(
+      await evaluate(
+        "document.querySelector('.connection-editor').innerText.includes('clears')",
+      ),
+    );
+    await click(".connection-editor button[type=submit]");
+    await until(
+      "document.querySelector('.connection-state').innerText.includes('Connected') && !document.querySelector('.connection-editor')",
+    );
+    assert(
+      await evaluate(
+        "!document.querySelector('.plot-panel') && !document.querySelector('[aria-label=\"MQTT topics\"]')",
+      ),
+    );
     console.log(
-      `Checked panes, touch controls, plot limit, and recovery: ${base}`,
+      `Checked panes, touch controls, recovery, and subscription editing: ${base}`,
     );
   }
   assert(
@@ -472,5 +567,10 @@ try {
     chrome.kill();
     await exited;
   }
-  rmSync(profile, { recursive: true, force: true });
+  rmSync(profile, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 100,
+  });
 }

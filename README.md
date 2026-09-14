@@ -30,9 +30,11 @@ The muted build link in the header identifies the exact source commit embedded i
 
 ### Data and reconnect behavior
 
-History exists only in the current tab. It defaults to 1,000 live messages per topic and is also globally bounded; payloads over 1 MiB are omitted. The latest retained snapshot for each topic is kept outside the count and age limits, but not plotted because its original publication time is unknown. History count and maximum age delete local samples; the independent plot window only limits the visible interval and its statistics. Clear actions affect only this tab.
+History exists only in the current tab. It defaults to a maximum of 1,000 live messages per topic; age and global limits can discard messages earlier. Payloads over 1 MiB are omitted. The latest retained snapshot for each topic is kept outside the count and age limits, but not plotted because its original publication time is unknown. History count and maximum age delete local samples; the independent plot window only limits the visible interval and its statistics. Clear actions affect only this tab.
 
-After a connection has been established, transport failures are retried and subscriptions are restored before the application reports connected. These are clean MQTT sessions: live QoS 0 traffic sent while disconnected is not recoverable. History marks reconnect gaps and plots do not join across them. An initial connection failure or a failed resubscription requires explicit user action.
+Applying subscription edits updates the current connection and keeps history, selection, and plots. Removing a filter does not delete collected data. New filters are subscribed before old ones are removed; broker rejections are reported individually. Refresh retained retries the current subscriptions and requests retained snapshots again. Reconnect and credential changes open a new connection while preserving the same broker's history and plots. Changing the broker URL clears that workspace; loading a dashboard replaces plot definitions with those in the file.
+
+After a connection has been established, transport failures are retried and the latest requested subscriptions are restored before the application reports connected. These are clean MQTT sessions: live QoS 0 traffic sent while disconnected is not recoverable. History and plots mark observation boundaries after reconnects or filter removals; these mark potential gaps, not measured message loss. An initial connection failure or a failed subscription operation requires explicit user action.
 
 ## Develop
 
@@ -48,7 +50,7 @@ npm run build
 ```
 
 `npm run build` type-checks and produces the self-contained `dist/index.html` used for both deployment and the local-file workflow.
-`npm run test:browser` optionally opens that artifact from `file://` with a locally installed Chrome or Chromium.
+`npm run test:browser` checks the built artifact over HTTP and `file://` with a locally installed Chrome or Chromium and a local MQTT fixture. It exercises responsive panes, touch controls, subscription editing, and recovery without contacting an external broker.
 
 ## License
 

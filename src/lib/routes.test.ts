@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_HISTORY_LIMIT,
   DEFAULT_PLOT_WINDOW_MS,
-  connectionKey,
   defaultRoute,
   isWebSocketBroker,
   launchUrl,
   readLaunchRoute,
+  subscriptionLines,
 } from "./routes";
 
 const launch = (href: string) => readLaunchRoute(new URL(href));
@@ -26,24 +26,29 @@ describe("route configuration", () => {
     });
   });
 
-  it("keeps view and retention changes on the same connection", () => {
-    const route = {
-      ...defaultRoute(),
-      broker: "wss://broker.example",
-      filters: ["a/#"],
-    };
-    expect(connectionKey({ ...route, historyLimit: 12 })).toBe(
-      connectionKey({ ...route, historyLimit: 34 }),
-    );
-    expect(connectionKey({ ...route, historyAgeMs: 60_000 })).toBe(
-      connectionKey({
-        ...route,
-        plots: [{ topic: "a", path: "$.value" }],
-      }),
-    );
-    expect(connectionKey({ ...route, plotWindowMs: null })).toBe(
-      connectionKey(route),
-    );
+  it("validates subscription lines without changing meaningful spaces or empty levels", () => {
+    expect(subscriptionLines("\r\n#\r\n#\r\n")).toEqual(["#"]);
+    expect(subscriptionLines("\n")).toEqual(["#"]);
+    expect(subscriptionLines(" a/+/ ")).toEqual([" a/+/ "]);
+    expect(subscriptionLines("a//+\n$SYS/#\na/温度\na/😀")).toEqual([
+      "a//+",
+      "$SYS/#",
+      "a/温度",
+      "a/😀",
+    ]);
+    expect(() => subscriptionLines("#\n\na/#/b")).toThrow(/line 3/);
+    expect(() => subscriptionLines("a+")).toThrow(/complete topic level/);
+    expect(() => subscriptionLines("a\0")).toThrow(/UTF-8/);
+    expect(() => subscriptionLines("a\uD800")).toThrow(/UTF-8/);
+    expect(() => subscriptionLines("温".repeat(21846))).toThrow(/65,535/);
+    expect(
+      launch(
+        "https://telemetry.example/?broker=wss://broker.example&sub=valid&sub=a%23",
+      ),
+    ).toMatchObject({
+      kind: "invalid",
+      error: expect.stringContaining("URL subscription 2"),
+    });
   });
 
   it("accepts WebSockets and explains browser transport constraints", () => {

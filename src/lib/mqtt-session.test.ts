@@ -20,10 +20,12 @@ class FakeClient {
   connected = false;
   options = { reconnectPeriod: 0 };
   listeners = new Map<string, Listener[]>();
-  subscribeResult = vi.fn().mockResolvedValue([
-    { topic: "sensors/#", qos: 0 },
-    { topic: "alerts/+", qos: 0 },
-  ]);
+  subscribeResult = vi.fn((filters: string[]) =>
+    Promise.resolve(
+      filters.map((topic) => ({ topic, qos: 0 as Grant["qos"] })),
+    ),
+  );
+  unsubscribeAsync = vi.fn().mockResolvedValue(undefined);
   end = vi.fn();
 
   subscribe(
@@ -35,7 +37,7 @@ class FakeClient {
       packet?: { granted: number[] },
     ) => void,
   ) {
-    this.subscribeResult().then(
+    this.subscribeResult(_filters).then(
       (grants: Grant[]) =>
         callback(
           grants.some(({ qos }) => qos === 128)
@@ -393,6 +395,97 @@ describe("MQTT session", () => {
     );
 
     session.close();
+  });
+
+  it("adds filters in place and removes old filters only after SUBACK", async () => {
+    const client = new FakeClient();
+    const session = await establish(client);
+    const added = deferred();
+    client.subscribeResult.mockImplementationOnce(() => added.promise);
+    const update = session.setFilters(["sensors/#", "new/#"]);
+    expect(client.subscribeResult).toHaveBeenLastCalledWith(["new/#"]);
+    expect(client.unsubscribeAsync).not.toHaveBeenCalled();
+    added.resolve([{ topic: "new/#", qos: 0 }]);
+    await update;
+    expect(client.unsubscribeAsync).toHaveBeenCalledExactlyOnceWith([
+      "alerts/+",
+    ]);
+    expect(client.end).not.toHaveBeenCalled();
+    session.close();
+  });
+
+  it("serializes edits that arrive during an acknowledgment", async () => {
+    const client = new FakeClient();
+    const statuses: SessionStatus[] = [];
+    const session = await establish(client, statuses);
+    const added = deferred();
+    client.subscribeResult.mockImplementationOnce(() => added.promise);
+    const first = session.setFilters(["sensors/#", "new/#"]);
+    const second = session.setFilters(["new/#", "latest/#"]);
+    expect(client.subscribeResult).toHaveBeenCalledTimes(2);
+    added.resolve([{ topic: "new/#", qos: 0 }]);
+    await Promise.all([first, second]);
+    expect(client.subscribeResult).toHaveBeenLastCalledWith(["latest/#"]);
+    expect(client.unsubscribeAsync).toHaveBeenCalledExactlyOnceWith([
+      "sensors/#",
+      "alerts/+",
+    ]);
+    expect(statuses.at(-1)).toEqual({ state: "connected", rejected: [] });
+    session.close();
+  });
+
+  it("finishes newer removals that arrive while UNSUBACK is pending", async () => {
+    const client = new FakeClient();
+    const session = await establish(client);
+    let acknowledge!: () => void;
+    client.unsubscribeAsync.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          acknowledge = resolve;
+        }),
+    );
+    const first = session.setFilters(["sensors/#"]);
+    const second = session.setFilters([]);
+    acknowledge();
+    await Promise.all([first, second]);
+    expect(client.unsubscribeAsync.mock.calls).toEqual([
+      [["alerts/+"]],
+      [["sensors/#"]],
+    ]);
+    session.close();
+  });
+
+  it("restores the latest desired filters and ignores an old update after reconnect", async () => {
+    const client = new FakeClient();
+    const session = await establish(client);
+    const stale = deferred();
+    client.subscribeResult.mockImplementationOnce(() => stale.promise);
+    const update = session.setFilters(["new/#"]);
+    client.emit("offline");
+    await session.setFilters(["latest/#"]);
+    client.emit("connect");
+    await vi.waitFor(() =>
+      expect(client.subscribeResult).toHaveBeenLastCalledWith(["latest/#"]),
+    );
+    stale.resolve([{ topic: "new/#", qos: 0 }]);
+    await update;
+    expect(client.unsubscribeAsync).not.toHaveBeenCalled();
+    session.close();
+  });
+
+  it("stops an uncertain subscription update when UNSUBACK fails", async () => {
+    const client = new FakeClient();
+    const statuses: SessionStatus[] = [];
+    const session = await establish(client, statuses);
+    client.unsubscribeAsync.mockRejectedValueOnce(
+      new Error("unsubscribe failed"),
+    );
+    await session.setFilters(["sensors/#"]);
+    expect(statuses.at(-1)).toEqual({
+      state: "failed",
+      error: "unsubscribe failed",
+    });
+    expect(client.end).toHaveBeenCalledWith(true);
   });
 
   it("reports established MQTT errors", async () => {

@@ -1,3 +1,4 @@
+import { mqttFilterError } from "./mqtt-filter";
 import { jsonPath, parseJsonPath } from "./json";
 import type { DisplayTimeZone } from "./time";
 import {
@@ -156,7 +157,11 @@ export function parseDashboard(value: unknown): Dashboard {
     )
   )
     throw new Error("Dashboard subscriptions must be non-empty strings.");
-  const subscriptions = value.subscriptions as string[];
+  const subscriptions = [...new Set(value.subscriptions as string[])];
+  for (const [index, filter] of (value.subscriptions as string[]).entries()) {
+    const error = mqttFilterError(filter);
+    if (error) throw new Error(`Dashboard subscription ${index + 1}: ${error}`);
+  }
   if (!isRecord(value.retention))
     throw new Error("Dashboard retention settings are missing.");
   const messages = value.retention.messagesPerTopic;

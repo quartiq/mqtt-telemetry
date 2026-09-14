@@ -22,9 +22,9 @@
 
 <div class="history-policy">
   <label
-    title="Maximum recent live messages for each topic; the latest retained snapshot is kept separately"
+    title="Maximum live messages per topic; age and global limits may discard messages earlier. Retained snapshots are kept separately."
   >
-    Max
+    Live max
     <input
       aria-label="Live messages kept per topic"
       max={MAX_HISTORY_LIMIT}

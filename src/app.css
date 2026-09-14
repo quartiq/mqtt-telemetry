@@ -296,6 +296,7 @@ pre {
 
 .connection-editor-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-tight);
 }
 

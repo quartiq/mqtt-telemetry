@@ -1,3 +1,4 @@
+import { mqttFilterError } from "./mqtt-filter";
 import type { DisplayTimeZone } from "./time";
 
 export const DEFAULT_HISTORY_LIMIT = 1000;
@@ -45,6 +46,16 @@ export function uniqueFilters(filters: Iterable<string>): string[] {
   return unique.length ? unique : [DEFAULT_FILTER];
 }
 
+export function subscriptionLines(text: string): string[] {
+  const lines = text.split(/\r?\n/);
+  for (const [index, filter] of lines.entries()) {
+    if (!filter) continue;
+    const error = mqttFilterError(filter);
+    if (error) throw new Error(`Subscription line ${index + 1}: ${error}`);
+  }
+  return uniqueFilters(lines);
+}
+
 export function isWebSocketBroker(
   value: string,
   pageProtocol = globalThis.location?.protocol ?? "http:",
@@ -71,10 +82,6 @@ export function webSocketBrokerError(value: string): string | undefined {
     return "Do not put credentials in the broker URL. Use the username and password fields.";
   }
   return undefined;
-}
-
-export function connectionKey(route: AppRoute): string {
-  return JSON.stringify([route.broker, uniqueFilters(route.filters)]);
 }
 
 export function readLaunchRoute(
@@ -105,6 +112,11 @@ export function readLaunchRoute(
     );
   const brokerError = isWebSocketBroker(broker, location.protocol);
   if (brokerError) return launchError(brokerError);
+
+  for (const [index, filter] of filters.entries()) {
+    const error = mqttFilterError(filter);
+    if (error) return launchError(`URL subscription ${index + 1}: ${error}`);
+  }
 
   const historyValue = parameters.get("history");
   const historyLimit =

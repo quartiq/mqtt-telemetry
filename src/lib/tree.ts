@@ -1,3 +1,5 @@
+import { mqttFilterError, topicMatchesFilter } from "./mqtt-filter";
+
 export type TreeNodeView = {
   id: string;
   label: string;
@@ -115,35 +117,6 @@ export function filterTopicTree(
   return filterTreeBy(roots, nodes, (node) =>
     topicMatchesFilter((node.title ?? node.label).split("\n", 1)[0], value),
   );
-}
-
-export function topicMatchesFilter(topic: string, filter: string): boolean {
-  if (mqttFilterError(filter)) return false;
-  const topicLevels = topic.split("/");
-  const filterLevels = filter.split("/");
-  if (
-    topic.startsWith("$") &&
-    (filterLevels[0] === "+" || filterLevels[0] === "#")
-  )
-    return false;
-  for (let index = 0; index < filterLevels.length; index += 1) {
-    const level = filterLevels[index];
-    if (level === "#") return true;
-    if (index >= topicLevels.length) return false;
-    if (level !== "+" && level !== topicLevels[index]) return false;
-  }
-  return topicLevels.length === filterLevels.length;
-}
-
-function mqttFilterError(filter: string): string | undefined {
-  const levels = filter.split("/");
-  for (const [index, level] of levels.entries()) {
-    if (level.includes("+") && level !== "+")
-      return "+ must occupy a complete topic level.";
-    if (level.includes("#") && (level !== "#" || index !== levels.length - 1))
-      return "# must occupy the final complete topic level.";
-  }
-  return undefined;
 }
 
 function filterTreeBy(
