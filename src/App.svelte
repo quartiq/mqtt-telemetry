@@ -95,6 +95,8 @@
   let status = $state(initialRoute.broker ? "Connecting" : "Not connected");
   let error = $state(startup.error);
   let dashboardNotice = $state("");
+  let connectionNotice = $state("");
+  let connectionInterrupted = false;
   let editingConnection = $state(!initialRoute.broker);
   let dashboardFileInput: HTMLInputElement;
   let connectSerial = 0;
@@ -485,6 +487,8 @@
     session = undefined;
     status = "Not connected";
     error = "";
+    connectionNotice = "";
+    connectionInterrupted = false;
     editingConnection = true;
     resetData(route.historyLimit);
   }
@@ -496,12 +500,28 @@
         error = next.rejected.length
           ? `Subscription rejected: ${next.rejected.join(", ")}`
           : "";
+        connectionNotice = connectionInterrupted
+          ? `${next.rejected.length ? "Reconnected" : "Subscriptions restored"} · messages during the interruption may be missing.`
+          : "";
+        connectionInterrupted = false;
         break;
       case "reconnecting":
         status = "Reconnecting";
         break;
       case "offline":
-        status = "Disconnected";
+        status = "Reconnecting";
+        connectionInterrupted = true;
+        connectionNotice =
+          "Connection interrupted · messages may be missed while reconnecting.";
+        break;
+      case "restoring":
+        status = "Restoring subscriptions";
+        break;
+      case "failed":
+        status = "Connection failed";
+        error = next.error;
+        connectionNotice =
+          "Automatic recovery stopped. Reconnect to try again.";
         break;
       case "error":
         status = "Connection error";
@@ -536,6 +556,8 @@
     const segments = new Map<number, number>();
     status = "Connecting";
     error = "";
+    connectionInterrupted = preserveData;
+    connectionNotice = "";
     try {
       const nextSession = await MqttSession.connect(
         nextRoute.broker,
@@ -657,7 +679,7 @@
     const current = session;
     if (!current || !canResubscribe) return;
     editingConnection = false;
-    status = "Resubscribing";
+    status = "Restoring subscriptions";
     error = "";
     try {
       await current.resubscribe();
@@ -967,7 +989,7 @@
           aria-expanded={editingConnection}
           class="connection-disclosure"
           disabled={status === "Connecting" ||
-            status === "Resubscribing" ||
+            status === "Restoring subscriptions" ||
             (editingConnection && !route.broker)}
           title={route.broker
             ? `Connection settings: ${route.broker}\nSubscriptions: ${route.filters.join(", ")}`
@@ -993,6 +1015,12 @@
     <div class="header-controls">
       <div class="connection-state">
         <span aria-live="polite" class:problem={statusProblem}>{status}</span>
+        {#if status === "Connection failed" && !editingConnection}
+          <button
+            type="button"
+            onclick={() => void startConnection(route, true)}>Reconnect</button
+          >
+        {/if}
         <span aria-hidden="true" class="build-separator">·</span>
         {#if buildUrl}
           <a
@@ -1059,6 +1087,11 @@
       </div>
     </div>
     {#if error}<strong class="header-error">{error}</strong>{/if}
+    {#if connectionNotice}
+      <span class="header-notice connection-notice meta" aria-live="polite"
+        >{connectionNotice}</span
+      >
+    {/if}
     {#if dashboardNotice}
       <span class="header-notice meta" aria-live="polite"
         >{dashboardNotice}</span

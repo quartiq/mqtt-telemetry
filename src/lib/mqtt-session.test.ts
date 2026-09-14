@@ -20,11 +20,33 @@ class FakeClient {
   connected = false;
   options = { reconnectPeriod: 0 };
   listeners = new Map<string, Listener[]>();
-  subscribeAsync = vi.fn().mockResolvedValue([
+  subscribeResult = vi.fn().mockResolvedValue([
     { topic: "sensors/#", qos: 0 },
     { topic: "alerts/+", qos: 0 },
   ]);
   end = vi.fn();
+
+  subscribe(
+    _filters: string[],
+    _options: unknown,
+    callback: (
+      error: Error | null,
+      grants?: Grant[],
+      packet?: { granted: number[] },
+    ) => void,
+  ) {
+    this.subscribeResult().then(
+      (grants: Grant[]) =>
+        callback(
+          grants.some(({ qos }) => qos === 128)
+            ? new Error("Subscribe error")
+            : null,
+          grants,
+          { granted: grants.map(({ qos }) => qos) },
+        ),
+      (error: Error) => callback(error),
+    );
+  }
 
   on(event: string, callback: (...args: never[]) => void): this {
     this.listeners.set(event, [
@@ -108,7 +130,7 @@ describe("MQTT session", () => {
   it("enables reconnect only after the initial SUBACK", async () => {
     const client = new FakeClient();
     const initial = deferred();
-    client.subscribeAsync.mockImplementationOnce(() => initial.promise);
+    client.subscribeResult.mockImplementationOnce(() => initial.promise);
     const statuses: SessionStatus[] = [];
     const opening = connect(client, statuses);
 
@@ -155,7 +177,7 @@ describe("MQTT session", () => {
 
   it("fails the initial attempt when subscribing fails", async () => {
     const client = new FakeClient();
-    client.subscribeAsync.mockRejectedValueOnce(new Error("subscribe failed"));
+    client.subscribeResult.mockRejectedValueOnce(new Error("subscribe failed"));
     const opening = connect(client);
 
     client.emit("connect");
@@ -167,6 +189,7 @@ describe("MQTT session", () => {
 
   it("forwards messages only while the established session is open", async () => {
     const client = new FakeClient();
+    client.subscribeResult.mockResolvedValue([{ topic: "#", qos: 0 }]);
     const messages: unknown[] = [];
     mocks.connect.mockReturnValueOnce(client as never);
     const opening = MqttSession.connect("ws://broker.example/mqtt", ["#"], {
@@ -193,6 +216,7 @@ describe("MQTT session", () => {
 
   it("labels messages from different transports as separate segments", async () => {
     const client = new FakeClient();
+    client.subscribeResult.mockResolvedValue([{ topic: "#", qos: 0 }]);
     const messages: { segment: number }[] = [];
     mocks.connect.mockReturnValueOnce(client as never);
     const opening = MqttSession.connect("ws://broker.example/mqtt", ["#"], {
@@ -208,7 +232,7 @@ describe("MQTT session", () => {
     client.emit("reconnect");
     client.emit("connect");
     await vi.waitFor(() =>
-      expect(client.subscribeAsync).toHaveBeenCalledTimes(2),
+      expect(client.subscribeResult).toHaveBeenCalledTimes(2),
     );
     client.emit("message", "sensors/room", new Uint8Array([50]), packet);
 
@@ -221,7 +245,7 @@ describe("MQTT session", () => {
     const statuses: SessionStatus[] = [];
     const session = await establish(client, statuses);
     const next = deferred();
-    client.subscribeAsync.mockImplementationOnce(() => next.promise);
+    client.subscribeResult.mockImplementationOnce(() => next.promise);
 
     client.emit("offline");
     client.emit("close");
@@ -229,11 +253,12 @@ describe("MQTT session", () => {
     client.emit("connect");
     await Promise.resolve();
 
-    expect(statuses.slice(-2)).toEqual([
+    expect(statuses.slice(-3)).toEqual([
       { state: "offline" },
       { state: "reconnecting" },
+      { state: "restoring" },
     ]);
-    expect(client.subscribeAsync).toHaveBeenCalledTimes(2);
+    expect(client.subscribeResult).toHaveBeenCalledTimes(2);
     next.resolve([
       { topic: "sensors/#", qos: 0 },
       { topic: "alerts/+", qos: 0 },
@@ -250,10 +275,10 @@ describe("MQTT session", () => {
     const statuses: SessionStatus[] = [];
     const session = await establish(client, statuses);
     const refreshed = deferred();
-    client.subscribeAsync.mockImplementationOnce(() => refreshed.promise);
+    client.subscribeResult.mockImplementationOnce(() => refreshed.promise);
 
     const resubscribing = session.resubscribe();
-    expect(client.subscribeAsync).toHaveBeenCalledTimes(2);
+    expect(client.subscribeResult).toHaveBeenCalledTimes(2);
     expect(client.end).not.toHaveBeenCalled();
     refreshed.resolve([
       { topic: "sensors/#", qos: 0 },
@@ -270,12 +295,12 @@ describe("MQTT session", () => {
     const client = new FakeClient();
     const statuses: SessionStatus[] = [];
     const session = await establish(client, statuses);
-    client.subscribeAsync.mockRejectedValueOnce(new Error("subscribe failed"));
+    client.subscribeResult.mockRejectedValueOnce(new Error("subscribe failed"));
 
     await session.resubscribe();
 
     expect(statuses.at(-1)).toEqual({
-      state: "error",
+      state: "failed",
       error: "subscribe failed",
     });
     expect(client.end).toHaveBeenCalledWith(true);
@@ -285,12 +310,12 @@ describe("MQTT session", () => {
     const client = new FakeClient();
     const statuses: SessionStatus[] = [];
     await establish(client, statuses);
-    client.subscribeAsync.mockRejectedValueOnce(new Error("subscribe failed"));
+    client.subscribeResult.mockRejectedValueOnce(new Error("subscribe failed"));
 
     client.emit("connect");
     await vi.waitFor(() =>
       expect(statuses.at(-1)).toEqual({
-        state: "error",
+        state: "failed",
         error: "subscribe failed",
       }),
     );
@@ -298,16 +323,16 @@ describe("MQTT session", () => {
 
     client.emit("close");
     client.emit("connect");
-    expect(client.subscribeAsync).toHaveBeenCalledTimes(2);
+    expect(client.subscribeResult).toHaveBeenCalledTimes(2);
     expect(statuses.at(-1)).toEqual({
-      state: "error",
+      state: "failed",
       error: "subscribe failed",
     });
   });
 
   it("reports filters rejected by SUBACK", async () => {
     const client = new FakeClient();
-    client.subscribeAsync.mockResolvedValueOnce([
+    client.subscribeResult.mockResolvedValueOnce([
       { topic: "sensors/#", qos: 0 },
       { topic: "alerts/+", qos: 128 },
     ]);
@@ -319,12 +344,28 @@ describe("MQTT session", () => {
     session.close();
   });
 
+  it("keeps the transport open when every filter is rejected", async () => {
+    const client = new FakeClient();
+    client.subscribeResult.mockResolvedValueOnce([
+      { topic: "sensors/#", qos: 128 },
+      { topic: "alerts/+", qos: 128 },
+    ]);
+    const statuses: SessionStatus[] = [];
+    const session = await establish(client, statuses);
+    expect(statuses.at(-1)).toEqual({
+      state: "connected",
+      rejected: ["sensors/#", "alerts/+"],
+    });
+    expect(client.end).not.toHaveBeenCalled();
+    session.close();
+  });
+
   it("ignores a stale SUBACK from an interrupted reconnect", async () => {
     const client = new FakeClient();
     const statuses: SessionStatus[] = [];
     const session = await establish(client, statuses);
     const stale = deferred();
-    client.subscribeAsync
+    client.subscribeResult
       .mockImplementationOnce(() => stale.promise)
       .mockResolvedValueOnce([
         { topic: "sensors/#", qos: 0 },

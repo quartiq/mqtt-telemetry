@@ -9,8 +9,8 @@ import { isWebSocketBroker } from "./routes";
 
 export type SessionStatus =
   | { state: "connected"; rejected: string[] }
-  | { state: "reconnecting" | "offline" }
-  | { state: "error"; error: string };
+  | { state: "reconnecting" | "offline" | "restoring" }
+  | { state: "error" | "failed"; error: string };
 
 export type IncomingMessage = {
   topic: string;
@@ -80,16 +80,31 @@ export class MqttSession {
     this.callbacks.status({ state: "offline" });
   }
 
-  private async subscribe(): Promise<string[]> {
-    const grants = await this.client.subscribeAsync(this.filters, {
-      qos: 0,
-    } satisfies IClientSubscribeOptions);
-    return grants.filter(({ qos }) => qos === 128).map(({ topic }) => topic);
+  private subscribe(): Promise<string[]> {
+    // subscribeAsync rejects partial SUBACKs and loses the grant list.
+    return new Promise((resolve, reject) => {
+      this.client.subscribe(
+        this.filters,
+        { qos: 0 } satisfies IClientSubscribeOptions,
+        (error, _grants, packet) => {
+          if (packet?.granted.length === this.filters.length) {
+            resolve(
+              this.filters.filter((_, index) => packet.granted[index] === 128),
+            );
+          } else {
+            reject(
+              error ?? new Error("Incomplete subscription acknowledgment"),
+            );
+          }
+        },
+      );
+    });
   }
 
   private async restoreSubscriptions(
     generation: number,
   ): Promise<string[] | undefined> {
+    this.callbacks.status({ state: "restoring" });
     try {
       const rejected = await this.subscribe();
       return generation === this.generation &&
@@ -106,7 +121,7 @@ export class MqttSession {
         this.closing = true;
         this.client.end(true);
         this.callbacks.status({
-          state: "error",
+          state: "failed",
           error: error instanceof Error ? error.message : String(error),
         });
       }

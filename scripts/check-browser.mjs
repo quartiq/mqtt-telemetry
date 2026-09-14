@@ -19,6 +19,8 @@ const server = createServer((_request, response) => {
 const broker = new WebSocketServer({ server });
 let client;
 let subscriptions = 0;
+let subscriptionReply = "accept";
+let acknowledge;
 broker.on("connection", (socket) => {
   const parser = packet.parser();
   socket.on("error", () => {});
@@ -28,14 +30,21 @@ broker.on("connection", (socket) => {
       socket.send(packet.generate({ cmd: "connack", returnCode: 0 }));
     } else if (message.cmd === "subscribe") {
       subscriptions += 1;
-      socket.send(
-        packet.generate({
-          cmd: "suback",
-          messageId: message.messageId,
-          granted: message.subscriptions.map(() => 0),
-        }),
-      );
+      acknowledge = () =>
+        socket.send(
+          packet.generate({
+            cmd: "suback",
+            messageId: message.messageId,
+            granted:
+              subscriptionReply === "incomplete"
+                ? [0]
+                : message.subscriptions.map((_, index) =>
+                    subscriptionReply === "reject" && index === 1 ? 128 : 0,
+                  ),
+          }),
+        );
       client = socket;
+      if (subscriptionReply !== "hold") acknowledge();
     } else if (message.cmd === "pingreq") {
       socket.send(packet.generate({ cmd: "pingresp" }));
     }
@@ -241,6 +250,7 @@ try {
     const url = new URL(base);
     url.searchParams.set("broker", `ws://127.0.0.1:${port}`);
     url.searchParams.set("sub", "#");
+    url.searchParams.append("sub", "alerts/+");
     await command("Page.navigate", { url: url.href });
     await until(
       "document.querySelector('.connection-state')?.innerText.includes('Connected')",
@@ -389,7 +399,64 @@ try {
       !(await dimensions()).overflow,
       "Touch controls overflow the viewport",
     );
-    console.log(`Checked panes, touch controls, and plot limit: ${base}`);
+    await command("Emulation.setTouchEmulationEnabled", { enabled: false });
+    subscriptionReply = "hold";
+    client.terminate();
+    await until(
+      "document.querySelector('.connection-state').innerText.includes('Restoring subscriptions')",
+    );
+    assert(
+      await evaluate(
+        "document.querySelector('.connection-notice').innerText.includes('interrupted')",
+      ),
+    );
+    subscriptionReply = "reject";
+    acknowledge();
+    await until(
+      "document.querySelector('.connection-state').innerText.includes('Connected')",
+    );
+    assert(
+      await evaluate(
+        "document.querySelector('.header-error').innerText.includes('alerts/+')",
+      ),
+    );
+    assert(
+      !(await evaluate(
+        "document.body.innerText.includes('Subscriptions restored')",
+      )),
+    );
+    assert(
+      await evaluate("document.querySelectorAll('.plot-panel').length === 9"),
+    );
+    subscriptionReply = "incomplete";
+    await click(".connection-disclosure");
+    await click(
+      '.connection-editor-actions button[title="Refresh subscriptions and retained messages without disconnecting"]',
+    );
+    await until(
+      "document.querySelector('.connection-state').innerText.includes('Connection failed')",
+    );
+    subscriptionReply = "accept";
+    await click(".connection-state button");
+    await until(
+      "document.querySelector('.connection-state').innerText.includes('Connected')",
+    );
+    assert(
+      await evaluate("document.querySelectorAll('.plot-panel').length === 9"),
+    );
+    assert(
+      await evaluate(
+        "document.querySelector('.connection-notice').innerText.includes('Subscriptions restored')",
+      ),
+    );
+    assert(
+      await evaluate(
+        "document.querySelectorAll('[aria-label=\"MQTT topics\"] [role=treeitem]').length >= 46",
+      ),
+    );
+    console.log(
+      `Checked panes, touch controls, plot limit, and recovery: ${base}`,
+    );
   }
   assert(
     subscriptions >= 2,
