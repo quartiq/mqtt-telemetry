@@ -35,10 +35,12 @@
     />
     /topic
   </label>
-  <label title="Discard older live messages">
+  <label
+    title="Discard older live messages; always keep the latest received value"
+  >
     Age
     <DurationSelect
-      ariaLabel="Maximum live history age"
+      ariaLabel="Age limit for older live history"
       noneLabel="none"
       value={ageMs}
       onchange={onagechange}

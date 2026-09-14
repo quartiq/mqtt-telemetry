@@ -58,21 +58,23 @@ function plotSeriesAtPath(
         ? getJsonPath(message.payload.value, path)
         : undefined;
     unavailable = typeof value !== "number" || !Number.isFinite(value);
+    // Retained snapshots describe the inspected value, not the live timeline.
+    if (message.retained) {
+      if (!unavailable) retainedExcluded += 1;
+      continue;
+    }
     if (unavailable) {
       interrupted = true;
       continue;
     }
-    if (message.retained) retainedExcluded += 1;
-    else {
-      if (interrupted) run += 1;
-      points.push({
-        x: message.receivedAt,
-        y: value as number,
-        segment: message.segment,
-        ...(run ? { run } : {}),
-      });
-      interrupted = false;
-    }
+    if (interrupted) run += 1;
+    points.push({
+      x: message.receivedAt,
+      y: value as number,
+      segment: message.segment,
+      ...(run ? { run } : {}),
+    });
+    interrupted = false;
   }
   return {
     points,

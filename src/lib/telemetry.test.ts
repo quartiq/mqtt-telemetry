@@ -543,6 +543,28 @@ describe("topic history", () => {
     ]);
   });
 
+  it("admits topics that fit after rejecting a path larger than the tree budget", () => {
+    const store = new TelemetryStore(10, { maxTopicNodes: 3 });
+    expect(
+      store.add("a/b/c/d", encode("1"), { receivedAt: 1, retained: false }),
+    ).toBeUndefined();
+    expect(store.snapshot()).toMatchObject({
+      topicsOmitted: true,
+      topicCount: 0,
+    });
+    expect(store.snapshot().nodes.size).toBe(0);
+    expect(
+      store.add("a/b", encode("2"), { receivedAt: 2, retained: false }),
+    ).toBeDefined();
+    expect(
+      store.add("c/d", encode("3"), { receivedAt: 3, retained: false }),
+    ).toBeUndefined();
+    expect(
+      store.add("c", encode("4"), { receivedAt: 4, retained: false }),
+    ).toBeDefined();
+    expect(store.snapshot().nodes.size).toBe(3);
+  });
+
   it("bounds discovered topics and omits oversized payload contents", () => {
     const store = new TelemetryStore(10, {
       maxTopicNodes: 2,
@@ -560,7 +582,7 @@ describe("topic history", () => {
     ).toBeUndefined();
     const snapshot = store.snapshot();
     expect(snapshot.payloadsOmitted).toBe(true);
-    expect(snapshot.topicLimitReached).toBe(true);
+    expect(snapshot.topicsOmitted).toBe(true);
     expect(
       store.add("a/b", encode("2"), { receivedAt: 3, retained: false }),
     ).toBeDefined();
@@ -665,6 +687,23 @@ describe("plot extraction", () => {
       ],
       retainedExcluded: 1,
     });
+  });
+
+  it("keeps retained updates out of live plot continuity", () => {
+    const store = new TelemetryStore(10);
+    store.add("a", encode("1"), { receivedAt: 1, retained: false });
+    store.add("a", encode('"offline"'), { receivedAt: 2, retained: true });
+    const id = store.nodeId("a")!;
+    expect(store.plotSeries(id, "$").unavailable).toBe(true);
+    store.add("a", encode("2"), { receivedAt: 3, retained: false });
+    const points = store.plotSeries(id, "$").points;
+    expect(points.map((point) => point.run ?? 0)).toEqual([0, 0]);
+    store.add("a", encode("3"), { receivedAt: 4, retained: true });
+    expect(store.plotSeries(id, "$").points).toEqual(points);
+    store.add("a", encode('"offline"'), { receivedAt: 5, retained: false });
+    store.add("a", encode("4"), { receivedAt: 6, retained: true });
+    store.add("a", encode("5"), { receivedAt: 7, retained: false });
+    expect(store.plotSeries(id, "$").points.at(-1)?.run).toBe(1);
   });
 
   it("preserves schema interruptions through downsampling", () => {

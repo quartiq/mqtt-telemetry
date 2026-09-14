@@ -280,6 +280,32 @@ try {
     await until(
       "document.querySelector('.connection-state')?.innerText.includes('Connected')",
     );
+    // A valid MQTT path can exceed the tree budget without filling the tree.
+    const beforeAdmissionConnections = connections.length;
+    publish(Array(10_001).fill("a").join("/"), 1);
+    await until(
+      "document.querySelector('.topics-header').innerText.includes('Some topics could not fit')",
+    );
+    assert(
+      await evaluate("!document.querySelector('.topic-tree [role=treeitem]')"),
+    );
+    const resetSelector =
+      'button[title="Clear collected messages and topics; keep subscriptions and plots"]';
+    assert(
+      await evaluate(
+        `!document.querySelector(${JSON.stringify(resetSelector)}).disabled`,
+      ),
+      "Admission failure must leave reset available even for an empty tree",
+    );
+    await click(resetSelector);
+    await until(
+      "!document.querySelector('.topics-header').innerText.includes('Some topics could not fit')",
+    );
+    assert.equal(
+      connections.length,
+      beforeAdmissionConnections,
+      "Reset must keep the transport",
+    );
     publish("sample", 1);
     await until(
       "document.querySelector('[aria-label=\"MQTT topics\"] [role=treeitem]')",
@@ -696,7 +722,7 @@ try {
     for (let index = 0; index < 19; index++)
       publish(`load/${index}`, { value: "x".repeat(900_000) });
     await until(
-      "document.querySelector('.topics-header').innerText.includes('Collection stopped')",
+      "document.querySelector('.app-header').innerText.includes('Collection stopped')",
     );
     assert(
       await evaluate("document.querySelector('.plot-panel') !== null"),

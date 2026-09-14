@@ -49,7 +49,7 @@ export type TopicSnapshot = {
   revision: number;
   topicCount: number;
   bufferedMessages: number;
-  topicLimitReached: boolean;
+  topicsOmitted: boolean;
   historyLimited: boolean;
   collectionStopped: boolean;
   payloadsOmitted: boolean;
@@ -214,7 +214,7 @@ export class TelemetryStore {
   private sequence = 0;
   private revision = 0;
   private topicCount = 0;
-  private topicLimitReached = false;
+  private topicsOmitted = false;
   private historyLimited = false;
   private collectionStopped = false;
   private payloadsOmitted = false;
@@ -242,8 +242,8 @@ export class TelemetryStore {
     if (this.collectionStopped) return undefined;
     const nodeId = this.topicIds.get(topic) ?? this.addTopic(topic);
     if (!nodeId) {
-      if (!this.topicLimitReached) this.revision += 1;
-      this.topicLimitReached = true;
+      if (!this.topicsOmitted) this.revision += 1;
+      this.topicsOmitted = true;
       return undefined;
     }
     const node = this.nodes.get(nodeId) as TopicNode;
@@ -441,7 +441,7 @@ export class TelemetryStore {
       revision: this.revision,
       topicCount: this.topicCount,
       bufferedMessages: this.messages.size,
-      topicLimitReached: this.topicLimitReached,
+      topicsOmitted: this.topicsOmitted,
       historyLimited: this.historyLimited,
       collectionStopped: this.collectionStopped,
       payloadsOmitted: this.payloadsOmitted,
@@ -457,8 +457,9 @@ export class TelemetryStore {
   }
 
   private addTopic(topic: string): string | undefined {
-    if (this.topicLimitReached) return undefined;
+    if (this.nodes.size >= this.limits.maxTopicNodes) return undefined;
     const parts = topic.split("/");
+    if (parts.length > this.limits.maxTopicNodes) return undefined;
     const ids = parts.map((_, index) => topicId(parts.slice(0, index + 1)));
     const missing = ids.filter((id) => !this.nodes.has(id)).length;
     if (this.nodes.size + missing > this.limits.maxTopicNodes) return undefined;
@@ -554,6 +555,7 @@ export class TelemetryStore {
     const ids = new Set(removed.map(({ id }) => id));
     const latest = node.history.at(-1)!;
     node.history = node.history.filter(({ id }) => !ids.has(id));
+    this.historyCache.delete(nodeId);
     if (ids.has(latest.id)) {
       const next = node.history.at(-1);
       this.latestBytes +=

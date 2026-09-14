@@ -283,9 +283,9 @@
   );
   let topicWarning = $derived(
     topicSnapshot.collectionStopped
-      ? "Collection stopped: latest values exceed storage capacity. Narrow subscriptions, then reset collected data."
-      : topicSnapshot.topicLimitReached
-        ? "Topic capacity reached: new topics are ignored. Narrow subscriptions, then reset collected data."
+      ? ""
+      : topicSnapshot.topicsOmitted
+        ? "Some topics could not fit in the topic tree. Narrow subscriptions, then reset collected data."
         : topicSnapshot.historyLimited
           ? "Storage limit reached: older history was trimmed; latest values are kept."
           : "",
@@ -1142,6 +1142,12 @@
         >
       </div>
     </div>
+    {#if topicSnapshot.collectionStopped}
+      <span class="header-notice problem" role="status">
+        Collection stopped: latest values exceed storage capacity. Narrow
+        subscriptions, then reset collected data.
+      </span>
+    {/if}
     {#if error || connectionError}<strong class="header-error"
         >{error || connectionError}</strong
       >{/if}
@@ -1225,6 +1231,7 @@
           type="button"
           onclick={resetCollectedData}
           disabled={!topicSnapshot.nodes.size &&
+            !topicSnapshot.topicsOmitted &&
             !topicSnapshot.collectionStopped}
           title="Clear collected messages and topics; keep subscriptions and plots"
           >Reset collected data</button
@@ -1255,8 +1262,7 @@
         {#if topicWarning}
           <span
             class="meta"
-            class:problem={topicSnapshot.collectionStopped ||
-              topicSnapshot.topicLimitReached}
+            class:problem={topicSnapshot.topicsOmitted}
             role="status"
           >
             {topicWarning}
