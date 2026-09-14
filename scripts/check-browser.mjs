@@ -583,9 +583,31 @@ try {
     assert(
       await evaluate(`['.message-tree .caret', '.message-tree .plot-toggle'].every(selector => {
       const rect = document.querySelector(selector).getBoundingClientRect();
-      return rect.width >= 44 && rect.height >= 44;
+      return rect.width === 30 && rect.height === 40;
     })`),
-      "Tree touch targets are too small",
+      "Tree touch targets must stay compact and usable",
+    );
+    assert(
+      await evaluate(`(() => {
+      for (const tree of document.querySelectorAll('.topic-tree [role=tree], .message-tree [role=tree]')) {
+        const offsets = new Set();
+        for (const row of tree.querySelectorAll('[role=treeitem]')) {
+          const rect = row.getBoundingClientRect();
+          const label = row.querySelector('.label').getBoundingClientRect();
+          const indent = parseFloat(getComputedStyle(row).paddingLeft);
+          offsets.add(Math.round(label.left - rect.left - indent));
+          for (const control of row.querySelectorAll('.caret, .pin-mark, .activity-dot')) {
+            const box = control.getBoundingClientRect();
+            if (Math.abs(box.top + box.height / 2 - rect.top - rect.height / 2) > 1) return false;
+          }
+          const mark = row.querySelector('.pin-mark');
+          if (mark && mark.getBoundingClientRect().width > 18) return false;
+        }
+        if (offsets.size !== 1) return false;
+      }
+      return true;
+    })()`),
+      "Tree controls must center vertically and reserve consistent columns",
     );
     await tap(".message-tree .caret");
     await until("!document.querySelector('.message-tree .plot-toggle')");

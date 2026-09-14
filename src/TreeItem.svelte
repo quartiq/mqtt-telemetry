@@ -110,7 +110,7 @@
     class:active
     data-tree-id={node.id}
     role="treeitem"
-    style:padding-left={`${depth}rem`}
+    style:padding-left={`calc(${depth} * var(--tree-indent))`}
     tabindex={context.tabStop === node.id ? 0 : -1}
     title={node.title ?? node.label}
     onclick={select}
@@ -126,6 +126,8 @@
         ondblclick={(event) => event.stopPropagation()}
         onclick={toggle}>{open ? "▾" : "▸"}</button
       >
+    {:else}
+      <span aria-hidden="true" class="control-slot"></span>
     {/if}
     {#if checkable}
       <button
@@ -141,16 +143,18 @@
             : "Add plot"}
         type="button"
         ondblclick={(event) => event.stopPropagation()}
-        onclick={toggleCheck}>{checked ? "✓" : ""}</button
+        onclick={toggleCheck}
+        ><span aria-hidden="true" class="pin-mark">{checked ? "✓" : ""}</span
+        ></button
       >
-    {:else if !internal}
-      <span aria-hidden="true" class="spacer"></span>
+    {:else}
+      <span aria-hidden="true" class="control-slot"></span>
     {/if}
-    {#if context.showActivity}
-      <span aria-hidden="true" class="activity-slot">
+    <span aria-hidden="true" class="activity-slot">
+      {#if context.showActivity}
         <span class="activity-dot" use:indicateActivity={activity}></span>
-      </span>
-    {/if}
+      {/if}
+    </span>
     <span class="label">{node.label}</span>
     {#if node.suffix !== undefined}
       <span class="suffix">{" "}{node.suffix}</span>
@@ -189,7 +193,9 @@
   }
 
   [role="treeitem"] {
-    align-items: baseline;
+    --tree-control: 1.3rem;
+    --tree-indent: 1rem;
+    align-items: center;
     border-radius: var(--radius);
     cursor: default;
     display: flex;
@@ -214,10 +220,9 @@
     align-items: center;
     align-self: stretch;
     display: flex;
-    flex: 0 0 0.55rem;
+    flex: 0 0 8px;
     justify-content: center;
     margin-right: 0.2rem;
-    width: 0.55rem;
   }
 
   .activity-dot {
@@ -229,26 +234,27 @@
   }
 
   .caret,
-  .spacer {
+  .plot-toggle,
+  .control-slot {
+    flex: 0 0 var(--tree-control);
+    width: var(--tree-control);
+  }
+
+  .caret,
+  .plot-toggle {
     appearance: none;
+    align-items: center;
+    align-self: stretch;
     background: transparent;
     border: 0;
     color: inherit;
-    flex: 0 0 var(--caret);
-    font: inherit;
-    line-height: 1;
-    margin: 0 var(--space-tight) 0 0;
-    padding: 0;
-    text-align: center;
-    width: var(--caret);
-  }
-
-  .caret {
-    align-items: center;
-    align-self: stretch;
-    cursor: pointer;
     display: flex;
+    font: inherit;
     justify-content: center;
+    line-height: 1;
+    margin: 0;
+    min-height: 0;
+    padding: 0;
   }
 
   .label {
@@ -280,23 +286,18 @@
     white-space: nowrap;
   }
 
-  .plot-toggle {
-    align-self: center;
-    background: transparent;
+  .pin-mark {
+    align-items: center;
     border: 1px solid var(--border);
     border-radius: 0.2rem;
-    color: var(--fg);
-    flex: 0 0 1rem;
+    display: flex;
     font-size: 0.75rem;
     height: 1rem;
-    line-height: 0.8rem;
-    margin-right: var(--space-tight);
-    min-height: 1rem;
-    padding: 0;
+    justify-content: center;
     width: 1rem;
   }
 
-  .plot-toggle[aria-pressed="true"] {
+  .plot-toggle[aria-pressed="true"] .pin-mark {
     background: var(--fg);
     border-color: var(--fg);
     color: var(--bg);
@@ -304,19 +305,9 @@
 
   @media (pointer: coarse) {
     [role="treeitem"] {
-      min-height: 44px;
-    }
-
-    .caret,
-    .spacer,
-    .plot-toggle {
-      flex-basis: 44px;
-      width: 44px;
-    }
-
-    .caret,
-    .plot-toggle {
-      min-height: 44px;
+      --tree-control: 30px;
+      --tree-indent: 12px;
+      min-height: 40px;
     }
   }
 </style>
