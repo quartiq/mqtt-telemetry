@@ -21,9 +21,7 @@
 </script>
 
 <div class="history-policy">
-  <label
-    title="Maximum live messages per topic; age and global limits may discard messages earlier. Retained snapshots are kept separately."
-  >
+  <label>
     Live max
     <input
       aria-label="Live messages kept per topic"
@@ -37,9 +35,7 @@
     />
     /topic
   </label>
-  <label
-    title="Discard history messages older than this; retained snapshots are kept separately"
-  >
+  <label title="Discard older live messages">
     Age
     <DurationSelect
       ariaLabel="Maximum live history age"

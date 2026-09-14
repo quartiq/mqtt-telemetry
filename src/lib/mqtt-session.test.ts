@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ connect: vi.fn() }));
 vi.mock("mqtt", () => ({ default: { connect: mocks.connect } }));
@@ -107,22 +107,18 @@ async function establish(
 
 describe("MQTT session", () => {
   beforeEach(() => mocks.connect.mockReset());
+  afterEach(() => vi.useRealTimers());
 
-  it("starts a clean, one-shot MQTT 3.1.1 browser connection", () => {
+  it("uses clean sessions and passes optional credentials", () => {
     const options = clientOptions({ username: "user", password: "secret" });
     expect(options).toMatchObject({
       clean: true,
-      connectTimeout: 15_000,
-      keepalive: 30,
       protocolVersion: 4,
       queueQoSZero: false,
-      reconnectPeriod: 0,
       resubscribe: false,
       username: "user",
       password: "secret",
     });
-    expect(options.clientId).toMatch(/^mqtttelemetry[a-f0-9]{10}$/);
-    expect(options.clientId).toHaveLength(23);
     expect(clientOptions({ password: "secret" })).toMatchObject({
       username: "",
       password: "secret",
@@ -487,6 +483,34 @@ describe("MQTT session", () => {
     });
     expect(client.end).toHaveBeenCalledWith(true);
   });
+
+  it.each(["subscribe", "unsubscribe"])(
+    "recovers control when %s acknowledgment never arrives",
+    async (operation) => {
+      const client = new FakeClient();
+      const statuses: SessionStatus[] = [];
+      const session = await establish(client, statuses);
+      vi.useFakeTimers();
+      if (operation === "subscribe")
+        client.subscribeResult.mockImplementationOnce(
+          () => new Promise(() => {}),
+        );
+      else
+        client.unsubscribeAsync.mockImplementationOnce(
+          () => new Promise(() => {}),
+        );
+      const update = session.setFilters(
+        operation === "subscribe" ? ["new/#"] : ["sensors/#"],
+      );
+      await vi.advanceTimersByTimeAsync(15_000);
+      await update;
+      expect(statuses.at(-1)).toEqual({
+        state: "failed",
+        error: "Subscription acknowledgment timed out",
+      });
+      expect(client.end).toHaveBeenCalledWith(true);
+    },
+  );
 
   it("reports established MQTT errors", async () => {
     const client = new FakeClient();

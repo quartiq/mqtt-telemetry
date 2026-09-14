@@ -1,40 +1,60 @@
 # MQTT Telemetry
 
-A read-only MQTT JSON telemetry browser with bounded history and up to ten live plots.
+A read-only MQTT JSON browser with local history and up to ten live plots.
 
-Many ideas and the fundamental concept are adopted from the fabulous [`mqttui`](https://github.com/EdJoPaTo/mqttui).
+## Connect
 
-## Use
+Open [MQTT Telemetry](https://telemetry.quartiq.de/) and enter a `ws://` or `wss://` broker URL, optional credentials, and one subscription filter per line. **Connect** opens the connection and subscribes. A [public broker example](https://telemetry.quartiq.de/?broker=wss://test.mosquitto.org:8081/&sub=$SYS/%23) starts immediately.
 
-Start with a [live public broker example](https://telemetry.quartiq.de/?broker=wss://test.mosquitto.org:8081/&sub=$SYS/%23), which connects and subscribes immediately. If you are adventurous, subscribe to the wildcard topic '#'.
+An empty subscription list defaults to `#`. Exact duplicates and empty lines are ignored; spaces within filters are preserved. `#` does not include MQTT `$` topics; subscribe to `$SYS/#` explicitly when needed. Invalid filters are reported before changing the connection.
 
-For another broker, open <https://telemetry.quartiq.de/> and enter its MQTT-over-WebSocket URL, with one subscription filter per line. MQTT excludes `$` topics from `#`; subscribe to `$SYS/#` explicitly when needed.
+## Inspect and plot
 
-The address bar is a compact, bookmarkable launch URL: `broker`, repeated `sub`, `history`, and optional `age` and `window` durations using `s`, `m`, `h`, or `d`. `age` discards older local samples; `window` only limits the plotted interval and defaults to `all`. Encode MQTT wildcards as `%23` and `%2B`.
+Select a topic to inspect its latest received message. Topic counts show buffered messages on that exact topic; branches without a count only group descendant topics. Search matches a case-insensitive substring, or an MQTT filter when the query contains `+` or `#`.
 
-Dashboard fragments and launch queries replace rather than merge; a dashboard fragment wins. On reload, matching same-tab state restores dashboard-only details from the cleaned URL, but never overrides a different query. With neither source, same-tab state then defaults are used. Loading a dashboard file replaces the current configuration.
+Pin a numeric JSON payload directly from its topic row. For an object or array, select the topic and pin numeric fields in **Value**. Both controls operate on the same plots. Pinning does not change the selected topic. Plot titles return to the corresponding topic and field; plot controls reorder or remove plots. At the ten-plot limit, remove a plot before adding another.
 
-Launch parameters are ordinary query data and may appear in browser or hosting logs. For sensitive broker or topic names, load a dashboard file locally instead.
+Expand **History** and select a message to inspect an earlier value; **Latest** resumes following incoming messages. This changes the inspected message, not the pinned plots. Plot hover inspection uses the mouse. On touch screens, the trees and plot controls are available, but hover inspection is not.
 
-A topic count is the number of history messages on that exact topic; nodes without a count are structural branches. Topics with a numeric JSON payload can be pinned directly from the topic tree. For structured payloads, select a counted topic, then toggle the square beside a numeric field to plot it. Topic search is a case-insensitive substring search unless it contains MQTT `+` or `#` wildcards.
+## Change subscriptions or connection
 
-Receipt times use a consistent 24-hour clock. Choose Local or UTC from the connected header; saved dashboards retain that choice.
+Open the broker heading to edit the applied settings. **Cancel** discards the edit; recovery never uses unapplied credentials.
 
-A dashboard contains every durable option: launch settings, timezone, and plots. Current selection, tree expansion, credentials, and message history are transient and never included. **Save** writes JSON; **Copy dashboard** creates a self-contained link whose embedded JSON is removed after import.
+| Action                           | Connection behavior                                                                             | Local history and plots                                                     |
+| -------------------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **Apply** subscription edits     | Updates filters on the existing connection. While reconnecting, updates the filters to restore. | Keeps history, selection, and plots.                                        |
+| **Apply** changed credentials    | Reconnects to the same broker.                                                                  | Keeps history, selection, and plots.                                        |
+| **Apply** a different broker URL | Opens a new connection.                                                                         | Clears history, selection, and plots.                                       |
+| **Refresh subscriptions**        | Subscribes again to request retained values and retry rejected filters.                         | Keeps the workspace; received retained snapshots replace earlier snapshots. |
+| **Reconnect**                    | Opens a new connection using the applied settings.                                              | Keeps the same broker's workspace.                                          |
 
-Browsers require `ws://` or `wss://`; ordinary `mqtt://` TCP endpoints do not work. The hosted HTTPS page requires `wss://` with a browser-trusted certificate. Chromium may additionally request Local Network Access permission for a private or loopback broker.
+Subscription additions are acknowledged before old filters are removed. A broker can reject individual filters; the connection remains open and the rejected filters are listed. Edit those filters or use **Refresh subscriptions** to retry. Removing a filter stops future reception where no remaining filter covers the topic; it does not erase collected messages or plots.
 
-For a LAN broker that only provides `ws://`, save the hosted page as **Webpage, HTML Only**, then open that file. It is a complete offline application and can connect directly to a private `ws://` endpoint.
+Established connections retry transport failures automatically. Subscription acknowledgment failure or a 15-second acknowledgment timeout stops the attempt and exposes **Reconnect**. An initial connection failure opens the editor for correction and retry. Connected means the broker has answered the subscription requests, not that messages are arriving.
 
-The muted build link in the header identifies the exact source commit embedded in hosted and downloaded copies. Builds made without source metadata are labeled `local build`.
+## Keep or discard data
 
-### Data and reconnect behavior
+History exists only in the current tab. **Live max** defaults to 1,000 messages per topic; **Age** and global memory limits can discard messages earlier. Payloads over 1 MiB are omitted. Clear actions delete local history only: they do not unsubscribe, remove plots, or delete retained messages on the broker.
 
-History exists only in the current tab. It defaults to a maximum of 1,000 live messages per topic; age and global limits can discard messages earlier. Payloads over 1 MiB are omitted. The latest retained snapshot for each topic is kept outside the count and age limits, but not plotted because its original publication time is unknown. History count and maximum age delete local samples; the independent plot window only limits the visible interval and its statistics. Clear actions affect only this tab.
+The latest retained snapshot per topic is kept separately from live count and age limits, but remains subject to global memory limits. Retained snapshots are inspectable and excluded from plots because their publication time is unknown.
 
-Applying subscription edits updates the current connection and keeps history, selection, and plots. Removing a filter does not delete collected data. New filters are subscribed before old ones are removed; broker rejections are reported individually. Refresh retained retries the current subscriptions and requests retained snapshots again. Reconnect and credential changes open a new connection while preserving the same broker's history and plots. Changing the broker URL clears that workspace; loading a dashboard replaces plot definitions with those in the file.
+Plots use browser receipt time. **Time** selects Local or UTC display. **Show** limits the plotted interval and its statistics without deleting history. Plot lines and history mark reception interruptions after a reconnect or after a topic loses subscription coverage. Changing an unrelated filter does not interrupt that topic's plot. Missing live messages are not recovered after reconnecting.
 
-After a connection has been established, transport failures are retried and the latest requested subscriptions are restored before the application reports connected. These are clean MQTT sessions: live QoS 0 traffic sent while disconnected is not recoverable. History and plots mark observation boundaries after reconnects or filter removals; these mark potential gaps, not measured message loss. An initial connection failure or a failed subscription operation requires explicit user action.
+## Save, share, and return
+
+**Save** writes dashboard JSON containing the broker, subscriptions, history limits, display settings, and plots. **Load** replaces those settings and plots. Loading for the same broker keeps existing messages within the loaded history limits; changing broker starts empty. Credentials, message history, selection, and tree expansion are not saved in dashboard files or links.
+
+**Copy dashboard** creates a link containing the dashboard in its fragment. The fragment is removed after import. The address bar otherwise contains a bookmarkable launch query: `broker`, repeated `sub`, `history`, and optional `age` and `window` durations such as `10m`, `1h`, or `7d`. Encode filter wildcards as `%23` and `%2B`.
+
+A dashboard fragment takes precedence over a launch query. Reload restores matching same-tab dashboard settings; an explicitly different launch query takes precedence over that tab state. Reload does not restore messages. Back and Forward restore dashboard settings and selection, applying subscription changes as needed; they cannot restore discarded history.
+
+Launch queries may appear in browser history and hosting logs. For sensitive broker or topic names, load a dashboard file locally instead.
+
+## Local brokers
+
+Browsers require MQTT over WebSockets; `mqtt://` TCP endpoints do not work. The hosted HTTPS page requires `wss://` and a browser-trusted certificate. Chromium may also request Local Network Access permission for private or loopback brokers.
+
+For a LAN broker that only supports `ws://`, save the hosted page as **Webpage, HTML Only**, then open the saved file. It is a complete offline application and can connect directly to the broker. Its build link identifies the source commit; builds without source metadata say `local build`.
 
 ## Develop
 
@@ -47,10 +67,12 @@ npm run dev
 npm run format:check
 npm test
 npm run build
+npm run test:browser
 ```
 
-`npm run build` type-checks and produces the self-contained `dist/index.html` used for both deployment and the local-file workflow.
-`npm run test:browser` checks the built artifact over HTTP and `file://` with a locally installed Chrome or Chromium and a local MQTT fixture. It exercises responsive panes, touch controls, subscription editing, and recovery without contacting an external broker.
+The build includes Svelte checks and produces the self-contained `dist/index.html`. Browser checks require installed Chrome or Chromium (`CHROME_BIN` can select it). They use a local MQTT fixture over HTTP and `file://`, with responsive-layout and touch-emulation checks; they do not contact an external broker.
+
+The concept and many ideas are adopted from [`mqttui`](https://github.com/EdJoPaTo/mqttui).
 
 ## License
 

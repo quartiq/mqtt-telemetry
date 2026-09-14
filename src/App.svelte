@@ -21,6 +21,7 @@
   import { TelemetryStore } from "./lib/telemetry";
   import type { DisplayTimeZone } from "./lib/time";
   import { MqttSession, type SessionStatus } from "./lib/mqtt-session";
+  import { topicMatchesFilter } from "./lib/mqtt-filter";
   import { randomId } from "./lib/random-id";
   import {
     dashboardJson,
@@ -76,7 +77,6 @@
   let formFilters = $state(initialRoute.filters.join("\n"));
   let username = $state("");
   let password = $state("");
-  let authBroker = initialRoute.broker;
 
   let session = $state<MqttSession | undefined>();
   let store = $state.raw(new TelemetryStore(initialRoute.historyLimit));
@@ -92,8 +92,24 @@
   let historyExpanded = $state(false);
   let jsonExpanded = $state(new Set<string>(["$"]));
   const jsonExpandedByTopic = new Map<string, Set<string>>();
-  let status = $state(initialRoute.broker ? "Connecting" : "Not connected");
+  let connectionState = $state<"idle" | "connecting" | SessionStatus["state"]>(
+    initialRoute.broker ? "connecting" : "idle",
+  );
+  let status = $derived(
+    {
+      idle: "Not connected",
+      connecting: "Connecting",
+      connected: "Connected",
+      offline: "Reconnecting",
+      reconnecting: "Reconnecting",
+      restoring: "Restoring subscriptions",
+      updating: "Updating subscriptions",
+      failed: "Connection failed",
+      error: "Connection error",
+    }[connectionState],
+  );
   let error = $state(startup.error);
+  let connectionError = $state("");
   let dashboardNotice = $state("");
   let connectionNotice = $state("");
   let connectionInterrupted = false;
@@ -144,17 +160,19 @@
         JSON.stringify(route.filters),
   );
   let connectionBusy = $derived(
-    status === "Connecting" ||
-      status === "Restoring subscriptions" ||
-      status === "Updating subscriptions",
+    connectionState === "connecting" ||
+      connectionState === "restoring" ||
+      connectionState === "updating",
   );
   let canResubscribe = $derived(
-    Boolean(session) && status === "Connected" && connectionDraftMatches,
+    Boolean(session) &&
+      connectionState === "connected" &&
+      connectionDraftMatches,
   );
   let statusProblem = $derived(
-    status === "Disconnected" ||
-      status === "Connection error" ||
-      status === "Connection failed",
+    connectionState === "offline" ||
+      connectionState === "error" ||
+      connectionState === "failed",
   );
   let selectedSubtreeCount = $derived.by(() => {
     revision;
@@ -195,15 +213,6 @@
     return undefined;
   });
   let selectedJsonId = $derived(selectedFieldPath ?? "");
-  let checkableJson = $derived.by(() => {
-    const ids = new Set<string>();
-    if (currentMessage?.payload.kind !== "json" || !jsonSnapshot) return ids;
-    for (const [id, path] of jsonSnapshot.paths) {
-      const value = getJsonPath(currentMessage.payload.value, path);
-      if (typeof value === "number" && Number.isFinite(value)) ids.add(id);
-    }
-    return ids;
-  });
   let checkedJson = $derived(
     new Set(
       route.plots
@@ -211,6 +220,15 @@
         .map((plot) => plot.path),
     ),
   );
+  let checkableJson = $derived.by(() => {
+    const ids = new Set(checkedJson);
+    if (currentMessage?.payload.kind !== "json" || !jsonSnapshot) return ids;
+    for (const [id, path] of jsonSnapshot.paths) {
+      const value = getJsonPath(currentMessage.payload.value, path);
+      if (typeof value === "number" && Number.isFinite(value)) ids.add(id);
+    }
+    return ids;
+  });
   let plotLimitReached = $derived(route.plots.length >= MAX_PLOTS);
   let checkedTopics = $derived.by(() => {
     revision;
@@ -326,13 +344,9 @@
       editingConnection = false;
       const next = routeFromViewState(event.state) ?? defaultRoute();
       if (next.broker !== route.broker) {
+        activeUsername = "";
+        activePassword = "";
         route = next;
-        formFilters = next.filters.join("\n");
-        if (next.broker !== authBroker) {
-          username = "";
-          password = "";
-          authBroker = next.broker;
-        }
         if (next.broker) {
           formBroker = next.broker;
           void startConnection(next);
@@ -366,7 +380,7 @@
       ? isWebSocketBroker(route.broker)
       : undefined;
     if (brokerError) {
-      status = "Connection error";
+      connectionState = "error";
       error = brokerError;
       editingConnection = true;
     } else if (route.broker) void startConnection(route);
@@ -419,22 +433,20 @@
   }
 
   function applyDashboard(dashboard: Dashboard) {
-    editingConnection = false;
     const next = routeFromDashboard(dashboard);
-    const sameConnection = Boolean(session) && next.broker === route.broker;
-    if (next.broker !== authBroker) {
-      username = "";
-      password = "";
-      authBroker = next.broker;
+    const brokerError = isWebSocketBroker(next.broker);
+    if (brokerError) throw new Error(brokerError);
+    editingConnection = false;
+    error = "";
+    const sameBroker = next.broker === route.broker;
+    if (!sameBroker) {
+      activeUsername = "";
+      activePassword = "";
     }
     formBroker = next.broker;
     formFilters = next.filters.join("\n");
     writeRoute(next, null);
-    const brokerError = isWebSocketBroker(next.broker);
-    if (brokerError) {
-      stopConnection();
-      error = brokerError;
-    } else if (sameConnection) {
+    if (sameBroker) {
       void updateSubscriptions();
       store.setHistoryLimit(next.historyLimit);
       if (next.historyAgeMs !== null)
@@ -514,7 +526,8 @@
     connectSerial += 1;
     session?.close();
     session = undefined;
-    status = "Not connected";
+    connectionState = "idle";
+    connectionError = "";
     error = "";
     connectionNotice = "";
     connectionInterrupted = false;
@@ -523,10 +536,10 @@
   }
 
   function statusChanged(next: SessionStatus) {
+    connectionState = next.state;
     switch (next.state) {
       case "connected":
-        status = "Connected";
-        error = next.rejected.length
+        connectionError = next.rejected.length
           ? `Subscription rejected: ${next.rejected.join(", ")}`
           : "";
         connectionNotice = connectionInterrupted
@@ -534,30 +547,17 @@
           : "";
         connectionInterrupted = false;
         break;
-      case "reconnecting":
-        status = "Reconnecting";
-        break;
       case "offline":
-        status = "Reconnecting";
         connectionInterrupted = true;
         connectionNotice =
           "Connection interrupted · messages may be missed while reconnecting.";
         break;
-      case "updating":
-        status = "Updating subscriptions";
-        break;
-      case "restoring":
-        status = "Restoring subscriptions";
-        break;
       case "failed":
-        status = "Connection failed";
-        error = next.error;
-        connectionNotice =
-          "Automatic recovery stopped. Reconnect to try again.";
+        connectionNotice = "";
+        connectionError = next.error;
         break;
       case "error":
-        status = "Connection error";
-        error = next.error;
+        connectionError = next.error;
         break;
     }
   }
@@ -578,15 +578,15 @@
 
   async function startConnection(nextRoute: AppRoute, preserveData = false) {
     const serial = ++connectSerial;
-    const credentials =
-      username || password ? { username, password } : undefined;
+    const credentials = { username: activeUsername, password: activePassword };
     session?.close();
     if (!preserveData) {
       session = undefined;
       resetData(nextRoute.historyLimit);
     }
-    const segments = new Map<number, number>();
-    status = "Connecting";
+    const segments = new Map<string, { transport: number; id: number }>();
+    connectionState = "connecting";
+    connectionError = "";
     error = "";
     connectionInterrupted = preserveData;
     connectionNotice = "";
@@ -598,11 +598,9 @@
           message: ({ topic, payload, packet, segment }) => {
             if (serial !== connectSerial || packet.cmd !== "publish") return;
             const receivedAt = receiptTime();
-            let historySegment = segments.get(segment);
-            if (historySegment === undefined) {
-              historySegment = ++lastSegment;
-              segments.set(segment, historySegment);
-            }
+            const previous = segments.get(topic);
+            const historySegment =
+              previous?.transport === segment ? previous.id : ++lastSegment;
             const added = store.add(topic, payload, {
               receivedAt,
               segment: historySegment,
@@ -614,6 +612,7 @@
             plotNow = Date.now();
             scheduleRender();
             if (!added) return;
+            segments.set(topic, { transport: segment, id: historySegment });
             const ancestors = store.ancestorIds(added.nodeId);
             const root = ancestors.at(-1);
             if (root && !autoExpandedTopicRoots.has(root)) {
@@ -630,7 +629,19 @@
             }
           },
           status: (next) => {
-            if (serial === connectSerial) statusChanged(next);
+            if (serial !== connectSerial) return;
+            if (next.state === "connected") {
+              const accepted = route.filters.filter(
+                (filter) => !next.rejected.includes(filter),
+              );
+              for (const topic of segments.keys()) {
+                if (
+                  !accepted.some((filter) => topicMatchesFilter(topic, filter))
+                )
+                  segments.delete(topic);
+              }
+            }
+            statusChanged(next);
           },
         },
         credentials,
@@ -640,14 +651,13 @@
         return;
       }
       session = nextSession;
-      activeUsername = credentials?.username ?? "";
-      activePassword = credentials?.password ?? "";
       restoreView(history.state);
     } catch (caught) {
       if (serial !== connectSerial) return;
-      status = "Connection failed";
-      error = caught instanceof Error ? caught.message : String(caught);
-      editingConnection = true;
+      connectionState = "failed";
+      connectionError =
+        caught instanceof Error ? caught.message : String(caught);
+      editConnection();
     }
   }
 
@@ -665,20 +675,22 @@
       error = caught instanceof Error ? caught.message : String(caught);
       return;
     }
-    authBroker = broker;
     const sameBroker = broker === route.broker;
     const sameTransport =
       Boolean(session) &&
       sameBroker &&
       transportDraftMatches &&
-      status !== "Connection failed";
+      connectionState !== "failed";
     const next: AppRoute = {
       ...route,
       broker,
       filters,
       ...(sameBroker ? {} : { selectedTopic: "", fieldPath: null, plots: [] }),
     };
+    activeUsername = username;
+    activePassword = password;
     editingConnection = false;
+    error = "";
     writeRoute(next, sameBroker ? selectedMessageId : null);
     if (sameTransport) void updateSubscriptions();
     else void startConnection(next, sameBroker);
@@ -686,7 +698,7 @@
 
   async function updateSubscriptions() {
     const current = session;
-    if (!current || status === "Connection failed") {
+    if (!current || connectionState === "failed") {
       if (route.broker) await startConnection(route, true);
       return;
     }
@@ -694,12 +706,14 @@
       await current.setFilters(route.filters);
     } catch (caught) {
       if (session !== current) return;
-      status = "Connection failed";
-      error = caught instanceof Error ? caught.message : String(caught);
+      connectionState = "failed";
+      connectionError =
+        caught instanceof Error ? caught.message : String(caught);
     }
   }
 
   function editConnection() {
+    error = "";
     formBroker = route.broker;
     formFilters = route.filters.join("\n");
     username = activeUsername;
@@ -708,10 +722,7 @@
   }
 
   function cancelConnectionEdit() {
-    formBroker = route.broker;
-    formFilters = route.filters.join("\n");
-    username = activeUsername;
-    password = activePassword;
+    error = "";
     editingConnection = false;
   }
 
@@ -724,14 +735,15 @@
     const current = session;
     if (!current || !canResubscribe) return;
     editingConnection = false;
-    status = "Restoring subscriptions";
+    connectionState = "restoring";
     error = "";
     try {
       await current.resubscribe();
     } catch (caught) {
       if (session !== current) return;
-      status = "Connection error";
-      error = caught instanceof Error ? caught.message : String(caught);
+      connectionState = "failed";
+      connectionError =
+        caught instanceof Error ? caught.message : String(caught);
     }
   }
 
@@ -1055,7 +1067,7 @@
     <div class="header-controls">
       <div class="connection-state">
         <span aria-live="polite" class:problem={statusProblem}>{status}</span>
-        {#if status === "Connection failed" && !editingConnection}
+        {#if connectionState === "failed" && !editingConnection}
           <button
             type="button"
             onclick={() => void startConnection(route, true)}>Reconnect</button
@@ -1101,7 +1113,7 @@
         </label>
         <label
           class="display-option"
-          title="Only changes the visible plot interval and its statistics; history is not deleted"
+          title="Changes the plotted interval without deleting history"
         >
           <span class="meta">Show</span>
           <DurationSelect
@@ -1126,7 +1138,9 @@
         >
       </div>
     </div>
-    {#if error}<strong class="header-error">{error}</strong>{/if}
+    {#if error || connectionError}<strong class="header-error"
+        >{error || connectionError}</strong
+      >{/if}
     {#if connectionNotice}
       <span class="header-notice connection-notice meta" aria-live="polite"
         >{connectionNotice}</span
@@ -1161,14 +1175,16 @@
         <div class="connection-editor-actions">
           <button
             disabled={connectionBusy ||
-              (status === "Connected" && connectionDraftMatches)}
+              (Boolean(session) &&
+                connectionState !== "failed" &&
+                connectionDraftMatches)}
             type="submit">{session ? "Apply" : "Connect"}</button
           >
           {#if session}
             <button
               disabled={connectionBusy || !connectionDraftMatches}
               type="button"
-              title="Open a new connection without clearing history or plots"
+              title="Reconnect using the applied settings"
               onclick={() => {
                 editingConnection = false;
                 void startConnection(route, true);
@@ -1176,13 +1192,9 @@
             >
             <button
               disabled={!canResubscribe}
-              title={!connectionDraftMatches
-                ? "Apply the changed settings first"
-                : status !== "Connected"
-                  ? "Available while connected"
-                  : "Refresh subscriptions and retained messages without disconnecting"}
+              title="Request retained values again and retry rejected filters"
               type="button"
-              onclick={resubscribeFromForm}>Refresh retained</button
+              onclick={resubscribeFromForm}>Refresh subscriptions</button
             >
           {/if}
           {#if route.broker}

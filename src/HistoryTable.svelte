@@ -189,7 +189,7 @@
         {/if}
         {#if gapBefore.size}
           <span
-            >{gapBefore.size.toLocaleString()} observation {gapBefore.size === 1
+            >{gapBefore.size.toLocaleString()} reception {gapBefore.size === 1
               ? "gap"
               : "gaps"}</span
           >
@@ -241,7 +241,7 @@
                 {#if gapBefore.has(message.id)}
                   <tr class="gap-row">
                     <td colspan="3"
-                      >Observation boundary · messages may be missing</td
+                      >Reception interrupted · messages may be missing</td
                     >
                   </tr>
                 {/if}

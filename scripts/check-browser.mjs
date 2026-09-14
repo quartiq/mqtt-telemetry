@@ -20,6 +20,7 @@ const broker = new WebSocketServer({ server });
 let client;
 let subscriptions = 0;
 const requests = [];
+const connections = [];
 let subscriptionReply = "accept";
 let acknowledge;
 broker.on("connection", (socket) => {
@@ -28,6 +29,7 @@ broker.on("connection", (socket) => {
   socket.on("message", (bytes) => parser.parse(bytes));
   parser.on("packet", (message) => {
     if (message.cmd === "connect") {
+      connections.push(message.username ?? "");
       socket.send(packet.generate({ cmd: "connack", returnCode: 0 }));
     } else if (message.cmd === "subscribe") {
       subscriptions += 1;
@@ -307,16 +309,23 @@ try {
     );
     await click(".topic-tree .plot-toggle");
     publish("sample", { value: 3 });
-    await until(
-      "document.querySelector('.message-tree [role=treeitem]')?.innerText.includes('Object') || !document.querySelector('.message-tree .plot-toggle[aria-pressed=true]')",
-    );
+    await until("document.querySelector('.message-tree .caret')");
     assert(
       await evaluate(
         "document.querySelector('.topic-tree .plot-toggle[aria-pressed=true]') !== null",
       ),
       "A changed payload type must still allow unpinning",
     );
+    assert(
+      await evaluate(
+        "document.querySelector('.message-tree .plot-toggle[aria-pressed=true]') !== null",
+      ),
+      "Value must retain the same unpin control after a type change",
+    );
     await click(".topic-tree .plot-toggle[aria-pressed=true]");
+    await until(
+      "!document.querySelector('.message-tree .plot-toggle[aria-pressed=true]')",
+    );
     await click('button[aria-label="Clear history for the selected topic"]');
     publish("sample", 1);
     await until("document.querySelector('.message-tree .plot-toggle')");
@@ -487,10 +496,23 @@ try {
     assert(
       await evaluate("document.querySelectorAll('.plot-panel').length === 9"),
     );
+    await click(".connection-disclosure");
+    await fill(".subscriptions textarea", "bad/#/path");
+    await click(".connection-editor button[type=submit]");
+    await until(
+      "document.querySelector('.header-error')?.innerText.includes('line 1')",
+    );
+    await click(".connection-editor-actions button:last-child");
+    assert(
+      await evaluate(
+        "document.querySelector('.header-error').innerText.includes('alerts/+')",
+      ),
+      "Cancel should discard validation errors but retain broker rejections",
+    );
     subscriptionReply = "incomplete";
     await click(".connection-disclosure");
     await click(
-      '.connection-editor-actions button[title="Refresh subscriptions and retained messages without disconnecting"]',
+      '.connection-editor-actions button[title="Request retained values again and retry rejected filters"]',
     );
     await until(
       "document.querySelector('.connection-state').innerText.includes('Connection failed')",
@@ -512,6 +534,13 @@ try {
       await evaluate(
         "document.querySelectorAll('[aria-label=\"MQTT topics\"] [role=treeitem]').length >= 46",
       ),
+    );
+    publish("sample", { field0: 1000 });
+    await until(
+      "document.querySelector('.message-tree')?.innerText.includes('1000')",
+    );
+    const gapsBeforeEdits = await evaluate(
+      "document.querySelectorAll('.gap-row').length",
     );
     const established = client;
     const previousRequests = requests.length;
@@ -551,6 +580,15 @@ try {
       cmd: "unsubscribe",
       filters: ["extra/#"],
     });
+    publish("sample", { field0: 1001 });
+    await until(
+      "document.querySelector('.message-tree')?.innerText.includes('1001')",
+    );
+    assert.equal(
+      await evaluate("document.querySelectorAll('.gap-row').length"),
+      gapsBeforeEdits,
+      "Unrelated subscription removal breaks continuous history",
+    );
     await evaluate("history.back()");
     await until(
       "document.querySelector('.subscription-label').innerText.includes('extra/#') && document.querySelector('.connection-state').innerText.includes('Connected')",
@@ -560,6 +598,28 @@ try {
       filters: ["extra/#"],
     });
     assert.equal(client, established, "Back navigation reconnected");
+    await click(".connection-disclosure");
+    await fill(".subscriptions textarea", "alerts/+\nextra/#");
+    await click(".connection-editor button[type=submit]");
+    await until(
+      "!document.querySelector('.connection-editor') && document.querySelector('.connection-state').innerText.includes('Connected')",
+    );
+    await click(".connection-disclosure");
+    await fill(".subscriptions textarea", "#\nalerts/+\nextra/#");
+    await click(".connection-editor button[type=submit]");
+    await until(
+      "!document.querySelector('.connection-editor') && document.querySelector('.connection-state').innerText.includes('Connected')",
+    );
+    publish("sample", { field0: 1002 });
+    await until(
+      "document.querySelector('.message-tree')?.innerText.includes('1002')",
+    );
+    assert.equal(
+      await evaluate("document.querySelectorAll('.gap-row').length"),
+      gapsBeforeEdits + 1,
+      "Resuming a removed topic must mark its reception gap",
+    );
+
     await click(".connection-disclosure");
     await fill("input[name=username]", "another-user");
     await click(".connection-editor button[type=submit]");
@@ -574,6 +634,25 @@ try {
       await evaluate(
         "document.querySelectorAll('[aria-label=\"MQTT topics\"] [role=treeitem]').length >= 46",
       ),
+    );
+    await click(".connection-disclosure");
+    await fill("input[name=username]", "unapplied-draft");
+    await evaluate("history.back()");
+    await until("!document.querySelector('.connection-editor')");
+    subscriptionReply = "incomplete";
+    client.terminate();
+    await until(
+      "document.querySelector('.connection-state').innerText.includes('Connection failed')",
+    );
+    subscriptionReply = "accept";
+    await click(".connection-state button");
+    await until(
+      "document.querySelector('.connection-state').innerText.includes('Connected')",
+    );
+    assert.equal(
+      connections.at(-1),
+      "another-user",
+      "Recovery applied an unsubmitted credential draft",
     );
     await click(".connection-disclosure");
     await fill("input[name=broker]", `ws://127.0.0.1:${port}/another-broker`);

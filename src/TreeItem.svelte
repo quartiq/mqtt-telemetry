@@ -112,9 +112,7 @@
     role="treeitem"
     style:padding-left={`${depth}rem`}
     tabindex={context.tabStop === node.id ? 0 : -1}
-    title={internal
-      ? `${node.title ?? node.label}\nDouble-click or Enter to toggle this branch`
-      : (node.title ?? node.label)}
+    title={node.title ?? node.label}
     onclick={select}
     ondblclick={activate}
     onkeydown={keydown}
