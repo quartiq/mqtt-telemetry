@@ -112,9 +112,7 @@
     role="treeitem"
     style:padding-left={`${depth}rem`}
     tabindex={context.tabStop === node.id ? 0 : -1}
-    title={internal
-      ? `${node.title ?? node.label}\nDouble-click or Enter to toggle this branch`
-      : (node.title ?? node.label)}
+    title={node.title ?? node.label}
     onclick={select}
     ondblclick={activate}
     onkeydown={keydown}
@@ -125,9 +123,11 @@
         class="caret"
         tabindex="-1"
         type="button"
+        ondblclick={(event) => event.stopPropagation()}
         onclick={toggle}>{open ? "▾" : "▸"}</button
       >
-    {:else if checkable}
+    {/if}
+    {#if checkable}
       <button
         aria-label={checked ? "Remove plot" : "Add plot"}
         aria-pressed={checked}
@@ -140,9 +140,10 @@
             ? "Remove plot"
             : "Add plot"}
         type="button"
+        ondblclick={(event) => event.stopPropagation()}
         onclick={toggleCheck}>{checked ? "✓" : ""}</button
       >
-    {:else}
+    {:else if !internal}
       <span aria-hidden="true" class="spacer"></span>
     {/if}
     {#if context.showActivity}
@@ -152,10 +153,12 @@
     {/if}
     <span class="label">{node.label}</span>
     {#if node.suffix !== undefined}
-      <span class="suffix">{node.suffix}</span>
+      <span class="suffix">{" "}{node.suffix}</span>
     {/if}
     {#if node.value !== undefined}
-      <span class="separator">=</span><span class="value">{node.value}</span>
+      <span class="separator">{" = "}</span><span class="value"
+        >{node.value}</span
+      >
     {/if}
   </div>
 
@@ -259,13 +262,12 @@
   .separator {
     color: var(--muted);
     flex: none;
-    margin-inline: 0.25em;
+    white-space: pre;
   }
 
   .suffix {
     color: var(--muted);
     flex: none;
-    margin-left: 0.3em;
     white-space: pre;
   }
 
@@ -298,5 +300,23 @@
     background: var(--fg);
     border-color: var(--fg);
     color: var(--bg);
+  }
+
+  @media (pointer: coarse) {
+    [role="treeitem"] {
+      min-height: 44px;
+    }
+
+    .caret,
+    .spacer,
+    .plot-toggle {
+      flex-basis: 44px;
+      width: 44px;
+    }
+
+    .caret,
+    .plot-toggle {
+      min-height: 44px;
+    }
   }
 </style>

@@ -2,17 +2,16 @@
 
 <script lang="ts">
   import TelemetryPlot from "./TelemetryPlot.svelte";
-  import { plotTimeDomain, type PlotPoint } from "./lib/plot";
+  import { plotTimeDomain, type PlotSeries } from "./lib/plot";
   import type { DisplayTimeZone } from "./lib/time";
   import type { PlotRef } from "./lib/routes";
   import { formatDuration } from "./lib/duration";
 
-  export type DashboardPlot = PlotRef & {
-    key: string;
-    label: string;
-    points: PlotPoint[];
-    retainedExcluded: number;
-  };
+  export type DashboardPlot = PlotRef &
+    PlotSeries & {
+      key: string;
+      label: string;
+    };
 
   type Props = {
     plots: DashboardPlot[];
@@ -51,6 +50,7 @@
           topic={plot.topic}
           label={plot.label}
           retainedExcluded={plot.retainedExcluded}
+          unavailable={plot.unavailable}
           xMin={domain.min}
           xMax={domain.max}
           {timeZone}

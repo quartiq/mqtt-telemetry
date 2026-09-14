@@ -9,7 +9,13 @@ import {
 import { plotSeriesPath, type PlotSeries } from "./plot";
 
 export type Payload =
-  | { kind: "json"; value: JsonValue }
+  | {
+      kind: "json";
+      value: JsonValue;
+      source: string;
+      unsafeIntegers?: true;
+      outOfRange?: true;
+    }
   | { kind: "text"; value: string }
   | { kind: "binary"; value: Uint8Array }
   | { kind: "omitted"; value: string };
@@ -33,26 +39,33 @@ type TopicNode = {
   children: string[];
   history: TelemetryMessage[];
   historyRevision: number;
-  latestRetainedId?: number;
   published: boolean;
   messageCount: number;
 };
 
+type TopicNodeView = TreeNodeView & {
+  // Whether the latest buffered payload is a finite JSON number.
+  numeric: boolean;
+  topic: string;
+};
+
 export type TopicSnapshot = {
   roots: string[];
-  nodes: Map<string, TreeNodeView>;
+  nodes: Map<string, TopicNodeView>;
   revision: number;
   topicCount: number;
   bufferedMessages: number;
-  droppedMessages: number;
-  evictedMessages: number;
-  omittedPayloads: number;
+  topicsOmitted: boolean;
+  historyLimited: boolean;
+  collectionStopped: boolean;
 };
 
 export type StoreLimits = {
   maxHistoryBytes: number;
   maxHistoryMessages: number;
   maxTopicNodes: number;
+  maxTopicDepth: number;
+  maxTopicBytes: number;
   maxPayloadBytes: number;
 };
 
@@ -60,6 +73,8 @@ export const DEFAULT_STORE_LIMITS: StoreLimits = {
   maxHistoryBytes: 64 * 1024 * 1024,
   maxHistoryMessages: 100_000,
   maxTopicNodes: 10_000,
+  maxTopicDepth: 64,
+  maxTopicBytes: 8 * 1024 * 1024,
   maxPayloadBytes: 1024 * 1024,
 };
 
@@ -80,34 +95,40 @@ export function parsePayload(bytes: Uint8Array): Payload {
   } catch {
     return { kind: "binary", value: bytes.slice() };
   }
+  let value: JsonValue;
   try {
-    return { kind: "json", value: JSON.parse(text) as JsonValue };
+    value = JSON.parse(text) as JsonValue;
   } catch {
     return { kind: "text", value: text };
   }
-}
-
-function hasUnsafeInteger(payload: Payload): boolean {
-  if (payload.kind !== "json") return false;
-  const pending: JsonValue[] = [payload.value];
+  let unsafeIntegers = false;
+  let outOfRange = false;
+  const pending = [value];
   while (pending.length) {
-    const value = pending.pop() as JsonValue;
-    if (
-      typeof value === "number" &&
-      Number.isInteger(value) &&
-      !Number.isSafeInteger(value)
-    )
-      return true;
-    if (Array.isArray(value)) pending.push(...value);
-    else if (isJsonObject(value)) pending.push(...Object.values(value));
+    const current = pending.pop()!;
+    if (typeof current === "number") {
+      if (!Number.isFinite(current)) outOfRange = true;
+      if (Number.isInteger(current) && !Number.isSafeInteger(current))
+        unsafeIntegers = true;
+    } else if (Array.isArray(current)) {
+      for (const child of current) pending.push(child);
+    } else if (isJsonObject(current)) {
+      for (const child of Object.values(current)) pending.push(child);
+    }
   }
-  return false;
+  return {
+    kind: "json",
+    value,
+    source: text,
+    ...(outOfRange ? { outOfRange: true } : {}),
+    ...(unsafeIntegers ? { unsafeIntegers: true } : {}),
+  };
 }
 
 export function formatPayload(payload: Payload): string {
   switch (payload.kind) {
     case "json":
-      return formatValue(payload.value);
+      return payload.source;
     case "text":
       return payload.value;
     case "binary":
@@ -124,7 +145,12 @@ export function selectedMessageValue(
   path: JsonPath,
 ): string {
   if (message.payload.kind !== "json")
-    return path.length ? "—" : truncate(formatPayload(message.payload));
+    return path.length
+      ? "—"
+      : message.bytes === 0
+        ? "empty payload"
+        : truncate(formatPayload(message.payload));
+  if (!path.length) return truncate(message.payload.source);
   const value = getJsonPath(message.payload.value, path);
   if (value === undefined) return "—";
   return truncate(formatValue(value));
@@ -133,9 +159,9 @@ export function selectedMessageValue(
 export function messagePayloadPreview(message: TelemetryMessage): string {
   switch (message.payload.kind) {
     case "json":
-      return truncate(formatValue(message.payload.value));
+      return truncate(message.payload.source);
     case "text":
-      return truncate(message.payload.value || "empty text");
+      return truncate(message.payload.value || "empty payload");
     case "binary":
       return `binary (${message.bytes.toLocaleString()} bytes)`;
     case "omitted":
@@ -151,7 +177,7 @@ export function messageFrequency(history: readonly TelemetryMessage[]): string {
   if (live.length < 2) return "";
   const seconds =
     (live.at(-1)!.receivedAt - live[0].receivedAt) / (live.length - 1) / 1000;
-  if (!(seconds > 0)) return "";
+  if (seconds < 0) return "";
   if (seconds < 0.001) return "burst (<1 ms apart)";
   if (seconds < 1)
     return `${(1 / seconds).toLocaleString(undefined, { maximumSignificantDigits: 3 })} msg/s`;
@@ -159,9 +185,8 @@ export function messageFrequency(history: readonly TelemetryMessage[]): string {
 }
 
 export function messageSpan(history: readonly TelemetryMessage[]): string {
-  const live = history.filter((message) => !message.retained);
-  if (live.length < 2) return "";
-  const milliseconds = live.at(-1)!.receivedAt - live[0].receivedAt;
+  if (history.length < 2) return "";
+  const milliseconds = history.at(-1)!.receivedAt - history[0].receivedAt;
   if (!(milliseconds > 0)) return "";
   if (milliseconds < 1) return "<1 ms span";
   if (milliseconds < 1000) return `${Math.round(milliseconds)} ms span`;
@@ -184,15 +209,11 @@ const MAX_PLOT_CACHE_ENTRIES = 16;
 export class TelemetryStore {
   private readonly nodes = new Map<string, TopicNode>();
   private readonly topicIds = new Map<string, string>();
-  private readonly views = new Map<string, TreeNodeView>();
+  private readonly views = new Map<string, TopicNodeView>();
   private readonly dirtyViews = new Set<string>();
   private roots: string[] = [];
   // Map insertion order is arrival order; its first remaining value is oldest.
   private readonly messages = new Map<
-    number,
-    { nodeId: string; cost: number; receivedAt: number }
-  >();
-  private readonly expirable = new Map<
     number,
     { nodeId: string; cost: number; receivedAt: number }
   >();
@@ -208,9 +229,12 @@ export class TelemetryStore {
   private sequence = 0;
   private revision = 0;
   private topicCount = 0;
-  private droppedMessages = 0;
-  private evictedMessages = 0;
-  private omittedPayloads = 0;
+  private topicBytes = 0;
+  private topicsOmitted = false;
+  private historyLimited = false;
+  private collectionStopped = false;
+  private latestBytes = 0;
+  private latestCount = 0;
   private readonly limits: StoreLimits;
 
   constructor(
@@ -230,23 +254,19 @@ export class TelemetryStore {
       duplicate?: boolean;
     },
   ): { nodeId: string; message: TelemetryMessage } | undefined {
+    if (this.collectionStopped) return undefined;
     const nodeId = this.topicIds.get(topic) ?? this.addTopic(topic);
     if (!nodeId) {
-      this.droppedMessages += 1;
-      this.revision += 1;
+      if (!this.topicsOmitted) this.revision += 1;
+      this.topicsOmitted = true;
       return undefined;
     }
     const node = this.nodes.get(nodeId) as TopicNode;
-    if (!node.published) {
-      node.published = true;
-      this.topicCount += 1;
-    }
     let parsed: Payload;
     if (payload.byteLength > this.limits.maxPayloadBytes) {
-      this.omittedPayloads += 1;
       parsed = {
         kind: "omitted",
-        value: `[payload omitted: ${payload.byteLength.toLocaleString()} bytes exceeds the ${this.limits.maxPayloadBytes.toLocaleString()} byte limit]`,
+        value: `Payload omitted: ${payload.byteLength.toLocaleString()} bytes (limit ${this.limits.maxPayloadBytes.toLocaleString()} bytes).`,
       };
     } else {
       parsed = parsePayload(payload);
@@ -257,35 +277,45 @@ export class TelemetryStore {
       segment: metadata.segment ?? 0,
       duplicate: metadata.duplicate ?? false,
       bytes: payload.byteLength,
-      unsafeIntegers: hasUnsafeInteger(parsed),
+      unsafeIntegers: parsed.kind === "json" && Boolean(parsed.unsafeIntegers),
       payload: parsed,
     };
     const cost =
       parsed.kind === "omitted"
         ? Math.max(256, parsed.value.length * 2)
         : Math.max(256, payload.byteLength * 4);
-    if (metadata.retained && node.latestRetainedId !== undefined) {
-      const previous = node.history.find(
-        ({ id }) => id === node.latestRetainedId,
-      );
-      if (previous) this.removeMessages(nodeId, [previous], false);
+    const previousLatest = node.history.at(-1);
+    const previousCost = previousLatest
+      ? this.messages.get(previousLatest.id)!.cost
+      : 0;
+    // Do not accept a partial current view when even one value per topic cannot fit.
+    if (
+      this.latestBytes - previousCost + cost > this.limits.maxHistoryBytes ||
+      this.latestCount + (previousLatest ? 0 : 1) >
+        this.limits.maxHistoryMessages
+    ) {
+      this.collectionStopped = true;
+      this.revision += 1;
+      return undefined;
     }
+    if (!node.published) {
+      node.published = true;
+      this.topicCount += 1;
+    }
+    this.latestBytes += cost - previousCost;
+    if (!previousLatest) this.latestCount += 1;
     node.history.push(message);
     node.historyRevision += 1;
-    if (metadata.retained) node.latestRetainedId = message.id;
     const stored = {
       nodeId,
       cost,
       receivedAt: message.receivedAt,
     };
     this.messages.set(message.id, stored);
-    if (!metadata.retained) this.expirable.set(message.id, stored);
     this.historyBytes += cost;
     this.adjustSubtree(nodeId, 1);
-    const liveMessages =
-      node.history.length - (node.latestRetainedId === undefined ? 0 : 1);
-    const excess = liveMessages - this.historyLimit;
-    if (excess > 0) this.dropOldest(nodeId, excess, false, true);
+    const excess = node.history.length - this.historyLimit;
+    if (excess > 0) this.dropOldest(nodeId, excess, true);
     this.enforceGlobalBudget();
     this.revision += 1;
     return { nodeId, message };
@@ -347,20 +377,19 @@ export class TelemetryStore {
   setHistoryLimit(limit: number): void {
     this.historyLimit = limit;
     for (const node of this.nodes.values()) {
-      const liveMessages =
-        node.history.length - (node.latestRetainedId === undefined ? 0 : 1);
-      const excess = liveMessages - limit;
-      if (excess > 0) this.dropOldest(node.id, excess, false, true);
+      const excess = node.history.length - limit;
+      if (excess > 0) this.dropOldest(node.id, excess, true);
     }
     this.revision += 1;
   }
 
   expireBefore(cutoff: number): number {
     let removed = 0;
-    while (true) {
-      const oldest = this.expirable.values().next().value;
-      if (!oldest || oldest.receivedAt >= cutoff) break;
-      this.dropOldest(oldest.nodeId, 1, false, true);
+    for (const [id, oldest] of this.messages) {
+      if (oldest.receivedAt >= cutoff) break;
+      const node = this.nodes.get(oldest.nodeId)!;
+      if (node.history.at(-1)?.id === id) continue;
+      this.dropOldest(oldest.nodeId, 1, true);
       removed += 1;
     }
     if (removed) this.revision += 1;
@@ -370,7 +399,7 @@ export class TelemetryStore {
   clearHistory(id: string): void {
     const node = this.nodes.get(id);
     if (!node?.history.length) return;
-    this.dropOldest(id, node.history.length, false);
+    this.dropOldest(id, node.history.length);
     this.revision += 1;
   }
 
@@ -380,8 +409,7 @@ export class TelemetryStore {
       const node = this.nodes.get(pending.pop() as string);
       if (!node) continue;
       pending.push(...node.children);
-      if (node.history.length)
-        this.dropOldest(node.id, node.history.length, false);
+      if (node.history.length) this.dropOldest(node.id, node.history.length);
     }
     this.revision += 1;
   }
@@ -389,8 +417,7 @@ export class TelemetryStore {
   clearAllHistory(): void {
     if (!this.messages.size) return;
     for (const node of this.nodes.values()) {
-      if (node.history.length)
-        this.dropOldest(node.id, node.history.length, false);
+      if (node.history.length) this.dropOldest(node.id, node.history.length);
     }
     this.revision += 1;
   }
@@ -414,9 +441,9 @@ export class TelemetryStore {
       revision: this.revision,
       topicCount: this.topicCount,
       bufferedMessages: this.messages.size,
-      droppedMessages: this.droppedMessages,
-      evictedMessages: this.evictedMessages,
-      omittedPayloads: this.omittedPayloads,
+      topicsOmitted: this.topicsOmitted,
+      historyLimited: this.historyLimited,
+      collectionStopped: this.collectionStopped,
     };
   }
 
@@ -429,11 +456,20 @@ export class TelemetryStore {
   }
 
   private addTopic(topic: string): string | undefined {
+    if (this.nodes.size >= this.limits.maxTopicNodes) return undefined;
     const parts = topic.split("/");
+    if (parts.length > this.limits.maxTopicDepth) return undefined;
     const ids = parts.map((_, index) => topicId(parts.slice(0, index + 1)));
     const missing = ids.filter((id) => !this.nodes.has(id)).length;
     if (this.nodes.size + missing > this.limits.maxTopicNodes) return undefined;
 
+    // Account for path strings and node overhead before mutating the tree.
+    const cost = ids.reduce(
+      (sum, id) => sum + (this.nodes.has(id) ? 0 : 256 + id.length * 8),
+      0,
+    );
+    if (this.topicBytes + cost > this.limits.maxTopicBytes) return undefined;
+    this.topicBytes += cost;
     let parent: string | undefined;
     for (let index = 0; index < parts.length; index += 1) {
       const id = ids[index];
@@ -465,11 +501,19 @@ export class TelemetryStore {
     return parent;
   }
 
-  private nodeView(id: string): TreeNodeView {
+  private nodeView(id: string): TopicNodeView {
     const node = this.nodes.get(id) as TopicNode;
     const direct = node.history.length;
+    const payload = node.history.at(-1)?.payload;
+    const numeric =
+      payload?.kind === "json" &&
+      typeof payload.value === "number" &&
+      Number.isFinite(payload.value);
     return {
       id,
+      numeric,
+      topic: node.topic,
+      ...(numeric ? { value: String(payload.value) } : {}),
       label: node.label,
       ...(node.parent ? { parent: node.parent } : {}),
       children: node.children,
@@ -495,52 +539,55 @@ export class TelemetryStore {
   private dropOldest(
     nodeId: string,
     count: number,
-    countAsEvicted: boolean,
-    preserveLatestRetained = false,
+    preserveLatest = false,
   ): void {
     const node = this.nodes.get(nodeId) as TopicNode;
     const removed: TelemetryMessage[] = [];
     for (const message of node.history) {
       if (removed.length >= count) break;
-      if (preserveLatestRetained && message.id === node.latestRetainedId)
-        continue;
+      if (preserveLatest && message === node.history.at(-1)) continue;
       removed.push(message);
     }
-    this.removeMessages(nodeId, removed, countAsEvicted);
+    this.removeMessages(nodeId, removed);
   }
 
-  private removeMessages(
-    nodeId: string,
-    removed: TelemetryMessage[],
-    countAsEvicted: boolean,
-  ): void {
+  private removeMessages(nodeId: string, removed: TelemetryMessage[]): void {
     if (!removed.length) return;
     const node = this.nodes.get(nodeId) as TopicNode;
     const ids = new Set(removed.map(({ id }) => id));
+    const latest = node.history.at(-1)!;
     node.history = node.history.filter(({ id }) => !ids.has(id));
+    this.historyCache.delete(nodeId);
+    if (ids.has(latest.id)) {
+      const next = node.history.at(-1);
+      this.latestBytes +=
+        (next ? this.messages.get(next.id)!.cost : 0) -
+        this.messages.get(latest.id)!.cost;
+      if (!next) this.latestCount -= 1;
+    }
     node.historyRevision += 1;
     for (const message of removed) {
       const stored = this.messages.get(message.id);
       if (!stored) continue;
       this.messages.delete(message.id);
-      this.expirable.delete(message.id);
       this.historyBytes -= stored.cost;
-      if (node.latestRetainedId === message.id)
-        node.latestRetainedId = undefined;
     }
     this.adjustSubtree(nodeId, -removed.length);
-    if (countAsEvicted) this.evictedMessages += removed.length;
   }
 
   private enforceGlobalBudget(): void {
-    while (
-      this.messages.size > this.limits.maxHistoryMessages ||
-      this.historyBytes > this.limits.maxHistoryBytes
-    ) {
-      const oldestLive = this.expirable.values().next().value;
-      const oldest = oldestLive ?? this.messages.values().next().value;
-      if (!oldest) break;
-      this.dropOldest(oldest.nodeId, 1, true, Boolean(oldestLive));
+    for (const [id, stored] of this.messages) {
+      if (
+        this.messages.size <= this.limits.maxHistoryMessages &&
+        this.historyBytes <= this.limits.maxHistoryBytes
+      )
+        break;
+      const node = this.nodes.get(stored.nodeId)!;
+      if (node.history.at(-1)?.id === id) continue;
+      this.removeMessages(stored.nodeId, [
+        node.history.find((message) => message.id === id)!,
+      ]);
+      this.historyLimited = true;
     }
   }
 }

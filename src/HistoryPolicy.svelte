@@ -21,12 +21,10 @@
 </script>
 
 <div class="history-policy">
-  <label
-    title="Maximum recent live messages for each topic; the latest retained snapshot is kept separately"
-  >
+  <label>
     Max
     <input
-      aria-label="Live messages kept per topic"
+      aria-label="Messages kept per topic"
       max={MAX_HISTORY_LIMIT}
       min="1"
       onchange={commit}
@@ -37,12 +35,10 @@
     />
     /topic
   </label>
-  <label
-    title="Discard history messages older than this; retained snapshots are kept separately"
-  >
+  <label title="Discard older messages; always keep the latest received value">
     Age
     <DurationSelect
-      ariaLabel="Maximum live history age"
+      ariaLabel="Age limit for older history"
       noneLabel="none"
       value={ageMs}
       onchange={onagechange}

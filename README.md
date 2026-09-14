@@ -1,38 +1,28 @@
 # MQTT Telemetry
 
-A read-only MQTT JSON telemetry browser with bounded history and up to ten live plots.
+A read-only MQTT JSON browser with local history and up to ten live plots, inspired by [mqttui](https://github.com/EdJoPaTo/mqttui).
 
-Many ideas and the fundamental concept are adopted from the fabulous [`mqttui`](https://github.com/EdJoPaTo/mqttui).
+[Open MQTT Telemetry](https://telemetry.quartiq.de/) or [try a public broker](https://telemetry.quartiq.de/?broker=wss://test.mosquitto.org:8081/&sub=$SYS/%23).
 
-## Use
+Connect to your broker, browse topics, and pin numeric values to plot them. Simple numeric payloads can be pinned directly in the topic tree; structured JSON exposes its fields in **Value**. **History** lets you inspect earlier messages while plots continue following live traffic.
 
-Start with a [live public broker example](https://telemetry.quartiq.de/?broker=wss://test.mosquitto.org:8081/&sub=$SYS/%23), which connects and subscribes immediately. If you are adventurous, subscribe to the wildcard topic '#'.
+Use one MQTT subscription filter per line. Start with the topics you need: `#` on a busy broker can overwhelm the viewer. An empty list means no subscriptions. `$SYS` topics need an explicit filter such as `$SYS/#`.
 
-For another broker, open <https://telemetry.quartiq.de/> and enter its MQTT-over-WebSocket URL, with one subscription filter per line. MQTT excludes `$` topics from `#`; subscribe to `$SYS/#` explicitly when needed.
+## What to expect
 
-The address bar is a compact, bookmarkable launch URL: `broker`, repeated `sub`, `history`, and optional `age` and `window` durations using `s`, `m`, `h`, or `d`. `age` discards older local samples; `window` only limits the plotted interval and defaults to `all`. Encode MQTT wildcards as `%23` and `%2B`.
+History lives in the current tab and is lost on reload. Storage is bounded: older messages are pruned, preserving each topic’s latest received value, the topic tree, and your plots. The latest value is kept even beyond the history age limit. If capacity is exhausted, the app explains what stopped and how to recover.
 
-Dashboard fragments and launch queries replace rather than merge; a dashboard fragment wins. On reload, matching same-tab state restores dashboard-only details from the cleaned URL, but never overrides a different query. With neither source, same-tab state then defaults are used. Loading a dashboard file replaces the current configuration.
+Subscription edits and reconnects preserve the workspace. Changing the broker URL starts fresh. Messages missed during a connection interruption cannot be recovered.
 
-Launch parameters are ordinary query data and may appear in browser or hosting logs. For sensitive broker or topic names, load a dashboard file locally instead.
+Plots use browser receipt time. Every arrival enters history, including retained replays and empty payloads; neither erases earlier messages. Retained replays are excluded from plots so refreshing subscriptions does not count old values as new measurements. A pinned field becoming absent or nonnumeric interrupts its line; the plot resumes when numeric values return.
 
-A topic count is the number of history messages on that exact topic; nodes without a count are structural branches. Select a counted topic, then toggle the square beside a numeric field to plot it. Topic search is a case-insensitive substring search unless it contains MQTT `+` or `#` wildcards.
+Saved dashboards and share links contain connection settings and plots, but no credentials or message history. Broker and topic names in launch URLs may appear in browser history and hosting logs; use a local dashboard file for sensitive names.
 
-Receipt times use a consistent 24-hour clock. Choose Local or UTC from the connected header; saved dashboards retain that choice.
+## Local brokers
 
-A dashboard contains every durable option: launch settings, timezone, and plots. Current selection, tree expansion, credentials, and message history are transient and never included. **Save** writes JSON; **Copy dashboard** creates a self-contained link whose embedded JSON is removed after import.
+Browsers need MQTT over WebSockets. The hosted HTTPS app requires `wss://` and a browser-trusted certificate. Your browser may also request permission to access a local broker.
 
-Browsers require `ws://` or `wss://`; ordinary `mqtt://` TCP endpoints do not work. The hosted HTTPS page requires `wss://` with a browser-trusted certificate. Chromium may additionally request Local Network Access permission for a private or loopback broker.
-
-For a LAN broker that only provides `ws://`, save the hosted page as **Webpage, HTML Only**, then open that file. It is a complete offline application and can connect directly to a private `ws://` endpoint.
-
-The muted build link in the header identifies the exact source commit embedded in hosted and downloaded copies. Builds made without source metadata are labeled `local build`.
-
-### Data and reconnect behavior
-
-History exists only in the current tab. It defaults to 1,000 live messages per topic and is also globally bounded; payloads over 1 MiB are omitted. The latest retained snapshot for each topic is kept outside the count and age limits, but not plotted because its original publication time is unknown. History count and maximum age delete local samples; the independent plot window only limits the visible interval and its statistics. Clear actions affect only this tab.
-
-After a connection has been established, transport failures are retried and subscriptions are restored before the application reports connected. These are clean MQTT sessions: live QoS 0 traffic sent while disconnected is not recoverable. History marks reconnect gaps and plots do not join across them. An initial connection failure or a failed resubscription requires explicit user action.
+For a LAN broker offering only `ws://`, save the hosted page as **Webpage, HTML Only** and open the saved file. It is a complete offline application that connects directly to the broker.
 
 ## Develop
 
@@ -45,10 +35,10 @@ npm run dev
 npm run format:check
 npm test
 npm run build
+npm run test:browser
 ```
 
-`npm run build` type-checks and produces the self-contained `dist/index.html` used for both deployment and the local-file workflow.
-`npm run test:browser` optionally opens that artifact from `file://` with a locally installed Chrome or Chromium.
+The build checks Svelte and produces the self-contained `dist/index.html`. Browser checks use a local MQTT fixture and require Chrome or Chromium; set `CHROME_BIN` if needed.
 
 ## License
 

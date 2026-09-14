@@ -43,7 +43,6 @@
     oncheck,
   }: Props = $props();
   const emptyActivity = new Map<string, TreeActivity>();
-  let focusId = $state("");
   const actions: TreeActions = {
     select: (id) => onselect(id),
     toggle: (id, open) => ontoggle(id, open),
@@ -69,15 +68,6 @@
     actions,
   });
 
-  $effect(() => {
-    if (!focusId) return;
-    requestAnimationFrame(() => {
-      document
-        .querySelector<HTMLElement>(`[data-tree-id="${CSS.escape(focusId)}"]`)
-        ?.focus();
-    });
-  });
-
   function move(id: string, direction: TreeDirection) {
     const node = nodes.get(id);
     if (!node) return;
@@ -92,7 +82,11 @@
     const next = moveTreeSelection(id, direction, visible, nodes);
     if (next !== id) {
       onselect(next);
-      focusId = next;
+      requestAnimationFrame(() =>
+        document
+          .querySelector<HTMLElement>(`[data-tree-id="${CSS.escape(next)}"]`)
+          ?.focus(),
+      );
     }
   }
 </script>
@@ -108,6 +102,6 @@
     margin: 0;
     min-width: 100%;
     padding: 0;
-    width: max-content;
+    width: 100%;
   }
 </style>

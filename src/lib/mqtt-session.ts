@@ -9,8 +9,8 @@ import { isWebSocketBroker } from "./routes";
 
 export type SessionStatus =
   | { state: "connected"; rejected: string[] }
-  | { state: "reconnecting" | "offline" }
-  | { state: "error"; error: string };
+  | { state: "reconnecting" | "offline" | "restoring" | "updating" }
+  | { state: "error" | "failed"; error: string };
 
 export type IncomingMessage = {
   topic: string;
@@ -47,11 +47,15 @@ export class MqttSession {
   private closing = false;
   private generation = 0;
   private offline = false;
+  private readonly grants = new Map<string, boolean>();
+  private synchronizing?: Promise<void>;
+  private synchronizingGeneration = 0;
+  private refresh = false;
 
   private constructor(
     private readonly client: MqttClient,
     private readonly callbacks: SessionCallbacks,
-    private readonly filters: string[],
+    private desiredFilters: string[],
   ) {
     client.on("message", (topic, payload, packet) => {
       if (!this.closing)
@@ -60,7 +64,9 @@ export class MqttSession {
     client.on("connect", () => {
       if (this.closing) return;
       this.offline = false;
-      void this.connected(++this.generation);
+      this.generation += 1;
+      this.grants.clear();
+      void this.synchronize("restoring");
     });
     client.on("reconnect", () => {
       if (!this.closing) callbacks.status({ state: "reconnecting" });
@@ -80,50 +86,112 @@ export class MqttSession {
     this.callbacks.status({ state: "offline" });
   }
 
-  private async subscribe(): Promise<string[]> {
-    const grants = await this.client.subscribeAsync(this.filters, {
-      qos: 0,
-    } satisfies IClientSubscribeOptions);
-    return grants.filter(({ qos }) => qos === 128).map(({ topic }) => topic);
+  private subscribe(filters = this.desiredFilters): Promise<string[]> {
+    if (!filters.length) return Promise.resolve([]);
+    // subscribeAsync rejects partial SUBACKs and loses the grant list.
+    return subscriptionAck(
+      new Promise((resolve, reject) => {
+        this.client.subscribe(
+          filters,
+          { qos: 0 } satisfies IClientSubscribeOptions,
+          (error, _grants, packet) => {
+            if (packet?.granted.length === filters.length) {
+              resolve(
+                filters.filter((_, index) => packet.granted[index] === 128),
+              );
+            } else {
+              reject(
+                error ?? new Error("Incomplete subscription acknowledgment"),
+              );
+            }
+          },
+        );
+      }),
+    );
   }
 
-  private async restoreSubscriptions(
-    generation: number,
-  ): Promise<string[] | undefined> {
-    try {
-      const rejected = await this.subscribe();
-      return generation === this.generation &&
-        this.client.connected &&
-        !this.closing
-        ? rejected
-        : undefined;
-    } catch (error) {
-      if (
-        generation === this.generation &&
-        this.client.connected &&
-        !this.closing
-      ) {
-        this.closing = true;
-        this.client.end(true);
+  private current(generation: number): boolean {
+    return (
+      generation === this.generation && this.client.connected && !this.closing
+    );
+  }
+
+  private synchronize(state: "restoring" | "updating"): Promise<void> {
+    if (this.synchronizing && this.synchronizingGeneration === this.generation)
+      return this.synchronizing;
+    const generation = this.generation;
+    this.callbacks.status({ state });
+    const pending = this.reconcile(generation)
+      .catch((error) => {
+        if (!this.current(generation)) return;
+        this.close();
         this.callbacks.status({
-          state: "error",
+          state: "failed",
           error: error instanceof Error ? error.message : String(error),
         });
+      })
+      .finally(() => {
+        if (this.synchronizing === pending) this.synchronizing = undefined;
+      });
+    this.synchronizing = pending;
+    this.synchronizingGeneration = generation;
+    return pending;
+  }
+
+  private async reconcile(generation: number): Promise<void> {
+    while (this.current(generation)) {
+      const additions = this.desiredFilters.filter(
+        (filter) => this.refresh || !this.grants.has(filter),
+      );
+      this.refresh = false;
+      if (additions.length) {
+        const rejected = await this.subscribe(additions);
+        if (!this.current(generation)) return;
+        for (const filter of additions)
+          this.grants.set(filter, !rejected.includes(filter));
       }
-      return undefined;
+      // Finish additions from newer edits before removing overlapping filters.
+      if (this.desiredFilters.some((filter) => !this.grants.has(filter)))
+        continue;
+      // Add first so replacing an overlapping filter does not create a gap.
+      const removals = [...this.grants.keys()].filter(
+        (filter) => !this.desiredFilters.includes(filter),
+      );
+      if (removals.length) {
+        await subscriptionAck(this.client.unsubscribeAsync(removals));
+        if (!this.current(generation)) return;
+        for (const filter of removals) this.grants.delete(filter);
+      }
+      // A newer edit may have arrived while an acknowledgment was pending.
+      if (
+        !this.refresh &&
+        [...this.grants.keys()].every((filter) =>
+          this.desiredFilters.includes(filter),
+        ) &&
+        this.desiredFilters.every((filter) => this.grants.has(filter))
+      ) {
+        this.callbacks.status({
+          state: "connected",
+          rejected: this.desiredFilters.filter(
+            (filter) => !this.grants.get(filter),
+          ),
+        });
+        return;
+      }
     }
   }
 
-  private async connected(generation: number): Promise<void> {
-    const rejected = await this.restoreSubscriptions(generation);
-    if (rejected) this.callbacks.status({ state: "connected", rejected });
+  async setFilters(filters: string[]): Promise<void> {
+    if (this.closing) throw new Error("Reconnect to update subscriptions.");
+    this.desiredFilters = [...filters];
+    if (this.client.connected) await this.synchronize("updating");
   }
 
   async resubscribe(): Promise<void> {
     if (this.closing || !this.client.connected)
       throw new Error("Cannot resubscribe while disconnected.");
-    const rejected = await this.restoreSubscriptions(this.generation);
-    if (rejected) this.callbacks.status({ state: "connected", rejected });
+    this.refresh = true;
+    await this.synchronize("restoring");
   }
 
   static async connect(
@@ -172,6 +240,8 @@ export class MqttSession {
       session.close();
       throw error;
     }
+    for (const filter of filters)
+      session.grants.set(filter, !rejected.includes(filter));
     client.options.reconnectPeriod = 1000;
     callbacks.status({ state: "connected", rejected });
     return session;
@@ -182,5 +252,23 @@ export class MqttSession {
     this.closing = true;
     this.generation += 1;
     this.client.end(true);
+  }
+}
+
+// A responsive transport can still leave SUBACK or UNSUBACK unanswered.
+async function subscriptionAck<T>(operation: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Subscription acknowledgment timed out")),
+          15_000,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }

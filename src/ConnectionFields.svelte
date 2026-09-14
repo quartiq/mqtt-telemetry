@@ -43,7 +43,9 @@
     />
   </label>
   <label class="subscriptions">
-    Subscriptions <span class="hint">one MQTT filter per line</span>
+    Subscriptions <span class="hint"
+      >one MQTT filter per line; empty means no subscriptions</span
+    >
     <textarea bind:value={filters} rows="3"></textarea>
   </label>
 </div>

@@ -1,8 +1,18 @@
 import { getJsonPath, parseJsonPath, type JsonPath } from "./json";
 import type { TelemetryMessage } from "./telemetry";
 
-export type PlotPoint = { x: number; y: number; segment: number };
-export type PlotSeries = { points: PlotPoint[]; retainedExcluded: number };
+export type PlotPoint = {
+  x: number;
+  y: number;
+  segment: number;
+  // Numeric run within a reception segment; survives downsampling across missing values.
+  run?: number;
+};
+export type PlotSeries = {
+  points: PlotPoint[];
+  retainedExcluded: number;
+  unavailable?: "omitted" | "nonnumeric";
+};
 export type PlotTimeDomain = { min: number; max: number };
 export type PlotScale = {
   min: number;
@@ -39,19 +49,43 @@ function plotSeriesAtPath(
 ): PlotSeries {
   const points: PlotPoint[] = [];
   let retainedExcluded = 0;
+  let unavailable: PlotSeries["unavailable"];
+  let interrupted = false;
+  let run = 0;
   for (const message of history) {
-    if (message.payload.kind !== "json") continue;
-    const value = getJsonPath(message.payload.value, path);
-    if (typeof value !== "number" || !Number.isFinite(value)) continue;
-    if (message.retained) retainedExcluded += 1;
-    else
-      points.push({
-        x: message.receivedAt,
-        y: value,
-        segment: message.segment,
-      });
+    const value =
+      message.payload.kind === "json"
+        ? getJsonPath(message.payload.value, path)
+        : undefined;
+    unavailable =
+      message.payload.kind === "omitted"
+        ? "omitted"
+        : typeof value !== "number" || !Number.isFinite(value)
+          ? "nonnumeric"
+          : undefined;
+    // Retained snapshots describe the inspected value, not the live timeline.
+    if (message.retained) {
+      if (!unavailable) retainedExcluded += 1;
+      continue;
+    }
+    if (unavailable) {
+      interrupted = true;
+      continue;
+    }
+    if (interrupted) run += 1;
+    points.push({
+      x: message.receivedAt,
+      y: value as number,
+      segment: message.segment,
+      ...(run ? { run } : {}),
+    });
+    interrupted = false;
   }
-  return { points, retainedExcluded };
+  return {
+    points,
+    retainedExcluded,
+    ...(unavailable ? { unavailable } : {}),
+  };
 }
 
 function emptyPlotSeries(): PlotSeries {
@@ -176,7 +210,10 @@ export function formatPlotTick(value: number, step: number): string {
     .replace(/^([−]?)0\./, "$1.");
 }
 
-export function nicePlotScale(dataMin: number, dataMax: number): PlotScale {
+export function nicePlotScale(
+  dataMin: number,
+  dataMax: number,
+): PlotScale | undefined {
   if (dataMin === dataMax) {
     const padding = Math.abs(dataMin) * 0.05 || 1;
     dataMin -= padding;
@@ -194,6 +231,12 @@ export function nicePlotScale(dataMin: number, dataMax: number): PlotScale {
     last = first + 2 * step;
   }
 
+  if (
+    ![first, last, step, last - first].every(Number.isFinite) ||
+    step <= 0 ||
+    last <= first
+  )
+    return undefined;
   return { min: first, max: last, step, ticks: [first, first + step, last] };
 }
 
@@ -240,15 +283,16 @@ export function downsamplePlotPoints(
     const start = 1 + Math.floor((bucket * interior) / buckets);
     const end = 1 + Math.floor(((bucket + 1) * interior) / buckets);
     if (start >= end) continue;
-    let low = points[start];
-    let high = low;
+    let low = start;
+    let high = start;
     for (let index = start + 1; index < end; index += 1) {
       const point = points[index];
-      if (point.y < low.y) low = point;
-      if (point.y > high.y) high = point;
+      if (point.y < points[low].y) low = index;
+      if (point.y > points[high].y) high = index;
     }
-    if (low.x <= high.x) sampled.push(low, ...(high === low ? [] : [high]));
-    else sampled.push(high, low);
+    if (low <= high)
+      sampled.push(points[low], ...(high === low ? [] : [points[high]]));
+    else sampled.push(points[high], points[low]);
   }
   sampled.push(points.at(-1) as PlotPoint);
   return sampled;

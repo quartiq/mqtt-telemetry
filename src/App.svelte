@@ -15,12 +15,12 @@
     jsonPath,
     jsonTree,
     parseJsonPath,
-    resolveJsonPath,
     telemetryPageTitle,
   } from "./lib/json";
   import { TelemetryStore } from "./lib/telemetry";
   import type { DisplayTimeZone } from "./lib/time";
   import { MqttSession, type SessionStatus } from "./lib/mqtt-session";
+  import { topicMatchesFilter } from "./lib/mqtt-filter";
   import { randomId } from "./lib/random-id";
   import {
     dashboardJson,
@@ -32,13 +32,13 @@
     type Dashboard,
   } from "./lib/dashboard";
   import {
-    connectionKey,
     defaultRoute,
     isWebSocketBroker,
     launchUrl,
     MAX_PLOTS,
     readLaunchRoute,
     uniqueFilters,
+    subscriptionLines,
     type AppRoute,
     type PlotRef,
   } from "./lib/routes";
@@ -53,6 +53,10 @@
     treeAncestorIds,
     type TreeActivity,
   } from "./lib/tree";
+
+  // Keep receipt times, plot windows, and expiration on the same monotonic clock.
+  const clockOrigin = Date.now() - performance.now();
+  const telemetryNow = () => clockOrigin + performance.now();
 
   const inlineDashboard = readInlineDashboard(location.hash);
   const launchRoute = readLaunchRoute(location);
@@ -76,7 +80,6 @@
   let formFilters = $state(initialRoute.filters.join("\n"));
   let username = $state("");
   let password = $state("");
-  let authBroker = initialRoute.broker;
 
   let session = $state<MqttSession | undefined>();
   let store = $state.raw(new TelemetryStore(initialRoute.historyLimit));
@@ -92,19 +95,37 @@
   let historyExpanded = $state(false);
   let jsonExpanded = $state(new Set<string>(["$"]));
   const jsonExpandedByTopic = new Map<string, Set<string>>();
-  let status = $state(initialRoute.broker ? "Connecting" : "Not connected");
+  let connectionState = $state<"idle" | "connecting" | SessionStatus["state"]>(
+    initialRoute.broker ? "connecting" : "idle",
+  );
+  let status = $derived(
+    {
+      idle: "Not connected",
+      connecting: "Connecting",
+      connected: "Connected",
+      offline: "Reconnecting",
+      reconnecting: "Reconnecting",
+      restoring: "Restoring subscriptions",
+      updating: "Updating subscriptions",
+      failed: "Connection failed",
+      error: "Connection error",
+    }[connectionState],
+  );
   let error = $state(startup.error);
+  let connectionError = $state("");
   let dashboardNotice = $state("");
+  let connectionNotice = $state("");
+  let connectionInterrupted = false;
   let editingConnection = $state(!initialRoute.broker);
   let dashboardFileInput: HTMLInputElement;
   let connectSerial = 0;
-  let activeUsername = "";
-  let activePassword = "";
+  let activeUsername = $state("");
+  let activePassword = $state("");
   let viewToken = randomId();
-  let lastReceivedAt = 0;
   let lastSegment = 0;
+  const segments = new Map<string, { transport: number; id: number }>();
   let renderFrame = 0;
-  let plotNow = $state(Date.now());
+  let plotNow = $state(telemetryNow());
 
   if (location.search || location.hash || !storedRoute)
     history.replaceState(
@@ -131,22 +152,31 @@
       : topicExpanded,
   );
   let selectedTopic = $derived(store.topic(selectedTopicId) ?? "");
-  let connectionDraftMatches = $derived(
-    connectionKey({
-      ...route,
-      broker: formBroker.trim(),
-      filters: uniqueFilters(formFilters.split(/\r?\n/)),
-    }) === connectionKey(route) &&
+  let transportDraftMatches = $derived(
+    formBroker.trim() === route.broker &&
       username === activeUsername &&
       password === activePassword,
   );
+  let connectionDraftMatches = $derived(
+    transportDraftMatches &&
+      JSON.stringify(uniqueFilters(formFilters.split(/\r?\n/))) ===
+        JSON.stringify(route.filters),
+  );
+  let connectionBusy = $derived(
+    connectionState === "connecting" ||
+      connectionState === "restoring" ||
+      connectionState === "updating",
+  );
   let canResubscribe = $derived(
-    Boolean(session) && status === "Connected" && connectionDraftMatches,
+    Boolean(session) &&
+      connectionState === "connected" &&
+      route.filters.length > 0 &&
+      connectionDraftMatches,
   );
   let statusProblem = $derived(
-    status === "Disconnected" ||
-      status === "Connection error" ||
-      status === "Connection failed",
+    connectionState === "offline" ||
+      connectionState === "error" ||
+      connectionState === "failed",
   );
   let selectedSubtreeCount = $derived.by(() => {
     revision;
@@ -176,26 +206,10 @@
         : (fieldByTopic.get(selectedTopic) ?? null)
       : null,
   );
-  let activeField = $derived.by(() => {
-    if (selectedFieldPath === null) return undefined;
-    for (let index = currentHistory.length - 1; index >= 0; index -= 1) {
-      const payload = currentHistory[index].payload;
-      if (payload.kind !== "json") continue;
-      const resolved = resolveJsonPath(payload.value, selectedFieldPath);
-      if (resolved) return resolved;
-    }
-    return undefined;
-  });
+  let activeField = $derived(
+    selectedFieldPath === null ? undefined : parseJsonPath(selectedFieldPath),
+  );
   let selectedJsonId = $derived(selectedFieldPath ?? "");
-  let checkableJson = $derived.by(() => {
-    const ids = new Set<string>();
-    if (currentMessage?.payload.kind !== "json" || !jsonSnapshot) return ids;
-    for (const [id, path] of jsonSnapshot.paths) {
-      const value = getJsonPath(currentMessage.payload.value, path);
-      if (typeof value === "number" && Number.isFinite(value)) ids.add(id);
-    }
-    return ids;
-  });
   let checkedJson = $derived(
     new Set(
       route.plots
@@ -203,7 +217,35 @@
         .map((plot) => plot.path),
     ),
   );
+  let checkableJson = $derived.by(() => {
+    const ids = new Set(checkedJson);
+    if (currentMessage?.payload.kind !== "json" || !jsonSnapshot) return ids;
+    for (const [id, path] of jsonSnapshot.paths) {
+      const value = getJsonPath(currentMessage.payload.value, path);
+      if (typeof value === "number" && Number.isFinite(value)) ids.add(id);
+    }
+    return ids;
+  });
   let plotLimitReached = $derived(route.plots.length >= MAX_PLOTS);
+  let checkedTopics = $derived.by(() => {
+    revision;
+    return new Set(
+      route.plots
+        .filter((plot) => plot.path === "$")
+        .flatMap((plot) => {
+          const id = store.nodeId(plot.topic);
+          return id === undefined ? [] : [id];
+        }),
+    );
+  });
+  let checkableTopics = $derived(
+    new Set([
+      ...checkedTopics,
+      ...[...topicSnapshot.nodes]
+        .filter(([, node]) => node.numeric)
+        .map(([id]) => id),
+    ]),
+  );
   let selectedValuePlotCount = $derived.by(() => {
     if (!jsonSnapshot?.nodes.get(selectedJsonId)?.children.length) return 0;
     const path = selectedJsonId;
@@ -235,19 +277,13 @@
         : selectedFieldPath,
   );
   let topicWarning = $derived(
-    [
-      topicSnapshot.droppedMessages
-        ? `${topicSnapshot.droppedMessages.toLocaleString()} dropped`
-        : "",
-      topicSnapshot.evictedMessages
-        ? `${topicSnapshot.evictedMessages.toLocaleString()} globally evicted`
-        : "",
-      topicSnapshot.omittedPayloads
-        ? `${topicSnapshot.omittedPayloads.toLocaleString()} payloads omitted`
-        : "",
-    ]
-      .filter(Boolean)
-      .join(" · "),
+    topicSnapshot.collectionStopped
+      ? ""
+      : topicSnapshot.topicsOmitted
+        ? "Some topics could not fit in the topic tree. Narrow subscriptions, then reset collected data."
+        : topicSnapshot.historyLimited
+          ? "Older history trimmed; latest values kept."
+          : "",
   );
 
   $effect(() => {
@@ -281,7 +317,7 @@
     if (!clockNeeded) return;
     let timer = 0;
     const tick = () => {
-      const now = Date.now();
+      const now = telemetryNow();
       plotNow = now;
       if (
         route.historyAgeMs !== null &&
@@ -298,14 +334,10 @@
     const popstate = (event: PopStateEvent) => {
       editingConnection = false;
       const next = routeFromViewState(event.state) ?? defaultRoute();
-      if (connectionKey(next) !== connectionKey(route)) {
+      if (next.broker !== route.broker) {
+        activeUsername = "";
+        activePassword = "";
         route = next;
-        formFilters = next.filters.join("\n");
-        if (next.broker !== authBroker) {
-          username = "";
-          password = "";
-          authBroker = next.broker;
-        }
         if (next.broker) {
           formBroker = next.broker;
           void startConnection(next);
@@ -315,7 +347,11 @@
       } else {
         const historyLimitChanged = next.historyLimit !== route.historyLimit;
         const historyAgeChanged = next.historyAgeMs !== route.historyAgeMs;
+        const filtersChanged =
+          JSON.stringify(next.filters) !== JSON.stringify(route.filters);
         route = next;
+        formFilters = next.filters.join("\n");
+        if (filtersChanged) void updateSubscriptions();
         if (historyLimitChanged) {
           store.setHistoryLimit(next.historyLimit);
           revision += 1;
@@ -323,7 +359,7 @@
         if (
           historyAgeChanged &&
           next.historyAgeMs !== null &&
-          store.expireBefore(Date.now() - next.historyAgeMs)
+          store.expireBefore(telemetryNow() - next.historyAgeMs)
         )
           revision += 1;
         restoreView(event.state);
@@ -335,7 +371,7 @@
       ? isWebSocketBroker(route.broker)
       : undefined;
     if (brokerError) {
-      status = "Connection error";
+      connectionState = "error";
       error = brokerError;
       editingConnection = true;
     } else if (route.broker) void startConnection(route);
@@ -388,26 +424,24 @@
   }
 
   function applyDashboard(dashboard: Dashboard) {
-    editingConnection = false;
     const next = routeFromDashboard(dashboard);
-    const sameConnection =
-      Boolean(session) && connectionKey(next) === connectionKey(route);
-    if (next.broker !== authBroker) {
-      username = "";
-      password = "";
-      authBroker = next.broker;
+    const brokerError = isWebSocketBroker(next.broker);
+    if (brokerError) throw new Error(brokerError);
+    editingConnection = false;
+    error = "";
+    const sameBroker = next.broker === route.broker;
+    if (!sameBroker) {
+      activeUsername = "";
+      activePassword = "";
     }
     formBroker = next.broker;
     formFilters = next.filters.join("\n");
     writeRoute(next, null);
-    const brokerError = isWebSocketBroker(next.broker);
-    if (brokerError) {
-      stopConnection();
-      error = brokerError;
-    } else if (sameConnection) {
+    if (sameBroker) {
+      void updateSubscriptions();
       store.setHistoryLimit(next.historyLimit);
       if (next.historyAgeMs !== null)
-        store.expireBefore(Date.now() - next.historyAgeMs);
+        store.expireBefore(telemetryNow() - next.historyAgeMs);
       revision += 1;
       restoreView(history.state);
     } else {
@@ -474,46 +508,49 @@
     jsonExpanded = new Set(["$"]);
     jsonExpandedByTopic.clear();
     viewToken = randomId();
-    lastReceivedAt = 0;
     lastSegment = 0;
-    plotNow = Date.now();
+    segments.clear();
+    plotNow = telemetryNow();
   }
 
   function stopConnection() {
     connectSerial += 1;
     session?.close();
     session = undefined;
-    status = "Not connected";
+    connectionState = "idle";
+    connectionError = "";
     error = "";
+    connectionNotice = "";
+    connectionInterrupted = false;
     editingConnection = true;
     resetData(route.historyLimit);
   }
 
   function statusChanged(next: SessionStatus) {
+    connectionState = next.state;
     switch (next.state) {
       case "connected":
-        status = "Connected";
-        error = next.rejected.length
+        connectionError = next.rejected.length
           ? `Subscription rejected: ${next.rejected.join(", ")}`
           : "";
-        break;
-      case "reconnecting":
-        status = "Reconnecting";
+        connectionNotice = connectionInterrupted
+          ? `${next.rejected.length ? "Reconnected" : "Subscriptions restored"} · messages during the interruption may be missing.`
+          : "";
+        connectionInterrupted = false;
         break;
       case "offline":
-        status = "Disconnected";
+        connectionInterrupted = true;
+        connectionNotice =
+          "Connection interrupted · messages may be missed while reconnecting.";
+        break;
+      case "failed":
+        connectionNotice = "";
+        connectionError = next.error;
         break;
       case "error":
-        status = "Connection error";
-        error = next.error;
+        connectionError = next.error;
         break;
     }
-  }
-
-  function receiptTime(): number {
-    const now = Date.now();
-    lastReceivedAt = Math.max(now, lastReceivedAt + 0.001);
-    return lastReceivedAt;
   }
 
   function scheduleRender() {
@@ -526,16 +563,18 @@
 
   async function startConnection(nextRoute: AppRoute, preserveData = false) {
     const serial = ++connectSerial;
-    const credentials =
-      username || password ? { username, password } : undefined;
+    const credentials = { username: activeUsername, password: activePassword };
     session?.close();
     if (!preserveData) {
       session = undefined;
       resetData(nextRoute.historyLimit);
     }
-    const segments = new Map<number, number>();
-    status = "Connecting";
+    segments.clear();
+    connectionState = "connecting";
+    connectionError = "";
     error = "";
+    connectionInterrupted = preserveData;
+    connectionNotice = "";
     try {
       const nextSession = await MqttSession.connect(
         nextRoute.broker,
@@ -543,12 +582,10 @@
         {
           message: ({ topic, payload, packet, segment }) => {
             if (serial !== connectSerial || packet.cmd !== "publish") return;
-            const receivedAt = receiptTime();
-            let historySegment = segments.get(segment);
-            if (historySegment === undefined) {
-              historySegment = ++lastSegment;
-              segments.set(segment, historySegment);
-            }
+            const receivedAt = telemetryNow();
+            const previous = segments.get(topic);
+            const historySegment =
+              previous?.transport === segment ? previous.id : ++lastSegment;
             const added = store.add(topic, payload, {
               receivedAt,
               segment: historySegment,
@@ -557,9 +594,10 @@
             });
             if (route.historyAgeMs !== null)
               store.expireBefore(receivedAt - route.historyAgeMs);
-            plotNow = Date.now();
+            plotNow = telemetryNow();
             scheduleRender();
             if (!added) return;
+            segments.set(topic, { transport: segment, id: historySegment });
             const ancestors = store.ancestorIds(added.nodeId);
             const root = ancestors.at(-1);
             if (root && !autoExpandedTopicRoots.has(root)) {
@@ -576,7 +614,19 @@
             }
           },
           status: (next) => {
-            if (serial === connectSerial) statusChanged(next);
+            if (serial !== connectSerial) return;
+            if (next.state === "connected") {
+              const accepted = route.filters.filter(
+                (filter) => !next.rejected.includes(filter),
+              );
+              for (const topic of segments.keys()) {
+                if (
+                  !accepted.some((filter) => topicMatchesFilter(topic, filter))
+                )
+                  segments.delete(topic);
+              }
+            }
+            statusChanged(next);
           },
         },
         credentials,
@@ -586,14 +636,13 @@
         return;
       }
       session = nextSession;
-      activeUsername = credentials?.username ?? "";
-      activePassword = credentials?.password ?? "";
       restoreView(history.state);
     } catch (caught) {
       if (serial !== connectSerial) return;
-      status = "Connection failed";
-      error = caught instanceof Error ? caught.message : String(caught);
-      editingConnection = true;
+      connectionState = "failed";
+      connectionError =
+        caught instanceof Error ? caught.message : String(caught);
+      editConnection();
     }
   }
 
@@ -604,35 +653,52 @@
       error = brokerError;
       return;
     }
-    const filters = uniqueFilters(formFilters.split(/\r?\n/));
-    authBroker = broker;
-    const next: AppRoute = {
-      broker,
-      filters,
-      historyLimit: route.historyLimit,
-      historyAgeMs: route.historyAgeMs,
-      plotWindowMs: route.plotWindowMs,
-      timeZone: route.timeZone,
-      selectedTopic: "",
-      fieldPath: null,
-      plots: [],
-    };
-    if (
-      session &&
-      connectionKey(next) === connectionKey(route) &&
-      username === activeUsername &&
-      password === activePassword
-    ) {
-      editingConnection = false;
-      void startConnection(route, true);
+    let filters: string[];
+    try {
+      filters = subscriptionLines(formFilters);
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : String(caught);
       return;
     }
+    const sameBroker = broker === route.broker;
+    const sameTransport =
+      Boolean(session) &&
+      sameBroker &&
+      transportDraftMatches &&
+      connectionState !== "failed";
+    const next: AppRoute = {
+      ...route,
+      broker,
+      filters,
+      ...(sameBroker ? {} : { selectedTopic: "", fieldPath: null, plots: [] }),
+    };
+    activeUsername = username;
+    activePassword = password;
     editingConnection = false;
-    writeRoute(next, null);
-    void startConnection(next);
+    error = "";
+    writeRoute(next, sameBroker ? selectedMessageId : null);
+    if (sameTransport) void updateSubscriptions();
+    else void startConnection(next, sameBroker);
+  }
+
+  async function updateSubscriptions() {
+    const current = session;
+    if (!current || connectionState === "failed") {
+      if (route.broker) await startConnection(route, true);
+      return;
+    }
+    try {
+      await current.setFilters(route.filters);
+    } catch (caught) {
+      if (session !== current) return;
+      connectionState = "failed";
+      connectionError =
+        caught instanceof Error ? caught.message : String(caught);
+    }
   }
 
   function editConnection() {
+    error = "";
     formBroker = route.broker;
     formFilters = route.filters.join("\n");
     username = activeUsername;
@@ -641,10 +707,7 @@
   }
 
   function cancelConnectionEdit() {
-    formBroker = route.broker;
-    formFilters = route.filters.join("\n");
-    username = activeUsername;
-    password = activePassword;
+    error = "";
     editingConnection = false;
   }
 
@@ -657,14 +720,15 @@
     const current = session;
     if (!current || !canResubscribe) return;
     editingConnection = false;
-    status = "Resubscribing";
+    connectionState = "restoring";
     error = "";
     try {
       await current.resubscribe();
     } catch (caught) {
       if (session !== current) return;
-      status = "Connection error";
-      error = caught instanceof Error ? caught.message : String(caught);
+      connectionState = "failed";
+      connectionError =
+        caught instanceof Error ? caught.message : String(caught);
     }
   }
 
@@ -804,7 +868,7 @@
 
   function changeHistoryAge(ageMs: number | null): boolean {
     if (ageMs === route.historyAgeMs) return true;
-    plotNow = Date.now();
+    plotNow = telemetryNow();
     if (ageMs !== null && store.expireBefore(plotNow - ageMs)) revision += 1;
     writeRoute({ ...route, historyAgeMs: ageMs }, selectedMessageId);
     return true;
@@ -812,7 +876,7 @@
 
   function changePlotWindow(windowMs: number | null): boolean {
     if (windowMs === route.plotWindowMs) return true;
-    plotNow = Date.now();
+    plotNow = telemetryNow();
     writeRoute({ ...route, plotWindowMs: windowMs }, selectedMessageId);
     return true;
   }
@@ -832,10 +896,7 @@
     );
   }
 
-  function togglePlot(id: string) {
-    const path = jsonSnapshot?.paths.get(id);
-    if (!path || !selectedTopic) return;
-    const plot = { topic: selectedTopic, path: jsonPath(path) };
+  function togglePlot(plot: PlotRef) {
     const key = plotKey(plot);
     const pinned = route.plots.some((current) => plotKey(current) === key);
     if (!pinned && route.plots.length >= MAX_PLOTS) return;
@@ -900,6 +961,11 @@
     replaceRoute(route, null);
   }
 
+  function resetCollectedData() {
+    resetData(route.historyLimit);
+    replaceRoute({ ...route, selectedTopic: "", fieldPath: null }, null);
+  }
+
   function clearAllHistory() {
     if (!topicSnapshot.bufferedMessages) return;
     store.clearAllHistory();
@@ -962,15 +1028,13 @@
       <h1>
         <button
           aria-label={route.broker
-            ? `Connection settings for ${route.broker}; subscriptions ${route.filters.join(", ")}`
+            ? `Connection settings for ${route.broker}; subscriptions ${route.filters.join(", ") || "No subscriptions"}`
             : "Open connection settings"}
           aria-expanded={editingConnection}
           class="connection-disclosure"
-          disabled={status === "Connecting" ||
-            status === "Resubscribing" ||
-            (editingConnection && !route.broker)}
+          disabled={connectionBusy || (editingConnection && !route.broker)}
           title={route.broker
-            ? `Connection settings: ${route.broker}\nSubscriptions: ${route.filters.join(", ")}`
+            ? `Connection settings: ${route.broker}\nSubscriptions: ${route.filters.join(", ") || "No subscriptions"}`
             : "Connect to an MQTT broker"}
           type="button"
           onclick={editingConnection && route.broker
@@ -984,7 +1048,9 @@
             <span class="broker-label">{route.broker || "Connect to MQTT"}</span
             >
             {#if route.broker}
-              <span class="subscription-label">{route.filters.join(", ")}</span>
+              <span class="subscription-label"
+                >{route.filters.join(", ") || "No subscriptions"}</span
+              >
             {/if}
           </span>
         </button>
@@ -993,6 +1059,12 @@
     <div class="header-controls">
       <div class="connection-state">
         <span aria-live="polite" class:problem={statusProblem}>{status}</span>
+        {#if connectionState === "failed" && !editingConnection}
+          <button
+            type="button"
+            onclick={() => void startConnection(route, true)}>Reconnect</button
+          >
+        {/if}
         <span aria-hidden="true" class="build-separator">·</span>
         {#if buildUrl}
           <a
@@ -1033,7 +1105,7 @@
         </label>
         <label
           class="display-option"
-          title="Only changes the visible plot interval and its statistics; history is not deleted"
+          title="Changes the plotted interval without deleting history"
         >
           <span class="meta">Show</span>
           <DurationSelect
@@ -1058,7 +1130,20 @@
         >
       </div>
     </div>
-    {#if error}<strong class="header-error">{error}</strong>{/if}
+    {#if topicSnapshot.collectionStopped}
+      <span class="header-notice problem" role="status">
+        Collection stopped: latest values exceed storage capacity. Narrow
+        subscriptions, then reset collected data.
+      </span>
+    {/if}
+    {#if error || connectionError}<strong class="header-error"
+        >{error || connectionError}</strong
+      >{/if}
+    {#if connectionNotice}
+      <span class="header-notice connection-notice meta" aria-live="polite"
+        >{connectionNotice}</span
+      >
+    {/if}
     {#if dashboardNotice}
       <span class="header-notice meta" aria-live="polite"
         >{dashboardNotice}</span
@@ -1076,21 +1161,38 @@
           bind:username
           bind:password
         />
+        {#if route.broker && formBroker.trim() !== route.broker}
+          <p class="meta">
+            Changing broker clears this tab's history and plots.
+          </p>
+        {:else if route.broker && !transportDraftMatches}
+          <p class="meta">
+            Changing credentials reconnects and keeps history and plots.
+          </p>
+        {/if}
         <div class="connection-editor-actions">
           <button
-            title="Apply these settings and open a new MQTT connection"
-            type="submit">{session ? "Reconnect" : "Connect"}</button
+            disabled={connectionBusy ||
+              (Boolean(session) &&
+                connectionState !== "failed" &&
+                connectionDraftMatches)}
+            type="submit">{session ? "Apply" : "Connect"}</button
           >
           {#if session}
             <button
-              disabled={!canResubscribe}
-              title={!connectionDraftMatches
-                ? "Reconnect to apply the changed settings first"
-                : status !== "Connected"
-                  ? "Available while connected"
-                  : "Refresh subscriptions and retained messages without disconnecting"}
+              disabled={connectionBusy || !connectionDraftMatches}
               type="button"
-              onclick={resubscribeFromForm}>Resubscribe</button
+              title="Reconnect using the applied settings"
+              onclick={() => {
+                editingConnection = false;
+                void startConnection(route, true);
+              }}>Reconnect</button
+            >
+            <button
+              disabled={!canResubscribe}
+              title="Request retained values again and retry rejected filters"
+              type="button"
+              onclick={resubscribeFromForm}>Refresh subscriptions</button
             >
           {/if}
           {#if route.broker}
@@ -1113,6 +1215,15 @@
             >({topicSnapshot.topicCount.toLocaleString()})</span
           >
         </h2>
+        <button
+          type="button"
+          onclick={resetCollectedData}
+          disabled={!topicSnapshot.nodes.size &&
+            !topicSnapshot.topicsOmitted &&
+            !topicSnapshot.collectionStopped}
+          title="Clear collected messages and topics; keep subscriptions and plots"
+          >Reset collected data</button
+        >
         <div class="topic-search">
           <input
             aria-label="Search topic paths"
@@ -1137,7 +1248,11 @@
           {/if}
         </div>
         {#if topicWarning}
-          <span class="meta problem" title="Browser safety limits applied">
+          <span
+            class="meta"
+            class:problem={topicSnapshot.topicsOmitted}
+            role="status"
+          >
             {topicWarning}
           </span>
         {/if}
@@ -1152,6 +1267,13 @@
             expanded={visibleTopicExpanded}
             activity={topicActivity}
             label="MQTT topics"
+            checkable={checkableTopics}
+            checked={checkedTopics}
+            checkDisabled={plotLimitReached}
+            oncheck={(id) => {
+              const topic = store.topic(id);
+              if (topic !== undefined) togglePlot({ topic, path: "$" });
+            }}
             onselect={selectTopic}
             ontoggle={toggleTopic}
           />
@@ -1160,7 +1282,9 @@
         {:else}
           <p class="empty">
             {route.broker
-              ? "Waiting for subscribed messages…"
+              ? route.filters.length
+                ? "Waiting for subscribed messages…"
+                : "No subscriptions. Edit connection settings to add topics."
               : "Connect to a broker to browse topics."}
           </p>
         {/if}
@@ -1185,7 +1309,7 @@
       timeZone={route.timeZone}
       onselect={selectJson}
       ontoggle={toggleJson}
-      oncheck={togglePlot}
+      oncheck={(path) => togglePlot({ topic: selectedTopic, path })}
       onremoveplots={removeSelectedValuePlots}
       onremoveallplots={() => removePlots(() => true)}
     />

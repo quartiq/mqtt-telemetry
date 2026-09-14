@@ -296,6 +296,7 @@ pre {
 
 .connection-editor-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-tight);
 }
 
@@ -393,7 +394,7 @@ pre {
     margin-top: var(--space);
   }
 
-  .topics {
+  .browsers > .panel {
     max-height: 45svh;
   }
 

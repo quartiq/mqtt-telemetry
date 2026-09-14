@@ -189,7 +189,7 @@
         {/if}
         {#if gapBefore.size}
           <span
-            >{gapBefore.size.toLocaleString()} reconnect {gapBefore.size === 1
+            >{gapBefore.size.toLocaleString()} reception {gapBefore.size === 1
               ? "gap"
               : "gaps"}</span
           >
@@ -241,7 +241,7 @@
                 {#if gapBefore.has(message.id)}
                   <tr class="gap-row">
                     <td colspan="3"
-                      >Reconnected · messages during gap unavailable</td
+                      >Reception interrupted · messages may be missing</td
                     >
                   </tr>
                 {/if}
@@ -301,6 +301,7 @@
   .clear-controls {
     align-items: baseline;
     display: flex;
+    flex-wrap: wrap;
     white-space: nowrap;
   }
 
@@ -393,28 +394,6 @@
     color: var(--muted);
     font-style: italic;
     text-align: center;
-  }
-
-  @media (max-width: 800px) {
-    .history-panel.expanded {
-      height: clamp(16rem, 40svh, 24rem);
-    }
-  }
-
-  @media (max-width: 420px) {
-    .history-panel > .panel-header {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .controls {
-      grid-column: 1;
-      grid-row: 2;
-    }
-
-    .panel-stats {
-      grid-column: 1;
-      grid-row: 3;
-    }
   }
 
   @container (max-width: 19rem) {

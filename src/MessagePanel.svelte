@@ -2,6 +2,7 @@
 
 <script lang="ts">
   import TreeView from "./TreeView.svelte";
+  import { MAX_PLOTS } from "./lib/routes";
   import type { JsonSnapshot } from "./lib/json";
   import { formatPayload, type TelemetryMessage } from "./lib/telemetry";
   import { formatTelemetryTime, type DisplayTimeZone } from "./lib/time";
@@ -68,8 +69,11 @@
     if (message.duplicate) items.push("possible duplicate");
     items.push(`${message.bytes.toLocaleString()} bytes`);
     if (snapshot) items.push(`${snapshot.nodes.size.toLocaleString()} nodes`);
+    if (snapshot?.truncated) items.push("additional fields omitted");
     if (showPlotHint) items.push("check a numeric field to plot");
     if (message.unsafeIntegers) items.push("unsafe integer precision");
+    if (message.payload.kind === "json" && message.payload.outOfRange)
+      items.push("number out of range");
     return items;
   });
   let tagline = $derived(statistics.join(" · "));
@@ -111,6 +115,12 @@
         {#each statistics as statistic}<span>{statistic}</span>{/each}
       </div>
     {/if}
+    {#if checkDisabled}
+      <p class="plot-limit meta" role="status">
+        Plot limit reached ({plotCount}/{MAX_PLOTS}). Remove a plot to add
+        another.
+      </p>
+    {/if}
   </header>
   {#if message?.payload.kind === "json" && snapshot}
     <div class="message-tree">
@@ -129,7 +139,9 @@
       />
     </div>
   {:else if message}
-    <pre>{formatPayload(message.payload)}</pre>
+    <pre>{message.bytes === 0
+        ? "empty payload"
+        : formatPayload(message.payload)}</pre>
   {:else if topic && subtreeMessages}
     <p class="empty">
       No message in history on this exact topic. Expand it and select a
@@ -144,6 +156,7 @@
 
 <style>
   .message-panel {
+    container-type: inline-size;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     min-height: 0;
@@ -152,6 +165,10 @@
   .message-tree {
     min-height: 0;
     overflow: auto;
+  }
+
+  .plot-limit {
+    grid-column: 1 / -1;
   }
 
   pre {
@@ -169,6 +186,7 @@
   .remove-controls {
     align-items: baseline;
     display: flex;
+    flex-wrap: wrap;
     gap: var(--space-tight);
   }
 
@@ -176,13 +194,7 @@
     white-space: nowrap;
   }
 
-  @media (max-width: 800px) {
-    .message-panel {
-      height: clamp(16rem, 40svh, 24rem);
-    }
-  }
-
-  @media (max-width: 420px) {
+  @container (max-width: 19rem) {
     .message-panel > .panel-header {
       grid-template-columns: minmax(0, 1fr);
     }

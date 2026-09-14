@@ -1,3 +1,4 @@
+import { mqttFilterError } from "./mqtt-filter";
 import type { DisplayTimeZone } from "./time";
 
 export const DEFAULT_HISTORY_LIMIT = 1000;
@@ -41,8 +42,17 @@ export function defaultRoute(): AppRoute {
 }
 
 export function uniqueFilters(filters: Iterable<string>): string[] {
-  const unique = [...new Set([...filters].filter((filter) => filter !== ""))];
-  return unique.length ? unique : [DEFAULT_FILTER];
+  return [...new Set([...filters].filter((filter) => filter !== ""))];
+}
+
+export function subscriptionLines(text: string): string[] {
+  const lines = text.split(/\r?\n/);
+  for (const [index, filter] of lines.entries()) {
+    if (!filter) continue;
+    const error = mqttFilterError(filter);
+    if (error) throw new Error(`Subscription line ${index + 1}: ${error}`);
+  }
+  return uniqueFilters(lines);
 }
 
 export function isWebSocketBroker(
@@ -73,10 +83,6 @@ export function webSocketBrokerError(value: string): string | undefined {
   return undefined;
 }
 
-export function connectionKey(route: AppRoute): string {
-  return JSON.stringify([route.broker, uniqueFilters(route.filters)]);
-}
-
 export function readLaunchRoute(
   location: Pick<Location, "href" | "search" | "hash" | "protocol">,
 ): LaunchRoute {
@@ -99,12 +105,14 @@ export function readLaunchRoute(
 
   const broker = parameters.get("broker") ?? "";
   const filters = parameters.getAll("sub");
-  if (!broker || !filters.length || filters.some((filter) => !filter))
-    return launchError(
-      "A launch URL needs one broker and at least one non-empty sub parameter.",
-    );
+  if (!broker) return launchError("A launch URL needs a broker.");
   const brokerError = isWebSocketBroker(broker, location.protocol);
   if (brokerError) return launchError(brokerError);
+
+  for (const [index, filter] of filters.entries()) {
+    const error = mqttFilterError(filter);
+    if (error) return launchError(`URL subscription ${index + 1}: ${error}`);
+  }
 
   const historyValue = parameters.get("history");
   const historyLimit =

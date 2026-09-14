@@ -11,6 +11,7 @@
     plotStatistics,
     timeTickValues,
     type PlotPoint,
+    type PlotSeries,
   } from "./lib/plot";
   import {
     displayDatesDiffer,
@@ -23,6 +24,7 @@
     topic: string;
     label: string;
     retainedExcluded: number;
+    unavailable?: PlotSeries["unavailable"];
     xMin: number;
     xMax: number;
     timeZone: DisplayTimeZone;
@@ -42,6 +44,7 @@
     topic,
     label,
     retainedExcluded,
+    unavailable,
     xMin,
     xMax,
     timeZone,
@@ -79,6 +82,12 @@
     if (!visiblePoints.length) return undefined;
     const summary = plotStatistics(visiblePoints)!;
     const yScale = nicePlotScale(summary.low, summary.high);
+    if (
+      !yScale ||
+      !Number.isFinite(summary.mean) ||
+      !Number.isFinite(summary.standardDeviation)
+    )
+      return undefined;
     return {
       summary,
       yMin: yScale.min,
@@ -122,6 +131,7 @@
     const plotHeight = height - top - bottom;
     const segments: {
       segment: number;
+      run?: number;
       coordinates: { x: number; y: number }[];
     }[] = [];
     for (const point of displayPoints) {
@@ -130,8 +140,12 @@
       const y =
         top + ((plot.yMax - point.y) / (plot.yMax - plot.yMin)) * plotHeight;
       let current = segments.at(-1);
-      if (!current || current.segment !== point.segment) {
-        current = { segment: point.segment, coordinates: [] };
+      if (
+        !current ||
+        current.segment !== point.segment ||
+        current.run !== point.run
+      ) {
+        current = { segment: point.segment, run: point.run, coordinates: [] };
         segments.push(current);
       }
       current.coordinates.push({ x, y });
@@ -190,7 +204,7 @@
         );
         items.push(`y ${formatPlotNumber(inspection.y, vertical.step)}`);
       } else {
-        items.push(`latest ${formatPlotNumber(latest, vertical.step)}`);
+        items.push(`last sample ${formatPlotNumber(latest, vertical.step)}`);
       }
       items.push(`μ ${formatPlotNumber(mean, vertical.step)}`);
       items.push(
@@ -201,11 +215,17 @@
       );
       items.push(`n ${visiblePoints.length.toLocaleString()}`);
     }
+    if (unavailable)
+      items.push(
+        unavailable === "omitted"
+          ? "payload omitted"
+          : "field absent or nonnumeric",
+      );
     if (retainedExcluded)
       items.push(`${retainedExcluded.toLocaleString()} retained excluded`);
     if (gaps)
       items.push(
-        `${gaps.toLocaleString()} reconnect ${gaps === 1 ? "gap" : "gaps"}`,
+        `${gaps.toLocaleString()} reception ${gaps === 1 ? "gap" : "gaps"}`,
       );
     return items;
   });
@@ -239,8 +259,11 @@
 <section class="panel plot-panel" aria-label={`Plot of ${label} on ${topic}`}>
   <header class="panel-header">
     <button class="plot-title" type="button" onclick={onfocus}>
-      <strong>{label}</strong>
-      <span>{topic}</span>
+      {#if label === "$"}
+        <strong>{topic}</strong>
+      {:else}
+        <strong>{label}</strong>{" "}<span>({topic})</span>
+      {/if}
     </button>
     <div class="plot-actions">
       {#if canMoveEarlier || canMoveLater}
@@ -364,6 +387,8 @@
         />
       {/if}
     </svg>
+  {:else if visiblePoints.length}
+    <p class="empty">Numeric range exceeds plot precision.</p>
   {:else}
     <p class="empty">
       {#if points.length && windowLabel}
@@ -388,7 +413,10 @@
     background: transparent;
     border: 0;
     color: inherit;
-    display: grid;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 0.35em;
     min-width: 0;
     padding: 0;
     text-align: left;
@@ -396,6 +424,8 @@
 
   .plot-title strong,
   .plot-title span {
+    min-width: 0;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -437,6 +467,17 @@
 
   .plot-action:disabled {
     opacity: 0.3;
+  }
+
+  @media (pointer: coarse) {
+    .plot-actions {
+      gap: var(--space-tight);
+    }
+
+    .plot-action {
+      min-height: 44px;
+      width: 44px;
+    }
   }
 
   svg {
