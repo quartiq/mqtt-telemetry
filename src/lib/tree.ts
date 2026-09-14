@@ -91,7 +91,7 @@ export function filterTree(
 
 export function filterTopicTree(
   roots: string[],
-  nodes: Map<string, TreeNodeView>,
+  nodes: Map<string, TreeNodeView & { topic: string }>,
   query: string,
 ): TreeFilter {
   const value = query.trim();
@@ -99,10 +99,7 @@ export function filterTopicTree(
   if (!/[+#]/.test(value)) {
     const needle = value.toLocaleLowerCase();
     return filterTreeBy(roots, nodes, (node) =>
-      (node.title ?? node.label)
-        .split("\n", 1)[0]
-        .toLocaleLowerCase()
-        .includes(needle),
+      node.topic.toLocaleLowerCase().includes(needle),
     );
   }
   const error = mqttFilterError(value);
@@ -115,14 +112,14 @@ export function filterTopicTree(
       error,
     };
   return filterTreeBy(roots, nodes, (node) =>
-    topicMatchesFilter((node.title ?? node.label).split("\n", 1)[0], value),
+    topicMatchesFilter(node.topic, value),
   );
 }
 
-function filterTreeBy(
+function filterTreeBy<T extends TreeNodeView>(
   roots: string[],
-  nodes: Map<string, TreeNodeView>,
-  matchesNode: (node: TreeNodeView) => boolean,
+  nodes: Map<string, T>,
+  matchesNode: (node: T) => boolean,
 ): TreeFilter {
   const matches = [...nodes.values()]
     .filter(matchesNode)

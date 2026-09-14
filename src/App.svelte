@@ -15,7 +15,6 @@
     jsonPath,
     jsonTree,
     parseJsonPath,
-    resolveJsonPath,
     telemetryPageTitle,
   } from "./lib/json";
   import { TelemetryStore } from "./lib/telemetry";
@@ -54,6 +53,10 @@
     treeAncestorIds,
     type TreeActivity,
   } from "./lib/tree";
+
+  // Keep receipt times, plot windows, and expiration on the same monotonic clock.
+  const clockOrigin = Date.now() - performance.now();
+  const telemetryNow = () => clockOrigin + performance.now();
 
   const inlineDashboard = readInlineDashboard(location.hash);
   const launchRoute = readLaunchRoute(location);
@@ -119,11 +122,10 @@
   let activeUsername = $state("");
   let activePassword = $state("");
   let viewToken = randomId();
-  let lastReceivedAt = 0;
   let lastSegment = 0;
   const segments = new Map<string, { transport: number; id: number }>();
   let renderFrame = 0;
-  let plotNow = $state(Date.now());
+  let plotNow = $state(telemetryNow());
 
   if (location.search || location.hash || !storedRoute)
     history.replaceState(
@@ -204,16 +206,9 @@
         : (fieldByTopic.get(selectedTopic) ?? null)
       : null,
   );
-  let activeField = $derived.by(() => {
-    if (selectedFieldPath === null) return undefined;
-    for (let index = currentHistory.length - 1; index >= 0; index -= 1) {
-      const payload = currentHistory[index].payload;
-      if (payload.kind !== "json") continue;
-      const resolved = resolveJsonPath(payload.value, selectedFieldPath);
-      if (resolved) return resolved;
-    }
-    return undefined;
-  });
+  let activeField = $derived(
+    selectedFieldPath === null ? undefined : parseJsonPath(selectedFieldPath),
+  );
   let selectedJsonId = $derived(selectedFieldPath ?? "");
   let checkedJson = $derived(
     new Set(
@@ -322,7 +317,7 @@
     if (!clockNeeded) return;
     let timer = 0;
     const tick = () => {
-      const now = Date.now();
+      const now = telemetryNow();
       plotNow = now;
       if (
         route.historyAgeMs !== null &&
@@ -364,7 +359,7 @@
         if (
           historyAgeChanged &&
           next.historyAgeMs !== null &&
-          store.expireBefore(Date.now() - next.historyAgeMs)
+          store.expireBefore(telemetryNow() - next.historyAgeMs)
         )
           revision += 1;
         restoreView(event.state);
@@ -446,7 +441,7 @@
       void updateSubscriptions();
       store.setHistoryLimit(next.historyLimit);
       if (next.historyAgeMs !== null)
-        store.expireBefore(Date.now() - next.historyAgeMs);
+        store.expireBefore(telemetryNow() - next.historyAgeMs);
       revision += 1;
       restoreView(history.state);
     } else {
@@ -513,10 +508,9 @@
     jsonExpanded = new Set(["$"]);
     jsonExpandedByTopic.clear();
     viewToken = randomId();
-    lastReceivedAt = 0;
     lastSegment = 0;
     segments.clear();
-    plotNow = Date.now();
+    plotNow = telemetryNow();
   }
 
   function stopConnection() {
@@ -559,12 +553,6 @@
     }
   }
 
-  function receiptTime(): number {
-    const now = Date.now();
-    lastReceivedAt = Math.max(now, lastReceivedAt + 0.001);
-    return lastReceivedAt;
-  }
-
   function scheduleRender() {
     if (renderFrame) return;
     renderFrame = requestAnimationFrame(() => {
@@ -594,7 +582,7 @@
         {
           message: ({ topic, payload, packet, segment }) => {
             if (serial !== connectSerial || packet.cmd !== "publish") return;
-            const receivedAt = receiptTime();
+            const receivedAt = telemetryNow();
             const previous = segments.get(topic);
             const historySegment =
               previous?.transport === segment ? previous.id : ++lastSegment;
@@ -606,7 +594,7 @@
             });
             if (route.historyAgeMs !== null)
               store.expireBefore(receivedAt - route.historyAgeMs);
-            plotNow = Date.now();
+            plotNow = telemetryNow();
             scheduleRender();
             if (!added) return;
             segments.set(topic, { transport: segment, id: historySegment });
@@ -880,7 +868,7 @@
 
   function changeHistoryAge(ageMs: number | null): boolean {
     if (ageMs === route.historyAgeMs) return true;
-    plotNow = Date.now();
+    plotNow = telemetryNow();
     if (ageMs !== null && store.expireBefore(plotNow - ageMs)) revision += 1;
     writeRoute({ ...route, historyAgeMs: ageMs }, selectedMessageId);
     return true;
@@ -888,7 +876,7 @@
 
   function changePlotWindow(windowMs: number | null): boolean {
     if (windowMs === route.plotWindowMs) return true;
-    plotNow = Date.now();
+    plotNow = telemetryNow();
     writeRoute({ ...route, plotWindowMs: windowMs }, selectedMessageId);
     return true;
   }

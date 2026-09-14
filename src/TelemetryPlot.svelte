@@ -82,6 +82,12 @@
     if (!visiblePoints.length) return undefined;
     const summary = plotStatistics(visiblePoints)!;
     const yScale = nicePlotScale(summary.low, summary.high);
+    if (
+      !yScale ||
+      !Number.isFinite(summary.mean) ||
+      !Number.isFinite(summary.standardDeviation)
+    )
+      return undefined;
     return {
       summary,
       yMin: yScale.min,
@@ -381,6 +387,8 @@
         />
       {/if}
     </svg>
+  {:else if visiblePoints.length}
+    <p class="empty">Numeric range exceeds plot precision.</p>
   {:else}
     <p class="empty">
       {#if points.length && windowLabel}

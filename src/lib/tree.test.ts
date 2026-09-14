@@ -10,20 +10,31 @@ import {
   visibleTreeIds,
 } from "./tree";
 
-const nodes = new Map<string, TreeNodeView>([
-  ["a", { id: "a", label: "a", children: ["a/1", "a/2"] }],
+const nodes = new Map<string, TreeNodeView & { topic: string }>([
+  ["a", { id: "a", topic: "a", label: "a", children: ["a/1", "a/2"] }],
   [
     "a/1",
     {
       id: "a/1",
+      topic: "a/1",
       label: "1",
       parent: "a",
       children: [],
       title: "a/1\nBuffered here: 1",
     },
   ],
-  ["a/2", { id: "a/2", label: "2", parent: "a", children: [], title: "a/2" }],
-  ["b", { id: "b", label: "b", children: [] }],
+  [
+    "a/2",
+    {
+      id: "a/2",
+      topic: "a/2",
+      label: "2",
+      parent: "a",
+      children: [],
+      title: "a/2",
+    },
+  ],
+  ["b", { id: "b", topic: "b", label: "b", children: [] }],
 ]);
 
 describe("tree navigation", () => {
@@ -84,5 +95,18 @@ describe("tree navigation", () => {
   it("searches topic paths without matching tooltip details", () => {
     expect(filterTopicTree(["a", "b"], nodes, "A/1").matches).toEqual(["a/1"]);
     expect(filterTopicTree(["a", "b"], nodes, "buffered").matches).toEqual([]);
+    const multiline = new Map([
+      [
+        "x",
+        {
+          id: "x",
+          label: "x",
+          topic: "first\nlast",
+          title: "display only",
+          children: [],
+        },
+      ],
+    ]);
+    expect(filterTopicTree(["x"], multiline, "last").matches).toEqual(["x"]);
   });
 });

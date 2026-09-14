@@ -9,7 +9,13 @@ import {
 import { plotSeriesPath, type PlotSeries } from "./plot";
 
 export type Payload =
-  | { kind: "json"; value: JsonValue }
+  | {
+      kind: "json";
+      value: JsonValue;
+      source: string;
+      unsafeIntegers?: true;
+      outOfRange?: true;
+    }
   | { kind: "text"; value: string }
   | { kind: "binary"; value: Uint8Array }
   | { kind: "omitted"; value: string };
@@ -40,6 +46,7 @@ type TopicNode = {
 type TopicNodeView = TreeNodeView & {
   // Whether the latest buffered payload is a finite JSON number.
   numeric: boolean;
+  topic: string;
 };
 
 export type TopicSnapshot = {
@@ -57,6 +64,8 @@ export type StoreLimits = {
   maxHistoryBytes: number;
   maxHistoryMessages: number;
   maxTopicNodes: number;
+  maxTopicDepth: number;
+  maxTopicBytes: number;
   maxPayloadBytes: number;
 };
 
@@ -64,6 +73,8 @@ export const DEFAULT_STORE_LIMITS: StoreLimits = {
   maxHistoryBytes: 64 * 1024 * 1024,
   maxHistoryMessages: 100_000,
   maxTopicNodes: 10_000,
+  maxTopicDepth: 64,
+  maxTopicBytes: 8 * 1024 * 1024,
   maxPayloadBytes: 1024 * 1024,
 };
 
@@ -84,34 +95,40 @@ export function parsePayload(bytes: Uint8Array): Payload {
   } catch {
     return { kind: "binary", value: bytes.slice() };
   }
+  let value: JsonValue;
   try {
-    return { kind: "json", value: JSON.parse(text) as JsonValue };
+    value = JSON.parse(text) as JsonValue;
   } catch {
     return { kind: "text", value: text };
   }
-}
-
-function hasUnsafeInteger(payload: Payload): boolean {
-  if (payload.kind !== "json") return false;
-  const pending: JsonValue[] = [payload.value];
+  let unsafeIntegers = false;
+  let outOfRange = false;
+  const pending = [value];
   while (pending.length) {
-    const value = pending.pop() as JsonValue;
-    if (
-      typeof value === "number" &&
-      Number.isInteger(value) &&
-      !Number.isSafeInteger(value)
-    )
-      return true;
-    if (Array.isArray(value)) pending.push(...value);
-    else if (isJsonObject(value)) pending.push(...Object.values(value));
+    const current = pending.pop()!;
+    if (typeof current === "number") {
+      if (!Number.isFinite(current)) outOfRange = true;
+      if (Number.isInteger(current) && !Number.isSafeInteger(current))
+        unsafeIntegers = true;
+    } else if (Array.isArray(current)) {
+      for (const child of current) pending.push(child);
+    } else if (isJsonObject(current)) {
+      for (const child of Object.values(current)) pending.push(child);
+    }
   }
-  return false;
+  return {
+    kind: "json",
+    value,
+    source: text,
+    ...(outOfRange ? { outOfRange: true } : {}),
+    ...(unsafeIntegers ? { unsafeIntegers: true } : {}),
+  };
 }
 
 export function formatPayload(payload: Payload): string {
   switch (payload.kind) {
     case "json":
-      return formatValue(payload.value);
+      return payload.source;
     case "text":
       return payload.value;
     case "binary":
@@ -133,6 +150,7 @@ export function selectedMessageValue(
       : message.bytes === 0
         ? "empty payload"
         : truncate(formatPayload(message.payload));
+  if (!path.length) return truncate(message.payload.source);
   const value = getJsonPath(message.payload.value, path);
   if (value === undefined) return "—";
   return truncate(formatValue(value));
@@ -141,7 +159,7 @@ export function selectedMessageValue(
 export function messagePayloadPreview(message: TelemetryMessage): string {
   switch (message.payload.kind) {
     case "json":
-      return truncate(formatValue(message.payload.value));
+      return truncate(message.payload.source);
     case "text":
       return truncate(message.payload.value || "empty payload");
     case "binary":
@@ -159,7 +177,7 @@ export function messageFrequency(history: readonly TelemetryMessage[]): string {
   if (live.length < 2) return "";
   const seconds =
     (live.at(-1)!.receivedAt - live[0].receivedAt) / (live.length - 1) / 1000;
-  if (!(seconds > 0)) return "";
+  if (seconds < 0) return "";
   if (seconds < 0.001) return "burst (<1 ms apart)";
   if (seconds < 1)
     return `${(1 / seconds).toLocaleString(undefined, { maximumSignificantDigits: 3 })} msg/s`;
@@ -211,6 +229,7 @@ export class TelemetryStore {
   private sequence = 0;
   private revision = 0;
   private topicCount = 0;
+  private topicBytes = 0;
   private topicsOmitted = false;
   private historyLimited = false;
   private collectionStopped = false;
@@ -258,7 +277,7 @@ export class TelemetryStore {
       segment: metadata.segment ?? 0,
       duplicate: metadata.duplicate ?? false,
       bytes: payload.byteLength,
-      unsafeIntegers: hasUnsafeInteger(parsed),
+      unsafeIntegers: parsed.kind === "json" && Boolean(parsed.unsafeIntegers),
       payload: parsed,
     };
     const cost =
@@ -439,11 +458,18 @@ export class TelemetryStore {
   private addTopic(topic: string): string | undefined {
     if (this.nodes.size >= this.limits.maxTopicNodes) return undefined;
     const parts = topic.split("/");
-    if (parts.length > this.limits.maxTopicNodes) return undefined;
+    if (parts.length > this.limits.maxTopicDepth) return undefined;
     const ids = parts.map((_, index) => topicId(parts.slice(0, index + 1)));
     const missing = ids.filter((id) => !this.nodes.has(id)).length;
     if (this.nodes.size + missing > this.limits.maxTopicNodes) return undefined;
 
+    // Account for path strings and node overhead before mutating the tree.
+    const cost = ids.reduce(
+      (sum, id) => sum + (this.nodes.has(id) ? 0 : 256 + id.length * 8),
+      0,
+    );
+    if (this.topicBytes + cost > this.limits.maxTopicBytes) return undefined;
+    this.topicBytes += cost;
     let parent: string | undefined;
     for (let index = 0; index < parts.length; index += 1) {
       const id = ids[index];
@@ -486,6 +512,7 @@ export class TelemetryStore {
     return {
       id,
       numeric,
+      topic: node.topic,
       ...(numeric ? { value: String(payload.value) } : {}),
       label: node.label,
       ...(node.parent ? { parent: node.parent } : {}),

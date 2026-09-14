@@ -145,6 +145,41 @@ describe("payloads and JSON fields", () => {
     expect(telemetryPageTitle("", undefined)).toBe("MQTT Telemetry");
   });
 
+  it("handles wide and deep JSON without losing the source or unaffected numeric fields", () => {
+    const store = new TelemetryStore(10);
+    const wide = `[${"0,".repeat(150_000)}9007199254740992]`;
+    const added = store.add("wide", encode(wide), {
+      receivedAt: 1,
+      retained: false,
+    })!;
+    expect(added.message.unsafeIntegers).toBe(true);
+    expect(messagePayloadPreview(added.message)).toHaveLength(256);
+    const deep = `${"[".repeat(8000)}0${"]".repeat(8000)}`;
+    const nested = store.add("deep", encode(deep), {
+      receivedAt: 2,
+      retained: false,
+    })!;
+    expect(messagePayloadPreview(nested.message)).toHaveLength(256);
+    expect(selectedMessageValue(nested.message, [0])).toBe("array (1 items)");
+    const raw = '{"value":1e400,"usable":2}';
+    const overflow = store.add("overflow", encode(raw), {
+      receivedAt: 3,
+      retained: false,
+    })!;
+    expect(messagePayloadPreview(overflow.message)).toBe(raw);
+    expect(selectedMessageValue(overflow.message, ["value"])).toBe(
+      "number out of range",
+    );
+    expect(store.plotSeries(overflow.nodeId, "$.usable").points[0].y).toBe(2);
+    expect(overflow.message.payload).toMatchObject({
+      kind: "json",
+      outOfRange: true,
+    });
+    expect(getJsonPath({}, ["constructor"])).toBeUndefined();
+    expect(getJsonPath({}, ["__proto__"])).toBeUndefined();
+    expect(getJsonPath(JSON.parse('{"__proto__":1}'), ["__proto__"])).toBe(1);
+  });
+
   it("builds a selectable, ordered, and bounded JSON tree", () => {
     const snapshot = jsonTree({ z: 1, a: [true] });
     expect(snapshot.nodes.get("$")?.children).toEqual(["$.a", "$.z"]);
@@ -168,9 +203,13 @@ describe("payloads and JSON fields", () => {
       },
     );
     expect(count.nodes.size).toBe(3);
-    expect([...count.nodes.values()].some((node) => node.label === "…")).toBe(
-      true,
+    expect(count.truncated).toBe(true);
+    const nested = jsonTree(
+      { a: { x: 1, y: 2 }, b: 3 },
+      { maxDepth: 64, maxNodes: 4 },
     );
+    expect(nested.nodes.has("$.b")).toBe(false);
+    expect(nested.truncated).toBe(true);
   });
 
   it("summarizes structured history values and truncates long scalars", () => {
@@ -189,6 +228,19 @@ describe("payloads and JSON fields", () => {
 });
 
 describe("topic history", () => {
+  it("bounds topic depth and metadata before admission without blocking other topics", () => {
+    const store = new TelemetryStore(10, {
+      maxTopicDepth: 2,
+      maxTopicBytes: 1024,
+    });
+    const metadata = { receivedAt: 1, retained: false };
+    expect(store.add("a/b/c", encode("1"), metadata)).toBeUndefined();
+    expect(store.add("a".repeat(200), encode("1"), metadata)).toBeUndefined();
+    expect(store.snapshot().nodes.size).toBe(0);
+    expect(store.add("ok", encode("2"), metadata)).toBeDefined();
+    expect(store.snapshot().collectionStopped).toBe(false);
+  });
+
   it("marks only current numeric root payloads for topic pinning", () => {
     const store = new TelemetryStore(2);
     store.add("a/child", encode("1"), { receivedAt: 1, retained: false });
@@ -385,14 +437,14 @@ describe("topic history", () => {
       }),
     ).toBeUndefined();
     expect(store.snapshot().collectionStopped).toBe(true);
-    expect(store.history(store.nodeId("a")!)[0].payload).toEqual({
+    expect(store.history(store.nodeId("a")!)[0].payload).toMatchObject({
       kind: "json",
       value: 1,
     });
     expect(
       store.add("b", encode("3"), { receivedAt: 4, retained: false }),
     ).toBeUndefined();
-    expect(store.history(store.nodeId("b")!)[0].payload).toEqual({
+    expect(store.history(store.nodeId("b")!)[0].payload).toMatchObject({
       kind: "json",
       value: 2,
     });
@@ -416,11 +468,11 @@ describe("topic history", () => {
       historyLimited: true,
       collectionStopped: false,
     });
-    expect(store.history(store.nodeId("quiet")!)[0].payload).toEqual({
+    expect(store.history(store.nodeId("quiet")!)[0].payload).toMatchObject({
       kind: "json",
       value: 42,
     });
-    expect(store.history(store.nodeId("changing")!)[0].payload).toEqual({
+    expect(store.history(store.nodeId("changing")!)[0].payload).toMatchObject({
       kind: "json",
       value: { value: 2 },
     });
@@ -638,7 +690,9 @@ describe("plot extraction", () => {
     expect(formatPlotNumber(103_403.95, 0.03)).toBe("103403.95");
     expect(formatPlotNumber(0.16, 0.03)).toBe("0.16");
 
-    const scale = nicePlotScale(0.383, 0.4);
+    expect(nicePlotScale(-1e308, 1e308)).toBeUndefined();
+    expect(nicePlotScale(Number.MAX_VALUE, Number.MAX_VALUE)).toBeUndefined();
+    const scale = nicePlotScale(0.383, 0.4)!;
     expect(scale).toEqual({
       min: 0.38,
       max: 0.4,
@@ -649,12 +703,12 @@ describe("plot extraction", () => {
       scale.ticks.map((value) => formatPlotTick(value, scale.step)),
     ).toEqual([".38", ".39", ".40"]);
 
-    const offset = nicePlotScale(103_403.8, 103_403.95);
+    const offset = nicePlotScale(103_403.8, 103_403.95)!;
     expect(
       offset.ticks.map((value) => formatPlotTick(value, offset.step)),
     ).toEqual(["103403.8", "103403.9", "103404.0"]);
 
-    const precise = nicePlotScale(1 + 1e-9, 1 + 2e-9);
+    const precise = nicePlotScale(1 + 1e-9, 1 + 2e-9)!;
     expect(
       precise.ticks.map((value) => formatPlotTick(value, precise.step)),
     ).toEqual(["1.0000000010", "1.0000000015", "1.0000000020"]);
@@ -738,6 +792,13 @@ describe("plot extraction", () => {
     const reduced = downsamplePlotPoints(plotSeries(dense, []).points, 12);
     expect(new Set(reduced.map((point) => point.run ?? 0)).size).toBe(2);
     expect(reduced.length).toBeLessThanOrEqual(12);
+  });
+
+  it("keeps arrival order when downsampling equal receipt timestamps", () => {
+    const points = [0, 5, 1, 3, 2, 0].map((y) => ({ x: 1, y, segment: 0 }));
+    expect(downsamplePlotPoints(points, 4).map((point) => point.y)).toEqual([
+      0, 5, 1, 0,
+    ]);
   });
 
   it("preserves reconnect boundaries in plot points", () => {

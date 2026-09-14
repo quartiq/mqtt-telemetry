@@ -306,6 +306,82 @@ try {
       beforeAdmissionConnections,
       "Reset must keep the transport",
     );
+    // Selection and layout must not depend on recent payload shape.
+    publish("long-".repeat(60), 1);
+    await until("document.querySelector('.topic-tree [role=treeitem]')");
+    assert(
+      await evaluate(`(() => {
+      const pane = document.querySelector('.topic-tree');
+      const label = pane.querySelector('.label');
+      return pane.scrollWidth <= pane.clientWidth + 1 && label.scrollWidth > label.clientWidth;
+    })()`),
+      "Long topic labels must ellipsize within their pane",
+    );
+    publish("fieldtest", { value: 1 });
+    await until(
+      "[...document.querySelectorAll('.topic-tree .label')].some(el => el.textContent === 'fieldtest')",
+    );
+    await click(".topic-tree [role=treeitem]");
+    await until(
+      "document.querySelector(\'.message-tree [data-tree-id=\"$.value\"]\')",
+    );
+    await click('.message-tree [data-tree-id="$.value"]');
+    await evaluate(
+      `(() => { const input = document.querySelector('[aria-label="Messages kept per topic"]'); input.value = '2'; input.dispatchEvent(new Event('change', {bubbles:true})); })()`,
+    );
+    await click(".history-disclosure");
+    publish("fieldtest", { other: 2 });
+    publish("fieldtest", { other: 3 });
+    await until(
+      'document.querySelector(\'.message-tree [data-tree-id="$.other"] > .value\')?.textContent === "3"',
+    );
+    assert.deepEqual(
+      await evaluate(
+        "[...document.querySelectorAll('.history-panel .message-row td:nth-child(2)')].map(el => el.textContent)",
+      ),
+      ["—", "—"],
+      "Pruning must preserve the selected field",
+    );
+    for (let repeat = 0; repeat < 2; repeat++) {
+      await click(".topic-tree [role=treeitem]");
+      await evaluate(
+        "document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowDown', bubbles:true}))",
+      );
+      await until(
+        "document.activeElement?.querySelector('.label')?.textContent.startsWith('long-')",
+      );
+    }
+    await click(".topic-tree [role=treeitem]");
+    publish("fieldtest", 1);
+    await until(
+      "document.querySelector('.topic-tree [role=treeitem]').querySelector(':scope > .value')?.textContent === '1'",
+    );
+    await click(".topic-tree .plot-toggle");
+    await until("document.querySelector('.plot-panel svg')");
+    await evaluate(
+      "globalThis.originalDateNow = Date.now; Date.now = () => globalThis.originalDateNow() - 60000",
+    );
+    publish("fieldtest", 2);
+    await until(
+      "document.querySelector('.plot-panel').innerText.includes('n 2')",
+    );
+    await evaluate(
+      "Date.now = globalThis.originalDateNow; delete globalThis.originalDateNow",
+    );
+    publish("fieldtest", -1e308);
+    publish("fieldtest", 1e308);
+    await until(
+      "document.querySelector('.plot-panel').innerText.includes('Numeric range exceeds plot precision')",
+    );
+    publish("fieldtest", 3);
+    publish("fieldtest", 4);
+    await until("document.querySelector('.plot-panel svg')");
+    await click(".topic-tree .plot-toggle");
+    await click(".history-disclosure");
+    await evaluate(
+      `(() => { const input = document.querySelector('[aria-label="Messages kept per topic"]'); input.value = '1000'; input.dispatchEvent(new Event('change', {bubbles:true})); })()`,
+    );
+    await click(resetSelector);
     publish("sample", 1);
     await until(
       "document.querySelector('[aria-label=\"MQTT topics\"] [role=treeitem]')",

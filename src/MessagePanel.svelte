@@ -69,8 +69,11 @@
     if (message.duplicate) items.push("possible duplicate");
     items.push(`${message.bytes.toLocaleString()} bytes`);
     if (snapshot) items.push(`${snapshot.nodes.size.toLocaleString()} nodes`);
+    if (snapshot?.truncated) items.push("additional fields omitted");
     if (showPlotHint) items.push("check a numeric field to plot");
     if (message.unsafeIntegers) items.push("unsafe integer precision");
+    if (message.payload.kind === "json" && message.payload.outOfRange)
+      items.push("number out of range");
     return items;
   });
   let tagline = $derived(statistics.join(" · "));

@@ -9,6 +9,7 @@ export type JsonSnapshot = {
   roots: string[];
   nodes: Map<string, TreeNodeView>;
   paths: Map<string, JsonPath>;
+  truncated: boolean;
 };
 
 export type JsonTreeLimits = {
@@ -22,7 +23,24 @@ export const DEFAULT_JSON_TREE_LIMITS: JsonTreeLimits = {
 };
 
 export function formatValue(value: JsonValue): string {
-  return JSON.stringify(value) ?? String(value);
+  if (typeof value === "number" && !Number.isFinite(value))
+    return "number out of range";
+  // Stop before deeply nested or large containers can overwhelm preview formatting.
+  let visited = 0;
+  try {
+    return JSON.stringify(value, (_key, child) => {
+      if (
+        ++visited > 256 ||
+        (typeof child === "number" && !Number.isFinite(child))
+      )
+        throw new RangeError("Preview limit");
+      return child;
+    });
+  } catch {
+    return Array.isArray(value)
+      ? `array (${value.length.toLocaleString()} items)`
+      : `object (${Object.keys(value as JsonObject).length.toLocaleString()} fields)`;
+  }
 }
 
 export function getJsonPath(
@@ -33,7 +51,11 @@ export function getJsonPath(
   for (const segment of path) {
     if (typeof segment === "number" && Array.isArray(value)) {
       value = value[segment];
-    } else if (typeof segment === "string" && isJsonObject(value)) {
+    } else if (
+      typeof segment === "string" &&
+      isJsonObject(value) &&
+      Object.hasOwn(value, segment)
+    ) {
       value = value[segment];
     } else {
       return undefined;
@@ -240,7 +262,11 @@ export function jsonTree(
       children: [],
       title: fieldLabel(path),
     });
-    if (depth >= limits.maxDepth) {
+    if (
+      depth >= limits.maxDepth &&
+      value !== null &&
+      typeof value === "object"
+    ) {
       nodes.set(id, {
         id,
         label,
@@ -259,19 +285,6 @@ export function jsonTree(
     for (let index = 0; index < childCount; index += 1) {
       if (nodeLimitReached) break;
       if (nodes.size >= limits.maxNodes) {
-        nodeLimitReached = true;
-        break;
-      }
-      if (nodes.size === limits.maxNodes - 1) {
-        const omittedId = `${id}#omitted`;
-        nodes.set(omittedId, {
-          id: omittedId,
-          label: "…",
-          parent: id,
-          children: [],
-          value: "additional fields omitted",
-        });
-        children.push(omittedId);
         nodeLimitReached = true;
         break;
       }
@@ -294,7 +307,8 @@ export function jsonTree(
     return id;
   };
 
-  return { roots: [visit(root, [], "$", 0)], nodes, paths };
+  const roots = [visit(root, [], "$", 0)];
+  return { roots, nodes, paths, truncated: nodeLimitReached };
 }
 
 function isJsonObject(value: JsonValue): value is JsonObject {
