@@ -276,8 +276,50 @@ try {
     await until(
       "document.querySelector('[aria-label=\"MQTT topics\"] [role=treeitem]')",
     );
+    await until("document.querySelector('.topic-tree .plot-toggle')");
+    await click(".topic-tree .plot-toggle");
+    await until("document.querySelectorAll('.plot-panel').length === 1");
+    assert(
+      await evaluate("!document.querySelector('[aria-label=\"JSON fields\"]')"),
+      "Pinning a topic must not change selection",
+    );
     await click('[aria-label="MQTT topics"] [role="treeitem"]');
     await until("document.querySelector('[aria-label=\"JSON fields\"]')");
+    assert(
+      await evaluate(
+        "document.querySelector('.message-tree .plot-toggle').getAttribute('aria-pressed') === 'true'",
+      ),
+    );
+    await click(".message-tree .plot-toggle");
+    await until("!document.querySelector('.plot-panel')");
+    assert(
+      await evaluate(
+        "document.querySelector('.topic-tree .plot-toggle').getAttribute('aria-pressed') === 'false'",
+      ),
+    );
+    publish("sample/child", 2);
+    await until("document.querySelector('.topic-tree [role=treeitem] .caret')");
+    assert(
+      await evaluate(
+        "document.querySelector('.topic-tree [role=treeitem]').querySelectorAll('button').length === 2",
+      ),
+      "Numeric parent topics need both expand and pin controls",
+    );
+    await click(".topic-tree .plot-toggle");
+    publish("sample", { value: 3 });
+    await until(
+      "document.querySelector('.message-tree [role=treeitem]')?.innerText.includes('Object') || !document.querySelector('.message-tree .plot-toggle[aria-pressed=true]')",
+    );
+    assert(
+      await evaluate(
+        "document.querySelector('.topic-tree .plot-toggle[aria-pressed=true]') !== null",
+      ),
+      "A changed payload type must still allow unpinning",
+    );
+    await click(".topic-tree .plot-toggle[aria-pressed=true]");
+    await click('button[aria-label="Clear history for the selected topic"]');
+    publish("sample", 1);
+    await until("document.querySelector('.message-tree .plot-toggle')");
     await click(".history-disclosure");
     const sparse = await dimensions();
     assert(
@@ -376,7 +418,7 @@ try {
     );
     assert(
       await evaluate(
-        "document.querySelectorAll('.plot-toggle:disabled').length === 30",
+        "document.querySelectorAll('.message-tree .plot-toggle:disabled').length === 30",
       ),
     );
     const firstTitle = await evaluate(

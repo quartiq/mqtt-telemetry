@@ -128,7 +128,8 @@
         ondblclick={(event) => event.stopPropagation()}
         onclick={toggle}>{open ? "▾" : "▸"}</button
       >
-    {:else if checkable}
+    {/if}
+    {#if checkable}
       <button
         aria-label={checked ? "Remove plot" : "Add plot"}
         aria-pressed={checked}
@@ -144,7 +145,7 @@
         ondblclick={(event) => event.stopPropagation()}
         onclick={toggleCheck}>{checked ? "✓" : ""}</button
       >
-    {:else}
+    {:else if !internal}
       <span aria-hidden="true" class="spacer"></span>
     {/if}
     {#if context.showActivity}

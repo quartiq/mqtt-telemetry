@@ -189,6 +189,25 @@ describe("payloads and JSON fields", () => {
 });
 
 describe("topic history", () => {
+  it("marks only current numeric root payloads for topic pinning", () => {
+    const store = new TelemetryStore(2);
+    store.add("a/child", encode("1"), { receivedAt: 1, retained: false });
+    const a = store.nodeId("a") as string;
+    expect(store.snapshot().nodes.get(a)?.numeric).toBe(false);
+    for (const [value, numeric] of [
+      ["42", true],
+      ['{"value": 42}', false],
+      ['"42"', false],
+      ["1e999", false],
+      ["-3.5", true],
+    ] as const) {
+      store.add("a", encode(value), { receivedAt: 2, retained: false });
+      expect(store.snapshot().nodes.get(a)?.numeric).toBe(numeric);
+    }
+    store.clearHistory(a);
+    expect(store.snapshot().nodes.get(a)?.numeric).toBe(false);
+  });
+
   it("bounds each topic independently", () => {
     const store = new TelemetryStore(2);
     store.add("a", encode("1"), { receivedAt: 1, retained: false });

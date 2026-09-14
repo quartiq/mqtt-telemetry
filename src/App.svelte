@@ -212,6 +212,25 @@
     ),
   );
   let plotLimitReached = $derived(route.plots.length >= MAX_PLOTS);
+  let checkedTopics = $derived.by(() => {
+    revision;
+    return new Set(
+      route.plots
+        .filter((plot) => plot.path === "$")
+        .flatMap((plot) => {
+          const id = store.nodeId(plot.topic);
+          return id === undefined ? [] : [id];
+        }),
+    );
+  });
+  let checkableTopics = $derived(
+    new Set([
+      ...checkedTopics,
+      ...[...topicSnapshot.nodes]
+        .filter(([, node]) => node.numeric)
+        .map(([id]) => id),
+    ]),
+  );
   let selectedValuePlotCount = $derived.by(() => {
     if (!jsonSnapshot?.nodes.get(selectedJsonId)?.children.length) return 0;
     const path = selectedJsonId;
@@ -880,10 +899,7 @@
     );
   }
 
-  function togglePlot(id: string) {
-    const path = jsonSnapshot?.paths.get(id);
-    if (!path || !selectedTopic) return;
-    const plot = { topic: selectedTopic, path: jsonPath(path) };
+  function togglePlot(plot: PlotRef) {
     const key = plotKey(plot);
     const pinned = route.plots.some((current) => plotKey(current) === key);
     if (!pinned && route.plots.length >= MAX_PLOTS) return;
@@ -1228,6 +1244,13 @@
             expanded={visibleTopicExpanded}
             activity={topicActivity}
             label="MQTT topics"
+            checkable={checkableTopics}
+            checked={checkedTopics}
+            checkDisabled={plotLimitReached}
+            oncheck={(id) => {
+              const topic = store.topic(id);
+              if (topic !== undefined) togglePlot({ topic, path: "$" });
+            }}
             onselect={selectTopic}
             ontoggle={toggleTopic}
           />
@@ -1261,7 +1284,7 @@
       timeZone={route.timeZone}
       onselect={selectJson}
       ontoggle={toggleJson}
-      oncheck={togglePlot}
+      oncheck={(path) => togglePlot({ topic: selectedTopic, path })}
       onremoveplots={removeSelectedValuePlots}
       onremoveallplots={() => removePlots(() => true)}
     />

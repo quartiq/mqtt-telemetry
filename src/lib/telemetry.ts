@@ -38,9 +38,14 @@ type TopicNode = {
   messageCount: number;
 };
 
+type TopicNodeView = TreeNodeView & {
+  // Whether the latest buffered payload is a finite JSON number.
+  numeric: boolean;
+};
+
 export type TopicSnapshot = {
   roots: string[];
-  nodes: Map<string, TreeNodeView>;
+  nodes: Map<string, TopicNodeView>;
   revision: number;
   topicCount: number;
   bufferedMessages: number;
@@ -184,7 +189,7 @@ const MAX_PLOT_CACHE_ENTRIES = 16;
 export class TelemetryStore {
   private readonly nodes = new Map<string, TopicNode>();
   private readonly topicIds = new Map<string, string>();
-  private readonly views = new Map<string, TreeNodeView>();
+  private readonly views = new Map<string, TopicNodeView>();
   private readonly dirtyViews = new Set<string>();
   private roots: string[] = [];
   // Map insertion order is arrival order; its first remaining value is oldest.
@@ -465,11 +470,16 @@ export class TelemetryStore {
     return parent;
   }
 
-  private nodeView(id: string): TreeNodeView {
+  private nodeView(id: string): TopicNodeView {
     const node = this.nodes.get(id) as TopicNode;
     const direct = node.history.length;
+    const payload = node.history.at(-1)?.payload;
     return {
       id,
+      numeric:
+        payload?.kind === "json" &&
+        typeof payload.value === "number" &&
+        Number.isFinite(payload.value),
       label: node.label,
       ...(node.parent ? { parent: node.parent } : {}),
       children: node.children,
