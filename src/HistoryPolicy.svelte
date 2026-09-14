@@ -22,9 +22,9 @@
 
 <div class="history-policy">
   <label>
-    Live max
+    Max
     <input
-      aria-label="Live messages kept per topic"
+      aria-label="Messages kept per topic"
       max={MAX_HISTORY_LIMIT}
       min="1"
       onchange={commit}
@@ -35,12 +35,10 @@
     />
     /topic
   </label>
-  <label
-    title="Discard older live messages; always keep the latest received value"
-  >
+  <label title="Discard older messages; always keep the latest received value">
     Age
     <DurationSelect
-      ariaLabel="Age limit for older live history"
+      ariaLabel="Age limit for older history"
       noneLabel="none"
       value={ageMs}
       onchange={onagechange}

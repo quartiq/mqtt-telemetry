@@ -136,7 +136,9 @@
       />
     </div>
   {:else if message}
-    <pre>{formatPayload(message.payload)}</pre>
+    <pre>{message.bytes === 0
+        ? "empty payload"
+        : formatPayload(message.payload)}</pre>
   {:else if topic && subtreeMessages}
     <p class="empty">
       No message in history on this exact topic. Expand it and select a

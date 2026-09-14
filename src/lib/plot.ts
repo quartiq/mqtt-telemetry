@@ -11,7 +11,7 @@ export type PlotPoint = {
 export type PlotSeries = {
   points: PlotPoint[];
   retainedExcluded: number;
-  unavailable?: boolean;
+  unavailable?: "omitted" | "nonnumeric";
 };
 export type PlotTimeDomain = { min: number; max: number };
 export type PlotScale = {
@@ -49,7 +49,7 @@ function plotSeriesAtPath(
 ): PlotSeries {
   const points: PlotPoint[] = [];
   let retainedExcluded = 0;
-  let unavailable = false;
+  let unavailable: PlotSeries["unavailable"];
   let interrupted = false;
   let run = 0;
   for (const message of history) {
@@ -57,7 +57,12 @@ function plotSeriesAtPath(
       message.payload.kind === "json"
         ? getJsonPath(message.payload.value, path)
         : undefined;
-    unavailable = typeof value !== "number" || !Number.isFinite(value);
+    unavailable =
+      message.payload.kind === "omitted"
+        ? "omitted"
+        : typeof value !== "number" || !Number.isFinite(value)
+          ? "nonnumeric"
+          : undefined;
     // Retained snapshots describe the inspected value, not the live timeline.
     if (message.retained) {
       if (!unavailable) retainedExcluded += 1;
@@ -79,7 +84,7 @@ function plotSeriesAtPath(
   return {
     points,
     retainedExcluded,
-    ...(unavailable ? { unavailable: true } : {}),
+    ...(unavailable ? { unavailable } : {}),
   };
 }
 

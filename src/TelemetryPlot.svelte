@@ -11,6 +11,7 @@
     plotStatistics,
     timeTickValues,
     type PlotPoint,
+    type PlotSeries,
   } from "./lib/plot";
   import {
     displayDatesDiffer,
@@ -23,7 +24,7 @@
     topic: string;
     label: string;
     retainedExcluded: number;
-    unavailable?: boolean;
+    unavailable?: PlotSeries["unavailable"];
     xMin: number;
     xMax: number;
     timeZone: DisplayTimeZone;
@@ -208,7 +209,12 @@
       );
       items.push(`n ${visiblePoints.length.toLocaleString()}`);
     }
-    if (unavailable) items.push("field absent or nonnumeric");
+    if (unavailable)
+      items.push(
+        unavailable === "omitted"
+          ? "payload omitted"
+          : "field absent or nonnumeric",
+      );
     if (retainedExcluded)
       items.push(`${retainedExcluded.toLocaleString()} retained excluded`);
     if (gaps)

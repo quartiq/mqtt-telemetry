@@ -63,14 +63,14 @@ broker.on("connection", (socket) => {
     }
   });
 });
-function publish(topic, value) {
+function publish(topic, value, retain = false) {
   client.send(
     packet.generate({
       cmd: "publish",
       topic,
-      payload: JSON.stringify(value),
+      payload: Buffer.isBuffer(value) ? value : JSON.stringify(value),
       qos: 0,
-      retain: false,
+      retain,
     }),
   );
 }
@@ -350,6 +350,43 @@ try {
       "Numeric parent topics need both expand and pin controls",
     );
     await click(".topic-tree .plot-toggle");
+    publish("sample", 20, true);
+    publish("sample", 21, true);
+    publish("sample", Buffer.alloc(0));
+    await until(
+      "document.querySelector('.message-panel pre')?.innerText === 'empty payload'",
+    );
+    assert(
+      await evaluate(
+        "document.querySelector('.topic-tree [role=treeitem]').textContent.includes('(4)')",
+      ),
+      "Retained replays and empty live messages must append without clearing history",
+    );
+    assert.equal(
+      await evaluate(
+        "document.querySelectorAll('.plot-panel svg circle').length",
+      ),
+      1,
+      "Retained replays and empty messages must preserve the existing live plot",
+    );
+    publish("sample", "x".repeat(1024 * 1024));
+    await until(
+      "document.querySelector('.message-panel pre')?.innerText.includes('Payload omitted:')",
+    );
+    await until(
+      "document.querySelector('.plot-panel').innerText.includes('payload omitted')",
+    );
+    assert(
+      await evaluate(
+        "!document.querySelector('.topic-tree [role=treeitem]').querySelector(':scope > .value')",
+      ),
+      "An omitted payload must not leave the previous numeric value current",
+    );
+    assert(
+      await evaluate(
+        "document.querySelector('.connection-state').innerText.includes('Connected')",
+      ),
+    );
     publish("sample", { value: 3 });
     await until("document.querySelector('.message-tree .caret')");
     assert(

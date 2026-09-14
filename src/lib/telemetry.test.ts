@@ -306,42 +306,40 @@ describe("topic history", () => {
     expect(store.subtreeMessageCount(store.nodeId("a") as string)).toBe(1);
   });
 
-  it("keeps and replaces one retained snapshot outside live limits", () => {
-    const store = new TelemetryStore(1);
-    store.add("a", encode("retained"), {
-      receivedAt: 1000,
-      retained: true,
-    });
-    store.add("a", encode("live 1"), {
-      receivedAt: 2000,
-      retained: false,
-    });
-    store.add("a", encode("live 2"), {
-      receivedAt: 3000,
-      retained: false,
-    });
-    const id = store.nodeId("a") as string;
-
-    expect(
-      store.history(id).map(({ retained, receivedAt }) => ({
-        retained,
-        receivedAt,
-      })),
-    ).toEqual([
-      { retained: true, receivedAt: 1000 },
-      { retained: false, receivedAt: 3000 },
+  it("appends retained arrivals and empty payloads under the ordinary history limits", () => {
+    const store = new TelemetryStore(4);
+    for (const [index, value] of ["1", "2", ""].entries())
+      store.add("a", encode(value), { receivedAt: index + 1, retained: true });
+    const id = store.nodeId("a")!;
+    expect(store.history(id).map(({ payload }) => payload.value)).toEqual([
+      1,
+      2,
+      "",
     ]);
-    expect(store.expireBefore(4000)).toBe(0);
-    expect(store.history(id)).toHaveLength(2);
-    expect(store.history(id).at(-1)?.retained).toBe(false);
-    store.add("a", encode("new"), {
-      receivedAt: 5000,
+    expect(messagePayloadPreview(store.history(id).at(-1)!)).toBe(
+      "empty payload",
+    );
+    expect(messageSpan(store.history(id))).toBe("2 ms span");
+    expect(store.snapshot().nodes.get(id)?.numeric).toBe(false);
+    store.add("a", encode("3"), { receivedAt: 4, retained: false });
+    store.setHistoryLimit(3);
+    expect(store.history(id).map(({ receivedAt }) => receivedAt)).toEqual([
+      2, 3, 4,
+    ]);
+    expect(store.expireBefore(5)).toBe(2);
+    expect(store.history(id).map(({ receivedAt }) => receivedAt)).toEqual([4]);
+    store.add("a", encode("4"), { receivedAt: 5, retained: true });
+    expect(store.expireBefore(10)).toBe(1);
+    expect(store.history(id).at(-1)).toMatchObject({
+      receivedAt: 5,
       retained: true,
     });
-    expect(store.expireBefore(4000)).toBe(1);
-    const history = store.history(id);
-    expect(history).toHaveLength(1);
-    expect(history[0]).toMatchObject({ receivedAt: 5000, retained: true });
+    store.add("a", encode("5"), { receivedAt: 6, retained: true });
+    store.add("a", encode("6"), { receivedAt: 7, retained: true });
+    store.add("a", encode("7"), { receivedAt: 8, retained: true });
+    expect(store.history(id).map(({ receivedAt }) => receivedAt)).toEqual([
+      6, 7, 8,
+    ]);
     store.clearHistory(id);
     expect(store.history(id)).toEqual([]);
   });
@@ -581,7 +579,6 @@ describe("topic history", () => {
       }),
     ).toBeUndefined();
     const snapshot = store.snapshot();
-    expect(snapshot.payloadsOmitted).toBe(true);
     expect(snapshot.topicsOmitted).toBe(true);
     expect(
       store.add("a/b", encode("2"), { receivedAt: 3, retained: false }),
@@ -689,12 +686,36 @@ describe("plot extraction", () => {
     });
   });
 
+  it("records oversized arrivals without stale previews or plot continuity", () => {
+    const store = new TelemetryStore(10, { maxPayloadBytes: 8 });
+    store.add("a", encode("1"), { receivedAt: 1, retained: false });
+    const omitted = store.add("a", encode('"0123456789"'), {
+      receivedAt: 2,
+      retained: false,
+    });
+    expect(omitted?.message).toMatchObject({
+      receivedAt: 2,
+      bytes: 12,
+      payload: { kind: "omitted" },
+    });
+    const id = store.nodeId("a")!;
+    expect(store.history(id)).toHaveLength(2);
+    expect(store.snapshot().nodes.get(id)?.value).toBeUndefined();
+    expect(store.plotSeries(id, "$").unavailable).toBe("omitted");
+    expect(store.snapshot().collectionStopped).toBe(false);
+    store.add("a", encode("3"), { receivedAt: 3, retained: false });
+    const series = store.plotSeries(id, "$");
+    expect(series.unavailable).toBeUndefined();
+    expect(series.points.map((point) => point.y)).toEqual([1, 3]);
+    expect(series.points.at(-1)?.run).toBe(1);
+  });
+
   it("keeps retained updates out of live plot continuity", () => {
     const store = new TelemetryStore(10);
     store.add("a", encode("1"), { receivedAt: 1, retained: false });
     store.add("a", encode('"offline"'), { receivedAt: 2, retained: true });
     const id = store.nodeId("a")!;
-    expect(store.plotSeries(id, "$").unavailable).toBe(true);
+    expect(store.plotSeries(id, "$").unavailable).toBe("nonnumeric");
     store.add("a", encode("2"), { receivedAt: 3, retained: false });
     const points = store.plotSeries(id, "$").points;
     expect(points.map((point) => point.run ?? 0)).toEqual([0, 0]);
@@ -708,7 +729,7 @@ describe("plot extraction", () => {
 
   it("preserves schema interruptions through downsampling", () => {
     const history = [message(1, 1, "1"), message(2, 2, '"offline"')];
-    expect(plotSeries(history, []).unavailable).toBe(true);
+    expect(plotSeries(history, []).unavailable).toBe("nonnumeric");
     history.push(message(3, 3, "2"));
     expect(plotSeries(history, []).points[1].run).toBe(1);
     const dense = Array.from({ length: 100 }, (_, i) =>

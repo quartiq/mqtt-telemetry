@@ -287,7 +287,7 @@
       : topicSnapshot.topicsOmitted
         ? "Some topics could not fit in the topic tree. Narrow subscriptions, then reset collected data."
         : topicSnapshot.historyLimited
-          ? "Storage limit reached: older history was trimmed; latest values are kept."
+          ? "Older history trimmed; latest values kept."
           : "",
   );
 
@@ -1267,9 +1267,6 @@
           >
             {topicWarning}
           </span>
-        {/if}
-        {#if topicSnapshot.payloadsOmitted}
-          <span class="meta">Payloads over 1 MiB were omitted.</span>
         {/if}
       </header>
       <div class="topic-tree">

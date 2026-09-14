@@ -14,7 +14,7 @@ History lives in the current tab and is lost on reload. Storage is bounded: olde
 
 Subscription edits and reconnects preserve the workspace. Changing the broker URL starts fresh. Messages missed during a connection interruption cannot be recovered.
 
-Plots use browser receipt time. Retained snapshots remain inspectable but are excluded from plots because their publication time is unknown. A pinned field becoming absent or nonnumeric interrupts its line; the plot resumes when numeric values return.
+Plots use browser receipt time. Every arrival enters history, including retained replays and empty payloads; neither erases earlier messages. Retained replays are excluded from plots so refreshing subscriptions does not count old values as new measurements. A pinned field becoming absent or nonnumeric interrupts its line; the plot resumes when numeric values return.
 
 Saved dashboards and share links contain connection settings and plots, but no credentials or message history. Broker and topic names in launch URLs may appear in browser history and hosting logs; use a local dashboard file for sensitive names.
 
