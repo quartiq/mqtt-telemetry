@@ -125,6 +125,7 @@
         class="caret"
         tabindex="-1"
         type="button"
+        ondblclick={(event) => event.stopPropagation()}
         onclick={toggle}>{open ? "▾" : "▸"}</button
       >
     {:else if checkable}
@@ -140,6 +141,7 @@
             ? "Remove plot"
             : "Add plot"}
         type="button"
+        ondblclick={(event) => event.stopPropagation()}
         onclick={toggleCheck}>{checked ? "✓" : ""}</button
       >
     {:else}
@@ -298,5 +300,23 @@
     background: var(--fg);
     border-color: var(--fg);
     color: var(--bg);
+  }
+
+  @media (pointer: coarse) {
+    [role="treeitem"] {
+      min-height: 44px;
+    }
+
+    .caret,
+    .spacer,
+    .plot-toggle {
+      flex-basis: 44px;
+      width: 44px;
+    }
+
+    .caret,
+    .plot-toggle {
+      min-height: 44px;
+    }
   }
 </style>

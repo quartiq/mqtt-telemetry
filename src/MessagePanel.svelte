@@ -2,6 +2,7 @@
 
 <script lang="ts">
   import TreeView from "./TreeView.svelte";
+  import { MAX_PLOTS } from "./lib/routes";
   import type { JsonSnapshot } from "./lib/json";
   import { formatPayload, type TelemetryMessage } from "./lib/telemetry";
   import { formatTelemetryTime, type DisplayTimeZone } from "./lib/time";
@@ -111,6 +112,12 @@
         {#each statistics as statistic}<span>{statistic}</span>{/each}
       </div>
     {/if}
+    {#if checkDisabled}
+      <p class="plot-limit meta" role="status">
+        Plot limit reached ({plotCount}/{MAX_PLOTS}). Remove a plot to add
+        another.
+      </p>
+    {/if}
   </header>
   {#if message?.payload.kind === "json" && snapshot}
     <div class="message-tree">
@@ -153,6 +160,10 @@
   .message-tree {
     min-height: 0;
     overflow: auto;
+  }
+
+  .plot-limit {
+    grid-column: 1 / -1;
   }
 
   pre {

@@ -439,6 +439,17 @@
     opacity: 0.3;
   }
 
+  @media (pointer: coarse) {
+    .plot-actions {
+      gap: var(--space-tight);
+    }
+
+    .plot-action {
+      min-height: 44px;
+      width: 44px;
+    }
+  }
+
   svg {
     color: var(--muted);
     cursor: crosshair;

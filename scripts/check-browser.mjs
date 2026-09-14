@@ -103,6 +103,22 @@ async function viewport(width, height) {
     mobile: false,
   });
 }
+async function tap(selector) {
+  const { x, y } = await evaluate(`(() => {
+    const element = document.querySelector(${JSON.stringify(selector)});
+    element.scrollIntoView({ block: 'center', inline: 'center' });
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  })()`);
+  await command("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x, y }],
+  });
+  await command("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+}
 async function dimensions() {
   return evaluate(`(() => {
     const rect = selector => {
@@ -199,6 +215,7 @@ try {
     `http://127.0.0.1:${port}/`,
     pathToFileURL(resolve("dist/index.html")).href,
   ]) {
+    await command("Emulation.setTouchEmulationEnabled", { enabled: false });
     await viewport(390, 844);
     await command("Page.navigate", { url: base });
     await until("document.querySelector('input[name=broker]')");
@@ -303,7 +320,76 @@ try {
       !(await dimensions()).overflow,
       "Connection editor overflows mobile viewport",
     );
-    console.log(`Checked empty and populated panes: ${base}`);
+    await click(".connection-disclosure");
+    await command("Emulation.setTouchEmulationEnabled", { enabled: true });
+    assert(await evaluate("matchMedia('(pointer: coarse)').matches"));
+    const fieldToggle =
+      '[aria-label="JSON fields"] .plot-toggle:not([aria-pressed="true"]):not(:disabled)';
+    assert(
+      await evaluate(`['.message-tree .caret', '.message-tree .plot-toggle'].every(selector => {
+      const rect = document.querySelector(selector).getBoundingClientRect();
+      return rect.width >= 44 && rect.height >= 44;
+    })`),
+      "Tree touch targets are too small",
+    );
+    await tap(".message-tree .caret");
+    await until("!document.querySelector('.message-tree .plot-toggle')");
+    await tap(".message-tree .caret");
+    await until("document.querySelector('.message-tree .plot-toggle')");
+    for (let count = 1; count <= 10; count++) {
+      await tap(fieldToggle);
+      await until(
+        `document.querySelectorAll('.plot-panel').length === ${count}`,
+      );
+    }
+    assert(
+      await evaluate(
+        "document.querySelector('.plot-limit').innerText.includes('10/10')",
+      ),
+    );
+    assert(
+      await evaluate(
+        "document.querySelectorAll('.plot-toggle:disabled').length === 30",
+      ),
+    );
+    const firstTitle = await evaluate(
+      "document.querySelector('.plot-title').innerText",
+    );
+    await tap('.plot-panel .plot-action[title="Move plot later"]');
+    await until(
+      `document.querySelector('.plot-title').innerText !== ${JSON.stringify(firstTitle)}`,
+    );
+    await tap('.plot-panel .plot-action[title="Remove plot"]');
+    await until(
+      "document.querySelectorAll('.plot-panel').length === 9 && !document.querySelector('.plot-limit')",
+    );
+    await tap(fieldToggle);
+    await until("document.querySelectorAll('.plot-panel').length === 10");
+    assert(
+      await evaluate(
+        "Array.from(document.querySelectorAll('.plot-action')).every(e => { const r = e.getBoundingClientRect(); return r.width >= 44 && r.height >= 44; })",
+      ),
+    );
+    // Keyboard removal remains available at the limit.
+    await evaluate(
+      "document.querySelector('.plot-toggle[aria-pressed=true]').closest('[role=treeitem]').focus()",
+    );
+    await command("Input.dispatchKeyEvent", {
+      type: "keyDown",
+      key: " ",
+      code: "Space",
+    });
+    await command("Input.dispatchKeyEvent", {
+      type: "keyUp",
+      key: " ",
+      code: "Space",
+    });
+    await until("document.querySelectorAll('.plot-panel').length === 9");
+    assert(
+      !(await dimensions()).overflow,
+      "Touch controls overflow the viewport",
+    );
+    console.log(`Checked panes, touch controls, and plot limit: ${base}`);
   }
   assert(
     subscriptions >= 2,
