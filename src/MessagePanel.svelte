@@ -144,6 +144,7 @@
 
 <style>
   .message-panel {
+    container-type: inline-size;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     min-height: 0;
@@ -169,6 +170,7 @@
   .remove-controls {
     align-items: baseline;
     display: flex;
+    flex-wrap: wrap;
     gap: var(--space-tight);
   }
 
@@ -176,13 +178,7 @@
     white-space: nowrap;
   }
 
-  @media (max-width: 800px) {
-    .message-panel {
-      height: clamp(16rem, 40svh, 24rem);
-    }
-  }
-
-  @media (max-width: 420px) {
+  @container (max-width: 19rem) {
     .message-panel > .panel-header {
       grid-template-columns: minmax(0, 1fr);
     }

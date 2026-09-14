@@ -301,6 +301,7 @@
   .clear-controls {
     align-items: baseline;
     display: flex;
+    flex-wrap: wrap;
     white-space: nowrap;
   }
 
@@ -393,28 +394,6 @@
     color: var(--muted);
     font-style: italic;
     text-align: center;
-  }
-
-  @media (max-width: 800px) {
-    .history-panel.expanded {
-      height: clamp(16rem, 40svh, 24rem);
-    }
-  }
-
-  @media (max-width: 420px) {
-    .history-panel > .panel-header {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .controls {
-      grid-column: 1;
-      grid-row: 2;
-    }
-
-    .panel-stats {
-      grid-column: 1;
-      grid-row: 3;
-    }
   }
 
   @container (max-width: 19rem) {

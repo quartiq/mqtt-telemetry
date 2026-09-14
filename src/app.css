@@ -393,7 +393,7 @@ pre {
     margin-top: var(--space);
   }
 
-  .topics {
+  .browsers > .panel {
     max-height: 45svh;
   }
 
