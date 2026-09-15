@@ -655,6 +655,71 @@ try {
       "Value header does not adapt to narrow sidebar",
     );
     await viewport(390, 844);
+    // Offscreen leaves must keep their height and remain reachable by keyboard,
+    // including after switching between desktop and touch row sizes.
+    for (const touch of [false, true, false]) {
+      await command("Emulation.setTouchEmulationEnabled", { enabled: touch });
+      for (const selector of [".message-tree", ".topic-tree"]) {
+        const before = await evaluate(`(() => {
+          const pane = document.querySelector('${selector}');
+          const rows = pane.querySelectorAll('[role=treeitem]');
+          rows[0].focus();
+          return { height: pane.scrollHeight, count: rows.length,
+            rowHeight: rows[0].getBoundingClientRect().height };
+        })()`);
+        assert.equal(
+          before.height,
+          Math.round(before.count * before.rowHeight),
+          "Skipped rows must reserve the current row height",
+        );
+        for (const key of ["End", "Home"]) {
+          await command("Input.dispatchKeyEvent", { type: "keyDown", key });
+          await command("Input.dispatchKeyEvent", { type: "keyUp", key });
+          await until(`(() => {
+            const pane = document.querySelector('${selector}');
+            const rows = pane.querySelectorAll('[role=treeitem]');
+            const row = rows[${key === "End" ? "rows.length - 1" : "0"}];
+            const box = row.getBoundingClientRect();
+            const bounds = pane.getBoundingClientRect();
+            return document.activeElement === row && box.top >= bounds.top - 1 &&
+              box.bottom <= bounds.bottom + 1 && box.height === ${before.rowHeight};
+          })()`);
+          assert.equal(
+            await evaluate(
+              `document.querySelector('${selector}').scrollHeight`,
+            ),
+            before.height,
+            "Revealing offscreen rows must not shift the scroll extent",
+          );
+        }
+      }
+    }
+    await command("Accessibility.enable");
+    const accessibility = await command("Accessibility.getFullAXTree");
+    assert.equal(
+      accessibility.nodes.filter((node) => node.role?.value === "treeitem")
+        .length,
+      await evaluate("document.querySelectorAll('[role=treeitem]').length"),
+      "All rows must retain their tree-item accessibility roles",
+    );
+    const { root } = await command("DOM.getDocument");
+    for (const [selector, name] of [
+      ['.message-tree [data-tree-id="$.field9"]', "field9"],
+      [".topic-tree > ul > li:last-child [role=treeitem]", "topic-9"],
+    ]) {
+      const { nodeId } = await command("DOM.querySelector", {
+        nodeId: root.nodeId,
+        selector,
+      });
+      const { nodes } = await command("Accessibility.getPartialAXTree", {
+        nodeId,
+        fetchRelatives: false,
+      });
+      assert(
+        nodes.some((node) => !node.ignored && node.name?.value.includes(name)),
+        "Offscreen rows must remain available to accessibility tools",
+      );
+    }
     await click(".connection-disclosure");
     assert(
       !(await dimensions()).overflow,
