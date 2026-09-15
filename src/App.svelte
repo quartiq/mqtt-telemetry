@@ -1,6 +1,7 @@
 <svelte:options runes={true} />
 
 <script lang="ts">
+  import { restoreAuth, rememberAuth } from "./lib/session-auth";
   import { onMount } from "svelte";
   import ConnectionFields from "./ConnectionFields.svelte";
   import DurationSelect from "./DurationSelect.svelte";
@@ -67,6 +68,10 @@
     storedRoute,
   );
   const initialRoute = startup.route;
+  const initialAuth = restoreAuth(initialRoute.broker);
+  const credentialsRequired =
+    storedRoute?.broker === initialRoute.broker &&
+    history.state?.credentialsRequired === true;
   const buildCommit = __BUILD_COMMIT__;
   const exactBuildCommit = /^[0-9a-f]{40}$/i.test(buildCommit);
   const buildLabel = exactBuildCommit
@@ -78,8 +83,8 @@
   let route = $state(initialRoute);
   let formBroker = $state(initialRoute.broker);
   let formFilters = $state(initialRoute.filters.join("\n"));
-  let username = $state("");
-  let password = $state("");
+  let username = $state(initialAuth?.username ?? "");
+  let password = $state(initialAuth?.password ?? "");
 
   let session = $state<MqttSession | undefined>();
   let store = $state.raw(new TelemetryStore(initialRoute.historyLimit));
@@ -119,8 +124,8 @@
   let editingConnection = $state(!initialRoute.broker);
   let dashboardFileInput: HTMLInputElement;
   let connectionLifetime = new AbortController();
-  let activeUsername = $state("");
-  let activePassword = $state("");
+  let activeUsername = $state(initialAuth?.username ?? "");
+  let activePassword = $state(initialAuth?.password ?? "");
   let viewToken = randomId();
   let lastSegment = 0;
   const segments = new Map<string, { transport: number; id: number }>();
@@ -129,7 +134,12 @@
 
   if (location.search || location.hash || !storedRoute)
     history.replaceState(
-      browserViewState(initialRoute, viewToken, null),
+      {
+        ...browserViewState(initialRoute, viewToken, null),
+        credentialsRequired:
+          credentialsRequired ||
+          Boolean(initialAuth?.username || initialAuth?.password),
+      },
       "",
       launchRoute.kind === "invalid" && inlineDashboard.kind === "absent"
         ? location.href
@@ -335,12 +345,15 @@
       editingConnection = false;
       const next = routeFromViewState(event.state) ?? defaultRoute();
       if (next.broker !== route.broker) {
+        rememberAuth();
         activeUsername = "";
         activePassword = "";
         route = next;
         if (next.broker) {
           formBroker = next.broker;
-          void startConnection(next);
+          formFilters = next.filters.join("\n");
+          if (event.state?.credentialsRequired) stopConnection();
+          else void startConnection(next);
         } else {
           stopConnection();
         }
@@ -374,6 +387,9 @@
       connectionState = "error";
       error = brokerError;
       editingConnection = true;
+    } else if (credentialsRequired && !initialAuth) {
+      editingConnection = true;
+      connectionState = "idle";
     } else if (route.broker) void startConnection(route);
     return () => {
       removeEventListener("popstate", popstate);
@@ -392,7 +408,10 @@
     route = next;
     const method = replace ? "replaceState" : "pushState";
     history[method](
-      browserViewState(next, viewToken, messageId),
+      {
+        ...browserViewState(next, viewToken, messageId),
+        credentialsRequired: Boolean(activeUsername || activePassword),
+      },
       "",
       launchUrl(next, location),
     );
@@ -431,6 +450,7 @@
     error = "";
     const sameBroker = next.broker === route.broker;
     if (!sameBroker) {
+      rememberAuth();
       activeUsername = "";
       activePassword = "";
     }
@@ -514,6 +534,9 @@
   }
 
   function stopConnection() {
+    rememberAuth();
+    activeUsername = username = "";
+    activePassword = password = "";
     connectionLifetime.abort();
     session?.close();
     session = undefined;
@@ -640,6 +663,12 @@
         return;
       }
       session = nextSession;
+      if (
+        !rememberAuth(nextRoute.broker, credentials) &&
+        (credentials.username || credentials.password)
+      )
+        connectionNotice =
+          "Credentials will not survive reload: browser storage unavailable.";
       restoreView(history.state);
     } catch (caught) {
       if (signal.aborted) return;
@@ -676,6 +705,7 @@
       filters,
       ...(sameBroker ? {} : { selectedTopic: "", fieldPath: null, plots: [] }),
     };
+    if (!sameBroker) rememberAuth();
     activeUsername = username;
     activePassword = password;
     editingConnection = false;
