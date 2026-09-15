@@ -2,6 +2,8 @@ import type { TelemetryMessage } from "./telemetry";
 
 export type DisplayTimeZone = "local" | "utc";
 
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
 export function formatTelemetryTime(
   value: number,
   options: {
@@ -10,17 +12,23 @@ export function formatTelemetryTime(
     milliseconds?: boolean;
   },
 ): string {
-  const parts = new Intl.DateTimeFormat("en", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-    ...(options.milliseconds ? { fractionalSecondDigits: 3 } : {}),
-    ...(options.timeZone === "utc" ? { timeZone: "UTC" } : {}),
-  }).formatToParts(value);
+  const key = `${options.timeZone}:${Boolean(options.milliseconds)}`;
+  let formatter = formatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+      ...(options.milliseconds ? { fractionalSecondDigits: 3 } : {}),
+      ...(options.timeZone === "utc" ? { timeZone: "UTC" } : {}),
+    });
+    formatters.set(key, formatter);
+  }
+  const parts = formatter.formatToParts(value);
   const part = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((candidate) => candidate.type === type)?.value ?? "";
   const date = options.date
@@ -37,13 +45,10 @@ export function displayDatesDiffer(
   right: number,
   timeZone: DisplayTimeZone,
 ): boolean {
-  const formatter = new Intl.DateTimeFormat("en", {
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    ...(timeZone === "utc" ? { timeZone: "UTC" } : {}),
-  });
-  return formatter.format(left) !== formatter.format(right);
+  return (
+    formatTelemetryTime(left, { timeZone, date: true }).slice(0, 10) !==
+    formatTelemetryTime(right, { timeZone, date: true }).slice(0, 10)
+  );
 }
 
 export function historyNeedsDate(

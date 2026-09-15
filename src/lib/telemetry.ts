@@ -18,7 +18,7 @@ export type Payload =
       outOfRange?: true;
     }
   | { kind: "text"; value: string }
-  | { kind: "binary"; value: Uint8Array }
+  | { kind: "binary"; value: Uint8Array; truncated: boolean }
   | { kind: "omitted"; value: string };
 
 export type TelemetryMessage = {
@@ -80,6 +80,8 @@ export const DEFAULT_STORE_LIMITS: StoreLimits = {
   maxPayloadBytes: 1024 * 1024,
 };
 
+const BINARY_PREVIEW_BYTES = 32;
+
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
 function topicId(parts: string[]): string {
@@ -95,7 +97,11 @@ export function parsePayload(bytes: Uint8Array): Payload {
   try {
     text = decoder.decode(bytes);
   } catch {
-    return { kind: "binary", value: bytes.slice() };
+    return {
+      kind: "binary",
+      value: new Uint8Array(bytes.subarray(0, BINARY_PREVIEW_BYTES)),
+      truncated: bytes.length > BINARY_PREVIEW_BYTES,
+    };
   }
   let value: JsonValue;
   try {
@@ -144,9 +150,12 @@ export function formatPayload(payload: Payload): string {
     case "text":
       return payload.value;
     case "binary":
-      return Array.from(payload.value, (byte) =>
-        byte.toString(16).padStart(2, "0"),
-      ).join(" ");
+      return (
+        Array.from(payload.value, (byte) =>
+          byte.toString(16).padStart(2, "0"),
+        ).join(" ") +
+        (payload.truncated ? ` … (first ${BINARY_PREVIEW_BYTES} bytes)` : "")
+      );
     case "omitted":
       return payload.value;
   }
@@ -239,7 +248,7 @@ export class TelemetryStore {
   >();
   private readonly plotCache = new Map<
     string,
-    { historyRevision: number; series: PlotSeries }
+    { nodeId: string; historyRevision: number; series: PlotSeries }
   >();
   private readonly historyCache = new Map<
     string,
@@ -303,9 +312,11 @@ export class TelemetryStore {
     const cost =
       parsed.kind === "omitted"
         ? Math.max(256, parsed.value.length * 2)
-        : parsed.kind === "json"
-          ? parsed.estimatedBytes
-          : Math.max(256, payload.byteLength * 4);
+        : parsed.kind === "binary"
+          ? 256
+          : parsed.kind === "json"
+            ? parsed.estimatedBytes
+            : Math.max(256, payload.byteLength * 4);
     const previousLatest = node.latest;
     const previousCost = previousLatest
       ? this.messages.get(previousLatest.id)!.cost
@@ -389,9 +400,13 @@ export class TelemetryStore {
       return cached.series;
     }
 
-    const series = plotSeriesPath(this.history(id), singularPath);
+    const series = plotSeriesPath(node.history.values(), singularPath);
     this.plotCache.delete(key);
-    this.plotCache.set(key, { historyRevision: node.historyRevision, series });
+    this.plotCache.set(key, {
+      nodeId: id,
+      historyRevision: node.historyRevision,
+      series,
+    });
     while (this.plotCache.size > MAX_PLOT_CACHE_ENTRIES)
       this.plotCache.delete(this.plotCache.keys().next().value as string);
     return series;
@@ -425,10 +440,12 @@ export class TelemetryStore {
     const node = this.nodes.get(id);
     if (!node?.history.size) return;
     this.dropOldest(id, node.history.size);
+    this.collectionStopped = false;
     this.revision += 1;
   }
 
   clearSubtree(id: string): void {
+    const before = this.messages.size;
     const pending = [id];
     while (pending.length) {
       const node = this.nodes.get(pending.pop() as string);
@@ -436,10 +453,14 @@ export class TelemetryStore {
       pending.push(...node.children);
       if (node.history.size) this.dropOldest(node.id, node.history.size);
     }
+    if (this.messages.size < before) this.collectionStopped = false;
     this.revision += 1;
   }
 
   clearAllHistory(): void {
+    this.plotCache.clear();
+    this.collectionStopped = false;
+    this.historyLimited = false;
     if (!this.messages.size) return;
     for (const node of this.nodes.values()) {
       if (node.history.size) this.dropOldest(node.id, node.history.size);
@@ -458,6 +479,13 @@ export class TelemetryStore {
   }
 
   snapshot(): TopicSnapshot {
+    // Release obsolete derived data once per view update, not for every arrival.
+    for (const [key, cached] of this.plotCache)
+      if (
+        this.nodes.get(cached.nodeId)?.historyRevision !==
+        cached.historyRevision
+      )
+        this.plotCache.delete(key);
     for (const id of this.unsorted) {
       if (id === undefined) this.roots = this.sorted([...this.roots]);
       else {

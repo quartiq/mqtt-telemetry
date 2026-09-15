@@ -1,3 +1,4 @@
+import { Buffer } from "buffer";
 import { describe, expect, it } from "vitest";
 import {
   fieldLabel,
@@ -102,6 +103,30 @@ describe("payloads and JSON fields", () => {
         "utc",
       ),
     ).toBe(true);
+  });
+
+  it("owns only the binary prefix while keeping the original size", () => {
+    const input = Buffer.alloc(1024 * 1024, 255);
+    const store = new TelemetryStore(10, { maxHistoryBytes: 512 });
+    const added = store.add("binary", input.subarray(10, 1010), {
+      receivedAt: 1,
+      retained: false,
+    })!;
+    const payload = added.message.payload;
+    expect(payload.kind).toBe("binary");
+    if (payload.kind !== "binary") throw new Error("Expected binary");
+    expect(payload.value).toHaveLength(32);
+    expect(payload.value.buffer.byteLength).toBe(32);
+    input.fill(0);
+    expect(payload.value[0]).toBe(255);
+    expect(added.message.bytes).toBe(1000);
+    expect(selectedMessageValue(added.message, [])).toContain("first 32 bytes");
+    expect(
+      store.add("another", new Uint8Array([255]), {
+        receivedAt: 2,
+        retained: false,
+      }),
+    ).toBeDefined();
   });
 
   it("distinguishes JSON, text, empty, and binary payloads", () => {
@@ -427,6 +452,29 @@ describe("topic history", () => {
     });
   });
 
+  it("explicit clearing releases stopped collection and stale series", () => {
+    const store = new TelemetryStore(10, { maxHistoryMessages: 2 });
+    const a = store.add("a", encode("1"), {
+      receivedAt: 1,
+      retained: false,
+    })!.nodeId;
+    store.add("a", encode("2"), { receivedAt: 2, retained: false });
+    store.plotSeries(a, "$");
+    store.add("b", encode("3"), { receivedAt: 3, retained: false });
+    store.add("c", encode("4"), { receivedAt: 4, retained: false });
+    expect(store.snapshot().collectionStopped).toBe(true);
+    store.clearAllHistory();
+    expect(store.snapshot()).toMatchObject({
+      collectionStopped: false,
+      historyLimited: false,
+      bufferedMessages: 0,
+    });
+    expect(store.plotSeries(a, "$").points).toEqual([]);
+    expect(
+      store.add("a", encode("5"), { receivedAt: 5, retained: false }),
+    ).toBeDefined();
+  });
+
   it("budgets parsed container overhead as well as source bytes", () => {
     const store = new TelemetryStore(1000, { maxHistoryBytes: 100_000 });
     const payload = encode("[".repeat(1000) + "0" + "]".repeat(1000));
@@ -700,6 +748,12 @@ describe("plot extraction", () => {
     expect(formatPlotNumber(103_403.8, 0.03)).toBe("103403.8");
     expect(formatPlotNumber(103_403.95, 0.03)).toBe("103403.95");
     expect(formatPlotNumber(0.16, 0.03)).toBe("0.16");
+
+    expect(formatPlotTick(0, 1e-13)).toBe("0");
+    expect(formatPlotNumber(1.0000000000002, 1e-13)).toBe("1.0000000000002");
+    const small = nicePlotScale(1.0000000000001, 1.0000000000002)!;
+    expect(small).toBeDefined();
+    expect(new Set(plotAxisLabels(small).labels).size).toBe(3);
 
     expect(nicePlotScale(-1e308, 1e308)).toBeUndefined();
     expect(nicePlotScale(Number.MAX_VALUE, Number.MAX_VALUE)).toBeUndefined();

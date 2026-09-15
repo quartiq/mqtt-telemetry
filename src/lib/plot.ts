@@ -29,14 +29,14 @@ export type PlotStatistics = {
 };
 
 export function plotSeries(
-  history: readonly TelemetryMessage[],
+  history: Iterable<TelemetryMessage>,
   path: JsonPath,
 ): PlotSeries {
   return plotSeriesAtPath(history, path);
 }
 
 export function plotSeriesPath(
-  history: readonly TelemetryMessage[],
+  history: Iterable<TelemetryMessage>,
   singularPath: string,
 ): PlotSeries {
   const path = parseJsonPath(singularPath);
@@ -44,7 +44,7 @@ export function plotSeriesPath(
 }
 
 function plotSeriesAtPath(
-  history: readonly TelemetryMessage[],
+  history: Iterable<TelemetryMessage>,
   path: JsonPath,
 ): PlotSeries {
   const points: PlotPoint[] = [];
@@ -190,7 +190,7 @@ export function formatPlotNumber(value: number, resolution: number): string {
   }
 
   return new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: Math.max(0, Math.min(12, -resolutionExponent + 1)),
+    maximumFractionDigits: Math.max(0, Math.min(17, -resolutionExponent + 1)),
     useGrouping: false,
   })
     .format(value)
@@ -198,6 +198,7 @@ export function formatPlotNumber(value: number, resolution: number): string {
 }
 
 export function formatPlotTick(value: number, step: number): string {
+  if (value === 0) return "0";
   const stepExponent = Math.floor(Math.log10(Math.abs(step)));
   const valueExponent =
     value === 0 ? 0 : Math.floor(Math.log10(Math.abs(value)));
@@ -205,7 +206,7 @@ export function formatPlotTick(value: number, step: number): string {
     return formatPlotNumber(value, step);
 
   return value
-    .toFixed(Math.max(0, Math.min(12, -stepExponent)))
+    .toFixed(Math.max(0, Math.min(17, -stepExponent)))
     .replace("-", "−")
     .replace(/^([−]?)0\./, "$1.");
 }
@@ -254,7 +255,12 @@ export function nicePlotScale(
     first > dataMin ||
     last < dataMax ||
     new Set(
-      [first, first + step, last].map((tick) => formatPlotTick(tick, step)),
+      plotAxisLabels({
+        min: first,
+        max: last,
+        step,
+        ticks: [first, first + step, last],
+      }).labels,
     ).size !== 3
   )
     return undefined;

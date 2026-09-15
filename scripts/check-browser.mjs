@@ -21,6 +21,7 @@ let client;
 let subscriptions = 0;
 const requests = [];
 const connections = [];
+const connectionPasswords = [];
 let subscriptionReply = "accept";
 let acknowledge;
 broker.on("connection", (socket) => {
@@ -31,6 +32,7 @@ broker.on("connection", (socket) => {
     if (message.cmd === "connect") {
       client = socket;
       connections.push(message.username ?? "");
+      connectionPasswords.push(message.password?.toString() ?? "");
       socket.send(packet.generate({ cmd: "connack", returnCode: 0 }));
     } else if (message.cmd === "subscribe") {
       subscriptions += 1;
@@ -904,6 +906,7 @@ try {
 
     await click(".connection-disclosure");
     await fill("input[name=username]", "another-user");
+    await fill("input[name=password]", "reload-secret");
     await click(".connection-editor button[type=submit]");
     await until(
       "document.querySelector('.connection-state').innerText.includes('Connected') && !document.querySelector('.connection-editor')",
@@ -935,6 +938,38 @@ try {
       connections.at(-1),
       "another-user",
       "Recovery applied an unsubmitted credential draft",
+    );
+    // Tiny binary previews must not retain the large transport frames they arrived in.
+    await command("HeapProfiler.collectGarbage");
+    const backingBefore = (await command("Runtime.getHeapUsage"))
+      .backingStorageSize;
+    for (let i = 0; i < 8; i++)
+      client.send(
+        Buffer.concat([
+          packet.generate({
+            cmd: "publish",
+            topic: "binary-preview",
+            qos: 0,
+            payload: Buffer.alloc(64, 255),
+          }),
+          packet.generate({
+            cmd: "publish",
+            topic: "oversize-preview",
+            qos: 0,
+            payload: Buffer.alloc(2 * 1024 * 1024, 120),
+          }),
+        ]),
+      );
+    publish("preview-sentinel", 1);
+    await until(
+      "[...document.querySelectorAll('.topic-tree .label')].some(el => el.textContent === 'preview-sentinel')",
+    );
+    await command("HeapProfiler.collectGarbage");
+    const backingAfter = (await command("Runtime.getHeapUsage"))
+      .backingStorageSize;
+    assert(
+      backingAfter - backingBefore < 2 * 1024 * 1024,
+      "Binary previews retained transport frames",
     );
     // Exercise the real shared budget with a small number of large current values.
     for (let index = 0; index < 19; index++)
@@ -999,6 +1034,34 @@ try {
       beforeResetRequests,
       "Reload must not replace no subscriptions with #",
     );
+    assert.equal(
+      connections.at(-1),
+      "another-user",
+      "Reload must restore the active username",
+    );
+    assert.equal(
+      connectionPasswords.at(-1),
+      "reload-secret",
+      "Reload must restore the active password",
+    );
+    assert(
+      await evaluate(
+        "!JSON.stringify(history.state).includes('reload-secret') && !location.href.includes('reload-secret')",
+      ),
+      "Credentials must stay outside routes",
+    );
+    // Losing the tab record must ask for credentials, not try anonymous access.
+    const beforeMissingCredentials = connections.length;
+    await evaluate("sessionStorage.clear()");
+    await command("Page.reload");
+    await until("document.querySelector('.connection-editor')");
+    assert.equal(connections.length, beforeMissingCredentials);
+    await fill("input[name=username]", "another-user");
+    await fill("input[name=password]", "reload-secret");
+    await click(".connection-editor button[type=submit]");
+    await until(
+      "document.querySelector('.connection-state').innerText.includes('Connected') && !document.querySelector('.connection-editor')",
+    );
     await click(".connection-disclosure");
     await fill("input[name=broker]", `ws://127.0.0.1:${port}/another-broker`);
     assert(
@@ -1014,6 +1077,18 @@ try {
       await evaluate(
         "!document.querySelector('.plot-panel') && !document.querySelector('[aria-label=\"MQTT topics\"]')",
       ),
+    );
+    const beforeBrokerBack = connections.length;
+    await evaluate("history.back()");
+    await until(
+      "document.querySelector('.connection-editor') && document.querySelector('input[name=broker]').value.endsWith(':' + " +
+        port +
+        ")",
+    );
+    assert.equal(
+      connections.length,
+      beforeBrokerBack,
+      "Back must not connect anonymously to a previously authenticated broker",
     );
     console.log(
       `Checked panes, touch controls, recovery, and subscription editing: ${base}`,
