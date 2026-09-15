@@ -280,9 +280,9 @@
     topicSnapshot.collectionStopped
       ? ""
       : topicSnapshot.topicsOmitted
-        ? "Some topics could not fit in the topic tree. Narrow subscriptions, then reset collected data."
+        ? "Topics omitted. Narrow subscriptions, then reset collected data."
         : topicSnapshot.historyLimited
-          ? "Older history trimmed; latest values kept."
+          ? "History trimmed; latest values kept."
           : "",
   );
 
@@ -1136,8 +1136,8 @@
     </div>
     {#if topicSnapshot.collectionStopped}
       <span class="header-notice problem" role="status">
-        Collection stopped: latest values exceed storage capacity. Narrow
-        subscriptions, then reset collected data.
+        Collection stopped: storage full. Narrow subscriptions, then reset
+        collected data.
       </span>
     {/if}
     {#if error || connectionError}<strong class="header-error"
@@ -1253,7 +1253,7 @@
         </div>
         {#if topicWarning}
           <span
-            class="meta"
+            class="topic-warning meta"
             class:problem={topicSnapshot.topicsOmitted}
             role="status"
           >

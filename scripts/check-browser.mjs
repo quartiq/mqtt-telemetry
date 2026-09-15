@@ -359,11 +359,19 @@ try {
     const beforeAdmissionConnections = connections.length;
     publish(Array(10_001).fill("a").join("/"), 1);
     await until(
-      "document.querySelector('.topics-header').innerText.includes('Some topics could not fit')",
+      "document.querySelector('.topics-header').innerText.includes('Topics omitted')",
     );
     assert(
       await evaluate("!document.querySelector('.topic-tree [role=treeitem]')"),
     );
+    assert(
+      await evaluate(`(() => {
+      const warning = document.querySelector('.topic-warning');
+      return getComputedStyle(warning).whiteSpace === 'normal' && warning.scrollWidth <= warning.clientWidth + 1;
+    })()`),
+      "Recovery warning must wrap inside the mobile pane",
+    );
+
     const resetSelector =
       'button[title="Clear collected messages and topics; keep subscriptions and plots"]';
     assert(
@@ -374,7 +382,7 @@ try {
     );
     await click(resetSelector);
     await until(
-      "!document.querySelector('.topics-header').innerText.includes('Some topics could not fit')",
+      "!document.querySelector('.topics-header').innerText.includes('Topics omitted')",
     );
     assert.equal(
       connections.length,
