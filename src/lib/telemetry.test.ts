@@ -14,6 +14,7 @@ import {
   formatPlotTick,
   nearestPlotPoint,
   nicePlotScale,
+  plotAxisLabels,
   plotPointInsertionIndex,
   plotSeries,
   plotSeriesPath,
@@ -426,6 +427,16 @@ describe("topic history", () => {
     });
   });
 
+  it("budgets parsed container overhead as well as source bytes", () => {
+    const store = new TelemetryStore(1000, { maxHistoryBytes: 100_000 });
+    const payload = encode("[".repeat(1000) + "0" + "]".repeat(1000));
+    for (let i = 0; i < 20; i++)
+      store.add("nested", payload, { receivedAt: i, retained: false });
+    expect(store.snapshot().historyLimited).toBe(true);
+    expect(store.snapshot().collectionStopped).toBe(false);
+    expect(store.history(store.nodeId("nested")!)).toHaveLength(1);
+  });
+
   it("stops collection when the latest values alone exceed the budget", () => {
     const store = new TelemetryStore(10, { maxHistoryBytes: 512 });
     store.add("a", encode("1"), { receivedAt: 1, retained: true });
@@ -692,6 +703,23 @@ describe("plot extraction", () => {
 
     expect(nicePlotScale(-1e308, 1e308)).toBeUndefined();
     expect(nicePlotScale(Number.MAX_VALUE, Number.MAX_VALUE)).toBeUndefined();
+    for (const [min, max] of [
+      [1e12, 1e12 + 0.001],
+      [-1e12 - 0.001, -1e12],
+    ]) {
+      const narrow = nicePlotScale(min, max)!;
+      expect(narrow).toBeDefined();
+      const axis = plotAxisLabels(narrow);
+      expect(axis.offset).toBe(narrow.min);
+      expect(axis.labels.every((label) => label.length <= 10)).toBe(true);
+      expect(new Set(axis.labels).size).toBe(3);
+      expect(narrow.min).toBeLessThanOrEqual(min);
+      expect(narrow.max).toBeGreaterThanOrEqual(max);
+      expect(
+        new Set(narrow.ticks.map((value) => formatPlotTick(value, narrow.step)))
+          .size,
+      ).toBe(3);
+    }
     const scale = nicePlotScale(0.383, 0.4)!;
     expect(scale).toEqual({
       min: 0.38,
@@ -703,6 +731,7 @@ describe("plot extraction", () => {
       scale.ticks.map((value) => formatPlotTick(value, scale.step)),
     ).toEqual([".38", ".39", ".40"]);
 
+    expect(plotAxisLabels(scale).offset).toBeUndefined();
     const offset = nicePlotScale(103_403.8, 103_403.95)!;
     expect(
       offset.ticks.map((value) => formatPlotTick(value, offset.step)),

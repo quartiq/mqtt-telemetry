@@ -178,7 +178,7 @@ export function formatPlotNumber(value: number, resolution: number): string {
   const resolutionExponent = Math.floor(Math.log10(safeResolution));
   const significantDigits = Math.max(
     1,
-    Math.min(12, exponent - resolutionExponent + 2),
+    Math.min(17, exponent - resolutionExponent + 2),
   );
 
   if (exponent <= -4 || exponent >= 7) {
@@ -210,6 +210,24 @@ export function formatPlotTick(value: number, step: number): string {
     .replace(/^([−]?)0\./, "$1.");
 }
 
+// Keep ordinary labels direct; share the baseline only when it saves axis space.
+export function plotAxisLabels(scale: PlotScale): {
+  labels: string[];
+  offset?: number;
+} {
+  const labels = scale.ticks.map((value) => formatPlotTick(value, scale.step));
+  if (labels.every((label) => label.length <= 10)) return { labels };
+  const relative = scale.ticks.map((value) =>
+    formatPlotTick(value - scale.min, scale.step),
+  );
+  if (
+    relative.every((label) => label.length <= 10) &&
+    new Set(relative).size === relative.length
+  )
+    return { labels: relative, offset: scale.min };
+  return { labels };
+}
+
 export function nicePlotScale(
   dataMin: number,
   dataMax: number,
@@ -223,9 +241,7 @@ export function nicePlotScale(
   let step = niceStep((dataMax - dataMin) / 2);
   let first = alignedFloor(dataMin, step);
   let last = first + 2 * step;
-  const tolerance = () =>
-    Math.max(Math.abs(last) * Number.EPSILON * 4, step * 1e-9);
-  if (last + tolerance() < dataMax) {
+  if (last < dataMax) {
     step = niceStep(step * (1 + 1e-10));
     first = alignedFloor(dataMin, step);
     last = first + 2 * step;
@@ -234,7 +250,12 @@ export function nicePlotScale(
   if (
     ![first, last, step, last - first].every(Number.isFinite) ||
     step <= 0 ||
-    last <= first
+    last <= first ||
+    first > dataMin ||
+    last < dataMax ||
+    new Set(
+      [first, first + step, last].map((tick) => formatPlotTick(tick, step)),
+    ).size !== 3
   )
     return undefined;
   return { min: first, max: last, step, ticks: [first, first + step, last] };
@@ -267,8 +288,8 @@ function niceStep(value: number): number {
 
 function alignedFloor(value: number, step: number): number {
   const quotient = value / step;
-  const tolerance = Math.abs(quotient) * Number.EPSILON * 4;
-  return Math.floor(quotient + tolerance) * step;
+  const aligned = Math.floor(quotient) * step;
+  return aligned > value ? aligned - step : aligned;
 }
 
 export function downsamplePlotPoints(

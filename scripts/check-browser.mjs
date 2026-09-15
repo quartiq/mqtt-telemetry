@@ -280,6 +280,81 @@ try {
     await until(
       "document.querySelector('.connection-state')?.innerText.includes('Connected')",
     );
+    // Back to an empty selection must clear Value as well as the active row.
+    publish("review/value", { value: 1 });
+    await until(
+      "document.querySelectorAll('.topic-tree [role=treeitem]').length === 2",
+    );
+    await evaluate(
+      `document.querySelectorAll('.topic-tree [role=treeitem]')[1].click()`,
+    );
+    await until(
+      `document.querySelector('.message-tree [data-tree-id="$.value"]')`,
+    );
+    await evaluate("history.back()");
+    await until(
+      "!document.querySelector('.topic-tree [aria-selected=true]') && !document.querySelector('.message-tree')",
+    );
+    await evaluate(
+      `document.querySelectorAll('.topic-tree [role=treeitem]')[1].click()`,
+    );
+    await until(
+      `document.querySelector('.message-tree [data-tree-id="$.value"]')`,
+    );
+    await click('.message-tree [data-tree-id="$.value"]');
+    publish("review/value", { other: 2 });
+    await until(
+      `document.querySelector('.message-tree [data-tree-id="$.other"]')`,
+    );
+    assert(
+      await evaluate(`document.activeElement?.dataset.treeId === "$"`),
+      "Schema removal must recover tree focus",
+    );
+    await fill("#topic-search", "review");
+    await until("document.querySelector('.topic-tree .fixed-caret')");
+    assert(
+      await evaluate("!document.querySelector('.topic-tree button.caret')"),
+      "Search ancestors must not offer ineffective collapse",
+    );
+    await fill("#topic-search", "");
+    // Display truncation does not imply that the selected field is absent.
+    publish("review/value", { value: 3 });
+    await until(
+      `document.querySelector('.message-tree [data-tree-id="$.value"]')`,
+    );
+    await click('.message-tree [data-tree-id="$.value"]');
+    publish("review/value", { a: Array(10000).fill(0), value: 4 });
+    await until(
+      "document.querySelector('.message-panel').innerText.includes('additional fields omitted')",
+    );
+    assert(
+      await evaluate("!document.querySelector('.message-panel .missing')"),
+      "Omitted field exists in payload",
+    );
+    publish("review/value", 1e12);
+    await until(
+      `document.querySelector('.message-tree [data-tree-id="$"] > .plot-toggle')`,
+    );
+    await click('.message-tree [data-tree-id="$"] > .plot-toggle');
+    publish("review/value", 1e12 + 0.001);
+    await until("document.querySelector('.y-offset')");
+    assert(
+      await evaluate(`(() => {
+      const labels = [...document.querySelectorAll('.y-label')];
+      return new Set(labels.map(el => el.textContent)).size === 3 && labels.every(el => el.getBBox().x >= 0);
+    })()`),
+      "Narrow numeric ranges must have distinct, unclipped labels",
+    );
+    assert(
+      await evaluate(
+        "document.querySelector('.y-offset')?.textContent.includes('1000000000000 + tick')",
+      ),
+      "Shared offset must explain the compact tick labels",
+    );
+    await command("Page.navigate", { url: url.href });
+    await until(
+      "document.querySelector('.connection-state')?.innerText.includes('Connected')",
+    );
     // A valid MQTT path can exceed the tree budget without filling the tree.
     const beforeAdmissionConnections = connections.length;
     publish(Array(10_001).fill("a").join("/"), 1);

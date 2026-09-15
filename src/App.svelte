@@ -118,13 +118,13 @@
   let connectionInterrupted = false;
   let editingConnection = $state(!initialRoute.broker);
   let dashboardFileInput: HTMLInputElement;
-  let connectSerial = 0;
+  let connectionLifetime = new AbortController();
   let activeUsername = $state("");
   let activePassword = $state("");
   let viewToken = randomId();
   let lastSegment = 0;
   const segments = new Map<string, { transport: number; id: number }>();
-  let renderFrame = 0;
+  let renderTimer = 0;
   let plotNow = $state(telemetryNow());
 
   if (location.search || location.hash || !storedRoute)
@@ -378,8 +378,8 @@
     return () => {
       removeEventListener("popstate", popstate);
       removeEventListener("keydown", browserKeydown);
-      if (renderFrame) cancelAnimationFrame(renderFrame);
-      connectSerial += 1;
+      if (renderTimer) clearTimeout(renderTimer);
+      connectionLifetime.abort();
       session?.close();
     };
   });
@@ -493,8 +493,8 @@
   }
 
   function resetData(historyLimit: number) {
-    if (renderFrame) cancelAnimationFrame(renderFrame);
-    renderFrame = 0;
+    if (renderTimer) clearTimeout(renderTimer);
+    renderTimer = 0;
     store = new TelemetryStore(historyLimit);
     revision += 1;
     selectedTopicId = "";
@@ -514,7 +514,7 @@
   }
 
   function stopConnection() {
-    connectSerial += 1;
+    connectionLifetime.abort();
     session?.close();
     session = undefined;
     connectionState = "idle";
@@ -554,15 +554,21 @@
   }
 
   function scheduleRender() {
-    if (renderFrame) return;
-    renderFrame = requestAnimationFrame(() => {
-      renderFrame = 0;
+    if (renderTimer) return;
+    // Keep receipt/storage independent of display work, even on high-refresh screens.
+    renderTimer = window.setTimeout(() => {
+      renderTimer = 0;
+      plotNow = telemetryNow();
+      if (route.historyAgeMs !== null)
+        store.expireBefore(plotNow - route.historyAgeMs);
       revision += 1;
-    });
+    }, 100);
   }
 
   async function startConnection(nextRoute: AppRoute, preserveData = false) {
-    const serial = ++connectSerial;
+    connectionLifetime.abort();
+    connectionLifetime = new AbortController();
+    const { signal } = connectionLifetime;
     const credentials = { username: activeUsername, password: activePassword };
     session?.close();
     if (!preserveData) {
@@ -581,7 +587,7 @@
         nextRoute.filters,
         {
           message: ({ topic, payload, packet, segment }) => {
-            if (serial !== connectSerial || packet.cmd !== "publish") return;
+            if (signal.aborted || packet.cmd !== "publish") return;
             const receivedAt = telemetryNow();
             const previous = segments.get(topic);
             const historySegment =
@@ -592,9 +598,7 @@
               retained: packet.retain,
               duplicate: packet.dup,
             });
-            if (route.historyAgeMs !== null)
-              store.expireBefore(receivedAt - route.historyAgeMs);
-            plotNow = telemetryNow();
+
             scheduleRender();
             if (!added) return;
             segments.set(topic, { transport: segment, id: historySegment });
@@ -614,7 +618,7 @@
             }
           },
           status: (next) => {
-            if (serial !== connectSerial) return;
+            if (signal.aborted) return;
             if (next.state === "connected") {
               const accepted = route.filters.filter(
                 (filter) => !next.rejected.includes(filter),
@@ -629,16 +633,16 @@
             statusChanged(next);
           },
         },
-        credentials,
+        { auth: credentials, signal },
       );
-      if (serial !== connectSerial) {
+      if (signal.aborted) {
         nextSession.close();
         return;
       }
       session = nextSession;
       restoreView(history.state);
     } catch (caught) {
-      if (serial !== connectSerial) return;
+      if (signal.aborted) return;
       connectionState = "failed";
       connectionError =
         caught instanceof Error ? caught.message : String(caught);
@@ -979,7 +983,7 @@
       ? store.nodeId(route.selectedTopic)
       : undefined;
     if (id) selectLoadedTopic(id, selectedTopic !== route.selectedTopic);
-    else if (route.selectedTopic) selectedTopicId = "";
+    else selectedTopicId = "";
 
     const messageId = messageIdFromViewState(state, viewToken);
     selectedMessageId = currentHistory.some(
@@ -1265,6 +1269,7 @@
             revision={topicSnapshot.revision}
             selected={selectedTopicId}
             expanded={visibleTopicExpanded}
+            fixedExpanded={Boolean(topicSearch.trim())}
             activity={topicActivity}
             label="MQTT topics"
             checkable={checkableTopics}

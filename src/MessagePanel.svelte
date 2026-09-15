@@ -3,7 +3,7 @@
 <script lang="ts">
   import TreeView from "./TreeView.svelte";
   import { MAX_PLOTS } from "./lib/routes";
-  import type { JsonSnapshot } from "./lib/json";
+  import { getJsonPath, parseJsonPath, type JsonSnapshot } from "./lib/json";
   import { formatPayload, type TelemetryMessage } from "./lib/telemetry";
   import { formatTelemetryTime, type DisplayTimeZone } from "./lib/time";
 
@@ -53,7 +53,12 @@
     onremoveallplots,
   }: Props = $props();
   let fieldMissing = $derived(
-    Boolean(selected && snapshot && !snapshot.nodes.has(selected)),
+    Boolean(
+      selected &&
+      message?.payload.kind === "json" &&
+      getJsonPath(message.payload.value, parseJsonPath(selected) ?? []) ===
+        undefined,
+    ),
   );
   let statistics = $derived.by(() => {
     if (!message) return [];
@@ -68,7 +73,6 @@
     if (message.retained) items.push("retained");
     if (message.duplicate) items.push("possible duplicate");
     items.push(`${message.bytes.toLocaleString()} bytes`);
-    if (snapshot) items.push(`${snapshot.nodes.size.toLocaleString()} nodes`);
     if (snapshot?.truncated) items.push("additional fields omitted");
     if (showPlotHint) items.push("check a numeric field to plot");
     if (message.unsafeIntegers) items.push("unsafe integer precision");

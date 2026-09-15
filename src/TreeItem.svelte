@@ -117,7 +117,9 @@
     ondblclick={activate}
     onkeydown={keydown}
   >
-    {#if internal}
+    {#if internal && context.fixedExpanded}
+      <span aria-hidden="true" class="control-slot fixed-caret">▾</span>
+    {:else if internal}
       <button
         aria-label={open ? "Collapse" : "Expand"}
         class="caret"
@@ -238,6 +240,10 @@
   .control-slot {
     flex: 0 0 var(--tree-control);
     width: var(--tree-control);
+  }
+
+  .fixed-caret {
+    text-align: center;
   }
 
   .caret,

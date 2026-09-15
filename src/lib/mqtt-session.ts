@@ -45,6 +45,8 @@ export function clientOptions(auth?: Partial<SessionAuth>): IClientOptions {
 
 export class MqttSession {
   private closing = false;
+  private readonly lifetime = new AbortController();
+  private removeAbortListener?: () => void;
   private generation = 0;
   private offline = false;
   private readonly grants = new Map<string, boolean>();
@@ -107,6 +109,7 @@ export class MqttSession {
           },
         );
       }),
+      this.lifetime.signal,
     );
   }
 
@@ -158,7 +161,10 @@ export class MqttSession {
         (filter) => !this.desiredFilters.includes(filter),
       );
       if (removals.length) {
-        await subscriptionAck(this.client.unsubscribeAsync(removals));
+        await subscriptionAck(
+          this.client.unsubscribeAsync(removals),
+          this.lifetime.signal,
+        );
         if (!this.current(generation)) return;
         for (const filter of removals) this.grants.delete(filter);
       }
@@ -198,8 +204,12 @@ export class MqttSession {
     broker: string,
     filters: string[],
     callbacks: SessionCallbacks,
-    auth?: Partial<SessionAuth>,
+    {
+      auth,
+      signal,
+    }: { auth?: Partial<SessionAuth>; signal?: AbortSignal } = {},
   ): Promise<MqttSession> {
+    signal?.throwIfAborted();
     const brokerError = isWebSocketBroker(broker);
     if (brokerError) throw new Error(brokerError);
 
@@ -209,6 +219,7 @@ export class MqttSession {
         client.off("connect", connected);
         client.off("close", closed);
         client.off("error", failed);
+        signal?.removeEventListener("abort", aborted);
       };
       const connected = () => {
         cleanup();
@@ -224,15 +235,22 @@ export class MqttSession {
         client.end(true);
         reject(error);
       };
+      const aborted = () => failed(new Error("Connection cancelled"));
+      signal?.addEventListener("abort", aborted, { once: true });
       client.once("connect", connected);
       client.once("close", closed);
       client.once("error", failed);
     });
 
     const session = new MqttSession(client, callbacks, filters);
+    const abort = () => session.close();
+    signal?.addEventListener("abort", abort, { once: true });
+    session.removeAbortListener = () =>
+      signal?.removeEventListener("abort", abort);
     const generation = ++session.generation;
     let rejected: string[];
     try {
+      signal?.throwIfAborted();
       rejected = await session.subscribe();
       if (generation !== session.generation || !client.connected)
         throw new Error("Connection closed while subscribing");
@@ -250,18 +268,30 @@ export class MqttSession {
   close(): void {
     if (this.closing) return;
     this.closing = true;
+    this.removeAbortListener?.();
+    this.lifetime.abort();
     this.generation += 1;
     this.client.end(true);
   }
 }
 
 // A responsive transport can still leave SUBACK or UNSUBACK unanswered.
-async function subscriptionAck<T>(operation: Promise<T>): Promise<T> {
+async function subscriptionAck<T>(
+  operation: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let aborted: () => void = () => {};
   try {
     return await Promise.race([
       operation,
       new Promise<T>((_, reject) => {
+        aborted = () => reject(new Error("Connection cancelled"));
+        if (signal.aborted) {
+          aborted();
+          return;
+        }
+        signal.addEventListener("abort", aborted, { once: true });
         timer = setTimeout(
           () => reject(new Error("Subscription acknowledgment timed out")),
           15_000,
@@ -270,5 +300,6 @@ async function subscriptionAck<T>(operation: Promise<T>): Promise<T> {
     ]);
   } finally {
     clearTimeout(timer);
+    signal.removeEventListener("abort", aborted);
   }
 }

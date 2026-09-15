@@ -13,6 +13,7 @@ export type Payload =
       kind: "json";
       value: JsonValue;
       source: string;
+      estimatedBytes: number;
       unsafeIntegers?: true;
       outOfRange?: true;
     }
@@ -37,7 +38,8 @@ type TopicNode = {
   parent?: string;
   topic: string;
   children: string[];
-  history: TelemetryMessage[];
+  history: Map<number, TelemetryMessage>;
+  latest?: TelemetryMessage;
   historyRevision: number;
   published: boolean;
   messageCount: number;
@@ -103,23 +105,33 @@ export function parsePayload(bytes: Uint8Array): Payload {
   }
   let unsafeIntegers = false;
   let outOfRange = false;
+  // Conservative estimate of parsed values, slots, keys, and preserved source.
+  let estimatedBytes = 192 + text.length * 2;
   const pending = [value];
   while (pending.length) {
     const current = pending.pop()!;
+    estimatedBytes += 16;
+    if (typeof current === "string") estimatedBytes += current.length * 2;
     if (typeof current === "number") {
       if (!Number.isFinite(current)) outOfRange = true;
       if (Number.isInteger(current) && !Number.isSafeInteger(current))
         unsafeIntegers = true;
     } else if (Array.isArray(current)) {
+      estimatedBytes += 64;
       for (const child of current) pending.push(child);
     } else if (isJsonObject(current)) {
-      for (const child of Object.values(current)) pending.push(child);
+      estimatedBytes += 64;
+      for (const key of Object.keys(current)) {
+        estimatedBytes += 32 + key.length * 2;
+        pending.push(current[key]);
+      }
     }
   }
   return {
     kind: "json",
     value,
     source: text,
+    estimatedBytes: Math.max(256, estimatedBytes),
     ...(outOfRange ? { outOfRange: true } : {}),
     ...(unsafeIntegers ? { unsafeIntegers: true } : {}),
   };
@@ -171,9 +183,16 @@ export function messagePayloadPreview(message: TelemetryMessage): string {
 
 export function messageFrequency(history: readonly TelemetryMessage[]): string {
   const segment = history.at(-1)?.segment;
-  const live = history
-    .filter((message) => !message.retained && message.segment === segment)
-    .slice(-100);
+  const live: TelemetryMessage[] = [];
+  for (
+    let index = history.length - 1;
+    index >= 0 && live.length < 100;
+    index -= 1
+  ) {
+    const message = history[index];
+    if (!message.retained && message.segment === segment) live.push(message);
+  }
+  live.reverse();
   if (live.length < 2) return "";
   const seconds =
     (live.at(-1)!.receivedAt - live[0].receivedAt) / (live.length - 1) / 1000;
@@ -212,6 +231,7 @@ export class TelemetryStore {
   private readonly views = new Map<string, TopicNodeView>();
   private readonly dirtyViews = new Set<string>();
   private roots: string[] = [];
+  private readonly unsorted = new Set<string | undefined>();
   // Map insertion order is arrival order; its first remaining value is oldest.
   private readonly messages = new Map<
     number,
@@ -283,8 +303,10 @@ export class TelemetryStore {
     const cost =
       parsed.kind === "omitted"
         ? Math.max(256, parsed.value.length * 2)
-        : Math.max(256, payload.byteLength * 4);
-    const previousLatest = node.history.at(-1);
+        : parsed.kind === "json"
+          ? parsed.estimatedBytes
+          : Math.max(256, payload.byteLength * 4);
+    const previousLatest = node.latest;
     const previousCost = previousLatest
       ? this.messages.get(previousLatest.id)!.cost
       : 0;
@@ -304,7 +326,8 @@ export class TelemetryStore {
     }
     this.latestBytes += cost - previousCost;
     if (!previousLatest) this.latestCount += 1;
-    node.history.push(message);
+    node.history.set(message.id, message);
+    node.latest = message;
     node.historyRevision += 1;
     const stored = {
       nodeId,
@@ -314,7 +337,7 @@ export class TelemetryStore {
     this.messages.set(message.id, stored);
     this.historyBytes += cost;
     this.adjustSubtree(nodeId, 1);
-    const excess = node.history.length - this.historyLimit;
+    const excess = node.history.size - this.historyLimit;
     if (excess > 0) this.dropOldest(nodeId, excess, true);
     this.enforceGlobalBudget();
     this.revision += 1;
@@ -343,7 +366,7 @@ export class TelemetryStore {
       return cached.history;
     }
 
-    const history = [...node.history];
+    const history = [...node.history.values()];
     this.historyCache.delete(id);
     this.historyCache.set(id, {
       historyRevision: node.historyRevision,
@@ -366,7 +389,7 @@ export class TelemetryStore {
       return cached.series;
     }
 
-    const series = plotSeriesPath(node.history, singularPath);
+    const series = plotSeriesPath(this.history(id), singularPath);
     this.plotCache.delete(key);
     this.plotCache.set(key, { historyRevision: node.historyRevision, series });
     while (this.plotCache.size > MAX_PLOT_CACHE_ENTRIES)
@@ -377,7 +400,7 @@ export class TelemetryStore {
   setHistoryLimit(limit: number): void {
     this.historyLimit = limit;
     for (const node of this.nodes.values()) {
-      const excess = node.history.length - limit;
+      const excess = node.history.size - limit;
       if (excess > 0) this.dropOldest(node.id, excess, true);
     }
     this.revision += 1;
@@ -385,21 +408,23 @@ export class TelemetryStore {
 
   expireBefore(cutoff: number): number {
     let removed = 0;
+    const expired = new Map<string, number>();
     for (const [id, oldest] of this.messages) {
       if (oldest.receivedAt >= cutoff) break;
       const node = this.nodes.get(oldest.nodeId)!;
-      if (node.history.at(-1)?.id === id) continue;
-      this.dropOldest(oldest.nodeId, 1, true);
+      if (node.latest?.id === id) continue;
+      expired.set(oldest.nodeId, (expired.get(oldest.nodeId) ?? 0) + 1);
       removed += 1;
     }
+    for (const [id, count] of expired) this.dropOldest(id, count, true);
     if (removed) this.revision += 1;
     return removed;
   }
 
   clearHistory(id: string): void {
     const node = this.nodes.get(id);
-    if (!node?.history.length) return;
-    this.dropOldest(id, node.history.length);
+    if (!node?.history.size) return;
+    this.dropOldest(id, node.history.size);
     this.revision += 1;
   }
 
@@ -409,7 +434,7 @@ export class TelemetryStore {
       const node = this.nodes.get(pending.pop() as string);
       if (!node) continue;
       pending.push(...node.children);
-      if (node.history.length) this.dropOldest(node.id, node.history.length);
+      if (node.history.size) this.dropOldest(node.id, node.history.size);
     }
     this.revision += 1;
   }
@@ -417,7 +442,7 @@ export class TelemetryStore {
   clearAllHistory(): void {
     if (!this.messages.size) return;
     for (const node of this.nodes.values()) {
-      if (node.history.length) this.dropOldest(node.id, node.history.length);
+      if (node.history.size) this.dropOldest(node.id, node.history.size);
     }
     this.revision += 1;
   }
@@ -433,6 +458,14 @@ export class TelemetryStore {
   }
 
   snapshot(): TopicSnapshot {
+    for (const id of this.unsorted) {
+      if (id === undefined) this.roots = this.sorted([...this.roots]);
+      else {
+        const node = this.nodes.get(id)!;
+        node.children = this.sorted([...node.children]);
+      }
+    }
+    this.unsorted.clear();
     for (const id of this.dirtyViews) this.views.set(id, this.nodeView(id));
     this.dirtyViews.clear();
     return {
@@ -481,7 +514,7 @@ export class TelemetryStore {
           ...(parent ? { parent } : {}),
           topic: nodeTopic,
           children: [],
-          history: [],
+          history: new Map(),
           historyRevision: 0,
           published: false,
           messageCount: 0,
@@ -490,10 +523,15 @@ export class TelemetryStore {
         this.dirtyViews.add(id);
         if (parent) {
           const parentNode = this.nodes.get(parent) as TopicNode;
-          parentNode.children = this.sorted([...parentNode.children, id]);
+          if (!this.unsorted.has(parent))
+            parentNode.children = [...parentNode.children];
+          parentNode.children.push(id);
+          this.unsorted.add(parent);
           this.dirtyViews.add(parent);
         } else {
-          this.roots = this.sorted([...this.roots, id]);
+          if (!this.unsorted.has(undefined)) this.roots = [...this.roots];
+          this.roots.push(id);
+          this.unsorted.add(undefined);
         }
       }
       parent = id;
@@ -503,8 +541,8 @@ export class TelemetryStore {
 
   private nodeView(id: string): TopicNodeView {
     const node = this.nodes.get(id) as TopicNode;
-    const direct = node.history.length;
-    const payload = node.history.at(-1)?.payload;
+    const direct = node.history.size;
+    const payload = node.latest?.payload;
     const numeric =
       payload?.kind === "json" &&
       typeof payload.value === "number" &&
@@ -543,9 +581,9 @@ export class TelemetryStore {
   ): void {
     const node = this.nodes.get(nodeId) as TopicNode;
     const removed: TelemetryMessage[] = [];
-    for (const message of node.history) {
+    for (const message of node.history.values()) {
       if (removed.length >= count) break;
-      if (preserveLatest && message === node.history.at(-1)) continue;
+      if (preserveLatest && message === node.latest) continue;
       removed.push(message);
     }
     this.removeMessages(nodeId, removed);
@@ -554,16 +592,14 @@ export class TelemetryStore {
   private removeMessages(nodeId: string, removed: TelemetryMessage[]): void {
     if (!removed.length) return;
     const node = this.nodes.get(nodeId) as TopicNode;
-    const ids = new Set(removed.map(({ id }) => id));
-    const latest = node.history.at(-1)!;
-    node.history = node.history.filter(({ id }) => !ids.has(id));
+    const latest = node.latest!;
+    for (const message of removed) node.history.delete(message.id);
     this.historyCache.delete(nodeId);
-    if (ids.has(latest.id)) {
-      const next = node.history.at(-1);
-      this.latestBytes +=
-        (next ? this.messages.get(next.id)!.cost : 0) -
-        this.messages.get(latest.id)!.cost;
-      if (!next) this.latestCount -= 1;
+    // Removals are always an oldest prefix, including explicit history clearing.
+    if (!node.history.size) {
+      this.latestBytes -= this.messages.get(latest.id)!.cost;
+      this.latestCount -= 1;
+      node.latest = undefined;
     }
     node.historyRevision += 1;
     for (const message of removed) {
@@ -583,10 +619,8 @@ export class TelemetryStore {
       )
         break;
       const node = this.nodes.get(stored.nodeId)!;
-      if (node.history.at(-1)?.id === id) continue;
-      this.removeMessages(stored.nodeId, [
-        node.history.find((message) => message.id === id)!,
-      ]);
+      if (node.latest?.id === id) continue;
+      this.removeMessages(stored.nodeId, [node.history.get(id)!]);
       this.historyLimited = true;
     }
   }
