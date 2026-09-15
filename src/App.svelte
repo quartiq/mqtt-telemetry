@@ -1,6 +1,7 @@
 <svelte:options runes={true} />
 
 <script lang="ts">
+  import { restoreAuth, rememberAuth } from "./lib/session-auth";
   import { onMount } from "svelte";
   import ConnectionFields from "./ConnectionFields.svelte";
   import DurationSelect from "./DurationSelect.svelte";
@@ -67,6 +68,10 @@
     storedRoute,
   );
   const initialRoute = startup.route;
+  const initialAuth = restoreAuth(initialRoute.broker);
+  const credentialsRequired =
+    storedRoute?.broker === initialRoute.broker &&
+    history.state?.credentialsRequired === true;
   const buildCommit = __BUILD_COMMIT__;
   const exactBuildCommit = /^[0-9a-f]{40}$/i.test(buildCommit);
   const buildLabel = exactBuildCommit
@@ -78,8 +83,8 @@
   let route = $state(initialRoute);
   let formBroker = $state(initialRoute.broker);
   let formFilters = $state(initialRoute.filters.join("\n"));
-  let username = $state("");
-  let password = $state("");
+  let username = $state(initialAuth?.username ?? "");
+  let password = $state(initialAuth?.password ?? "");
 
   let session = $state<MqttSession | undefined>();
   let store = $state.raw(new TelemetryStore(initialRoute.historyLimit));
@@ -118,18 +123,23 @@
   let connectionInterrupted = false;
   let editingConnection = $state(!initialRoute.broker);
   let dashboardFileInput: HTMLInputElement;
-  let connectSerial = 0;
-  let activeUsername = $state("");
-  let activePassword = $state("");
+  let connectionLifetime = new AbortController();
+  let activeUsername = $state(initialAuth?.username ?? "");
+  let activePassword = $state(initialAuth?.password ?? "");
   let viewToken = randomId();
   let lastSegment = 0;
   const segments = new Map<string, { transport: number; id: number }>();
-  let renderFrame = 0;
+  let renderTimer = 0;
   let plotNow = $state(telemetryNow());
 
   if (location.search || location.hash || !storedRoute)
     history.replaceState(
-      browserViewState(initialRoute, viewToken, null),
+      {
+        ...browserViewState(initialRoute, viewToken, null),
+        credentialsRequired:
+          credentialsRequired ||
+          Boolean(initialAuth?.username || initialAuth?.password),
+      },
       "",
       launchRoute.kind === "invalid" && inlineDashboard.kind === "absent"
         ? location.href
@@ -280,9 +290,9 @@
     topicSnapshot.collectionStopped
       ? ""
       : topicSnapshot.topicsOmitted
-        ? "Some topics could not fit in the topic tree. Narrow subscriptions, then reset collected data."
+        ? "Topics omitted. Narrow subscriptions, then reset collected data."
         : topicSnapshot.historyLimited
-          ? "Older history trimmed; latest values kept."
+          ? "History trimmed; latest values kept."
           : "",
   );
 
@@ -335,12 +345,15 @@
       editingConnection = false;
       const next = routeFromViewState(event.state) ?? defaultRoute();
       if (next.broker !== route.broker) {
+        rememberAuth();
         activeUsername = "";
         activePassword = "";
         route = next;
         if (next.broker) {
           formBroker = next.broker;
-          void startConnection(next);
+          formFilters = next.filters.join("\n");
+          if (event.state?.credentialsRequired) stopConnection();
+          else void startConnection(next);
         } else {
           stopConnection();
         }
@@ -374,12 +387,15 @@
       connectionState = "error";
       error = brokerError;
       editingConnection = true;
+    } else if (credentialsRequired && !initialAuth) {
+      editingConnection = true;
+      connectionState = "idle";
     } else if (route.broker) void startConnection(route);
     return () => {
       removeEventListener("popstate", popstate);
       removeEventListener("keydown", browserKeydown);
-      if (renderFrame) cancelAnimationFrame(renderFrame);
-      connectSerial += 1;
+      if (renderTimer) clearTimeout(renderTimer);
+      connectionLifetime.abort();
       session?.close();
     };
   });
@@ -392,7 +408,10 @@
     route = next;
     const method = replace ? "replaceState" : "pushState";
     history[method](
-      browserViewState(next, viewToken, messageId),
+      {
+        ...browserViewState(next, viewToken, messageId),
+        credentialsRequired: Boolean(activeUsername || activePassword),
+      },
       "",
       launchUrl(next, location),
     );
@@ -431,6 +450,7 @@
     error = "";
     const sameBroker = next.broker === route.broker;
     if (!sameBroker) {
+      rememberAuth();
       activeUsername = "";
       activePassword = "";
     }
@@ -493,8 +513,8 @@
   }
 
   function resetData(historyLimit: number) {
-    if (renderFrame) cancelAnimationFrame(renderFrame);
-    renderFrame = 0;
+    if (renderTimer) clearTimeout(renderTimer);
+    renderTimer = 0;
     store = new TelemetryStore(historyLimit);
     revision += 1;
     selectedTopicId = "";
@@ -514,7 +534,10 @@
   }
 
   function stopConnection() {
-    connectSerial += 1;
+    rememberAuth();
+    activeUsername = username = "";
+    activePassword = password = "";
+    connectionLifetime.abort();
     session?.close();
     session = undefined;
     connectionState = "idle";
@@ -554,15 +577,21 @@
   }
 
   function scheduleRender() {
-    if (renderFrame) return;
-    renderFrame = requestAnimationFrame(() => {
-      renderFrame = 0;
+    if (renderTimer) return;
+    // Keep receipt/storage independent of display work, even on high-refresh screens.
+    renderTimer = window.setTimeout(() => {
+      renderTimer = 0;
+      plotNow = telemetryNow();
+      if (route.historyAgeMs !== null)
+        store.expireBefore(plotNow - route.historyAgeMs);
       revision += 1;
-    });
+    }, 100);
   }
 
   async function startConnection(nextRoute: AppRoute, preserveData = false) {
-    const serial = ++connectSerial;
+    connectionLifetime.abort();
+    connectionLifetime = new AbortController();
+    const { signal } = connectionLifetime;
     const credentials = { username: activeUsername, password: activePassword };
     session?.close();
     if (!preserveData) {
@@ -581,7 +610,7 @@
         nextRoute.filters,
         {
           message: ({ topic, payload, packet, segment }) => {
-            if (serial !== connectSerial || packet.cmd !== "publish") return;
+            if (signal.aborted || packet.cmd !== "publish") return;
             const receivedAt = telemetryNow();
             const previous = segments.get(topic);
             const historySegment =
@@ -592,9 +621,7 @@
               retained: packet.retain,
               duplicate: packet.dup,
             });
-            if (route.historyAgeMs !== null)
-              store.expireBefore(receivedAt - route.historyAgeMs);
-            plotNow = telemetryNow();
+
             scheduleRender();
             if (!added) return;
             segments.set(topic, { transport: segment, id: historySegment });
@@ -614,7 +641,7 @@
             }
           },
           status: (next) => {
-            if (serial !== connectSerial) return;
+            if (signal.aborted) return;
             if (next.state === "connected") {
               const accepted = route.filters.filter(
                 (filter) => !next.rejected.includes(filter),
@@ -629,16 +656,22 @@
             statusChanged(next);
           },
         },
-        credentials,
+        { auth: credentials, signal },
       );
-      if (serial !== connectSerial) {
+      if (signal.aborted) {
         nextSession.close();
         return;
       }
       session = nextSession;
+      if (
+        !rememberAuth(nextRoute.broker, credentials) &&
+        (credentials.username || credentials.password)
+      )
+        connectionNotice =
+          "Credentials will not survive reload: browser storage unavailable.";
       restoreView(history.state);
     } catch (caught) {
-      if (serial !== connectSerial) return;
+      if (signal.aborted) return;
       connectionState = "failed";
       connectionError =
         caught instanceof Error ? caught.message : String(caught);
@@ -672,6 +705,7 @@
       filters,
       ...(sameBroker ? {} : { selectedTopic: "", fieldPath: null, plots: [] }),
     };
+    if (!sameBroker) rememberAuth();
     activeUsername = username;
     activePassword = password;
     editingConnection = false;
@@ -979,7 +1013,7 @@
       ? store.nodeId(route.selectedTopic)
       : undefined;
     if (id) selectLoadedTopic(id, selectedTopic !== route.selectedTopic);
-    else if (route.selectedTopic) selectedTopicId = "";
+    else selectedTopicId = "";
 
     const messageId = messageIdFromViewState(state, viewToken);
     selectedMessageId = currentHistory.some(
@@ -1132,8 +1166,8 @@
     </div>
     {#if topicSnapshot.collectionStopped}
       <span class="header-notice problem" role="status">
-        Collection stopped: latest values exceed storage capacity. Narrow
-        subscriptions, then reset collected data.
+        Collection stopped: storage full. Narrow subscriptions, then reset
+        collected data.
       </span>
     {/if}
     {#if error || connectionError}<strong class="header-error"
@@ -1249,7 +1283,7 @@
         </div>
         {#if topicWarning}
           <span
-            class="meta"
+            class="topic-warning meta"
             class:problem={topicSnapshot.topicsOmitted}
             role="status"
           >
@@ -1265,6 +1299,7 @@
             revision={topicSnapshot.revision}
             selected={selectedTopicId}
             expanded={visibleTopicExpanded}
+            fixedExpanded={Boolean(topicSearch.trim())}
             activity={topicActivity}
             label="MQTT topics"
             checkable={checkableTopics}

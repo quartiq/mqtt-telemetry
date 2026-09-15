@@ -1,6 +1,7 @@
 <svelte:options runes={true} />
 
 <script lang="ts">
+  import { tick } from "svelte";
   import type {
     TreeActions,
     TreeActivity,
@@ -17,6 +18,7 @@
     revision?: number;
     selected: string;
     expanded: Set<string>;
+    fixedExpanded?: boolean;
     activity?: Map<string, TreeActivity>;
     checkable?: Set<string>;
     checked?: Set<string>;
@@ -33,6 +35,7 @@
     revision = 0,
     selected,
     expanded,
+    fixedExpanded = false,
     activity,
     checkable = new Set(),
     checked = new Set(),
@@ -45,7 +48,9 @@
   const emptyActivity = new Map<string, TreeActivity>();
   const actions: TreeActions = {
     select: (id) => onselect(id),
-    toggle: (id, open) => ontoggle(id, open),
+    toggle: (id, open) => {
+      if (!fixedExpanded) ontoggle(id, open);
+    },
     move,
     check: (id) => oncheck?.(id),
   };
@@ -60,12 +65,41 @@
     selected,
     tabStop,
     expanded,
+    fixedExpanded,
     activity: activity ?? emptyActivity,
     showActivity: activity !== undefined,
     checkable,
     checked,
     checkDisabled,
     actions,
+  });
+
+  let tree: HTMLUListElement;
+  $effect.pre(() => {
+    const ids = visible;
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement) || !tree?.contains(active)) return;
+    const row = active.closest<HTMLElement>("[data-tree-id]");
+    if (!row || ids.includes(row.dataset.treeId!)) return;
+    // Recover focus only when this tree removes the focused row. Preserve selection intent.
+    let ancestor = row.parentElement?.parentElement?.closest("li");
+    let target = tabStop;
+    while (ancestor) {
+      const candidate = ancestor.querySelector<HTMLElement>(
+        ":scope > [data-tree-id]",
+      )?.dataset.treeId;
+      if (candidate && ids.includes(candidate)) {
+        target = candidate;
+        break;
+      }
+      ancestor = ancestor.parentElement?.closest("li") ?? null;
+    }
+    void tick().then(() => {
+      if (!active.isConnected && document.activeElement === document.body)
+        tree
+          ?.querySelector<HTMLElement>(`[data-tree-id="${CSS.escape(target)}"]`)
+          ?.focus({ preventScroll: true });
+    });
   });
 
   function move(id: string, direction: TreeDirection) {
@@ -75,7 +109,12 @@
       ontoggle(id, true);
       return;
     }
-    if (direction === "parent" && node.children.length && expanded.has(id)) {
+    if (
+      !fixedExpanded &&
+      direction === "parent" &&
+      node.children.length &&
+      expanded.has(id)
+    ) {
       ontoggle(id, false);
       return;
     }
@@ -83,7 +122,7 @@
     if (next !== id) {
       onselect(next);
       requestAnimationFrame(() =>
-        document
+        tree
           .querySelector<HTMLElement>(`[data-tree-id="${CSS.escape(next)}"]`)
           ?.focus(),
       );
@@ -91,7 +130,7 @@
   }
 </script>
 
-<ul aria-label={label} role="tree">
+<ul bind:this={tree} aria-label={label} role="tree">
   {#each roots as id, index (id)}
     <TreeItem {id} {context} index={index + 1} size={roots.length} />
   {/each}

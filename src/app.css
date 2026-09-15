@@ -190,12 +190,6 @@ pre {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.topics > header .meta {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .app-header h1,
 .identity {
   min-width: 0;
@@ -366,7 +360,11 @@ pre {
 
 .topics .problem {
   margin-left: 0;
-  white-space: nowrap;
+}
+
+.topics .topic-warning {
+  flex-basis: 100%;
+  margin-left: 0;
 }
 
 .topic-tree {

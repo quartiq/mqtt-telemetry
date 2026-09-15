@@ -127,6 +127,45 @@ describe("MQTT session", () => {
     expect(client.subscribeResult).toHaveBeenCalledTimes(calls);
   });
 
+  it.each(["connecting", "after CONNACK", "subscribing", "connected"])(
+    "cancels the session while %s",
+    async (phase) => {
+      vi.useFakeTimers();
+      const client = new FakeClient();
+      const ack = deferred();
+      if (phase === "subscribing")
+        client.subscribeResult.mockImplementationOnce(() => ack.promise);
+      mocks.connect.mockReturnValueOnce(client as never);
+      const lifetime = new AbortController();
+      const status = vi.fn();
+      const opening = MqttSession.connect(
+        "ws://broker.example",
+        ["#"],
+        {
+          status,
+          message: vi.fn(),
+        },
+        { signal: lifetime.signal },
+      );
+      const outcome =
+        phase === "connected"
+          ? opening
+          : expect(opening).rejects.toThrow(/cancelled|aborted/);
+      if (phase !== "connecting") client.emit("connect");
+      if (phase === "connected") await opening;
+      else if (phase !== "after CONNACK") await Promise.resolve();
+      lifetime.abort();
+      await outcome;
+      expect(client.end).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+      const calls = status.mock.calls.length;
+      ack.resolve([{ topic: "#", qos: 0 }]);
+      client.emit("connect");
+      await Promise.resolve();
+      expect(status).toHaveBeenCalledTimes(calls);
+    },
+  );
+
   it("uses clean sessions and passes optional credentials", () => {
     const options = clientOptions({ username: "user", password: "secret" });
     expect(options).toMatchObject({

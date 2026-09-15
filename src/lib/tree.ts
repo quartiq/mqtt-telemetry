@@ -39,6 +39,7 @@ export type TreeContext = {
   expanded: Set<string>;
   activity: Map<string, TreeActivity>;
   showActivity: boolean;
+  fixedExpanded?: boolean;
   checkable: Set<string>;
   checked: Set<string>;
   checkDisabled: boolean;

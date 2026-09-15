@@ -10,11 +10,13 @@ Use one MQTT subscription filter per line. Start with the topics you need: `#` o
 
 ## What to expect
 
-History lives in the current tab and is lost on reload. Storage is bounded: older messages are pruned, preserving each topic’s latest received value, the topic tree, and your plots. The latest value is kept even beyond the history age limit. If capacity is exhausted, the app explains what stopped and how to recover.
+History lives in the current tab and is lost on reload. Storage is bounded: older messages are pruned, preserving each topic’s latest received value, the topic tree, and your plots. The latest value is kept even beyond the history age limit. Clearing history keeps topics and pins; resetting collected data also forgets topics. If capacity is exhausted, the app explains what stopped and how to recover.
+
+Credentials are remembered for reload using this tab’s session storage, when available.
 
 Subscription edits and reconnects preserve the workspace. Changing the broker URL starts fresh. Messages missed during a connection interruption cannot be recovered.
 
-Plots use browser receipt time. Every arrival enters history, including retained replays and empty payloads; neither erases earlier messages. Retained replays are excluded from plots so refreshing subscriptions does not count old values as new measurements. A pinned field becoming absent or nonnumeric interrupts its line; the plot resumes when numeric values return.
+Plots use browser receipt time. Display updates are batched; every accepted arrival enters history, including retained replays and empty payloads. Neither erases earlier messages. Binary previews retain at most 32 bytes, alongside the original message size. Retained replays are excluded from plots so refreshing subscriptions does not count old values as new measurements. A pinned field becoming absent or nonnumeric interrupts its line; the plot resumes when numeric values return.
 
 Saved dashboards and share links contain connection settings and plots, but no credentials or message history. Broker and topic names in launch URLs may appear in browser history and hosting logs; use a local dashboard file for sensitive names.
 

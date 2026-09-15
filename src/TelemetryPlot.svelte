@@ -4,7 +4,7 @@
   import {
     downsamplePlotPoints,
     formatPlotNumber,
-    formatPlotTick,
+    plotAxisLabels,
     nearestPlotPoint,
     nicePlotScale,
     plotPointInsertionIndex,
@@ -62,12 +62,10 @@
 
   const left = 82;
   const right = 16;
-  const top = 10;
   const bottom = 32;
   let clientWidth = $state(640);
   let clientHeight = $state(220);
   let width = $derived(Math.max(clientWidth, left + right + 1));
-  let height = $derived(Math.max(clientHeight, top + bottom + 1));
   let visibleStart = $derived(plotPointInsertionIndex(points, xMin));
   let visibleEnd = $derived(plotPointInsertionIndex(points, xMax, true));
   let visiblePoints = $derived.by(() =>
@@ -88,17 +86,21 @@
       !Number.isFinite(summary.standardDeviation)
     )
       return undefined;
+    const axis = plotAxisLabels(yScale);
     return {
       summary,
+      offset: axis.offset,
       yMin: yScale.min,
       yMax: yScale.max,
       step: yScale.step,
-      yTicks: yScale.ticks.map((value) => ({
+      yTicks: yScale.ticks.map((value, index) => ({
         value,
-        label: formatPlotTick(value, yScale.step),
+        label: axis.labels[index],
       })),
     };
   });
+  let top = $derived(vertical?.offset === undefined ? 10 : 28);
+  let height = $derived(Math.max(clientHeight, top + bottom + 1));
   let plot = $derived(
     vertical
       ? {
@@ -321,6 +323,11 @@
       onpointermove={inspect}
       onpointerleave={() => oninspect(undefined)}
     >
+      {#if plot.offset !== undefined}
+        <text class="y-offset" x={left} y="12"
+          >y = {String(plot.offset).replace("-", "−")} + tick</text
+        >
+      {/if}
       {#each plot.yTicks as tick}
         {@const y =
           top +

@@ -29,14 +29,14 @@ export type PlotStatistics = {
 };
 
 export function plotSeries(
-  history: readonly TelemetryMessage[],
+  history: Iterable<TelemetryMessage>,
   path: JsonPath,
 ): PlotSeries {
   return plotSeriesAtPath(history, path);
 }
 
 export function plotSeriesPath(
-  history: readonly TelemetryMessage[],
+  history: Iterable<TelemetryMessage>,
   singularPath: string,
 ): PlotSeries {
   const path = parseJsonPath(singularPath);
@@ -44,7 +44,7 @@ export function plotSeriesPath(
 }
 
 function plotSeriesAtPath(
-  history: readonly TelemetryMessage[],
+  history: Iterable<TelemetryMessage>,
   path: JsonPath,
 ): PlotSeries {
   const points: PlotPoint[] = [];
@@ -178,7 +178,7 @@ export function formatPlotNumber(value: number, resolution: number): string {
   const resolutionExponent = Math.floor(Math.log10(safeResolution));
   const significantDigits = Math.max(
     1,
-    Math.min(12, exponent - resolutionExponent + 2),
+    Math.min(17, exponent - resolutionExponent + 2),
   );
 
   if (exponent <= -4 || exponent >= 7) {
@@ -190,7 +190,7 @@ export function formatPlotNumber(value: number, resolution: number): string {
   }
 
   return new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: Math.max(0, Math.min(12, -resolutionExponent + 1)),
+    maximumFractionDigits: Math.max(0, Math.min(17, -resolutionExponent + 1)),
     useGrouping: false,
   })
     .format(value)
@@ -198,6 +198,7 @@ export function formatPlotNumber(value: number, resolution: number): string {
 }
 
 export function formatPlotTick(value: number, step: number): string {
+  if (value === 0) return "0";
   const stepExponent = Math.floor(Math.log10(Math.abs(step)));
   const valueExponent =
     value === 0 ? 0 : Math.floor(Math.log10(Math.abs(value)));
@@ -205,9 +206,27 @@ export function formatPlotTick(value: number, step: number): string {
     return formatPlotNumber(value, step);
 
   return value
-    .toFixed(Math.max(0, Math.min(12, -stepExponent)))
+    .toFixed(Math.max(0, Math.min(17, -stepExponent)))
     .replace("-", "−")
     .replace(/^([−]?)0\./, "$1.");
+}
+
+// Keep ordinary labels direct; share the baseline only when it saves axis space.
+export function plotAxisLabels(scale: PlotScale): {
+  labels: string[];
+  offset?: number;
+} {
+  const labels = scale.ticks.map((value) => formatPlotTick(value, scale.step));
+  if (labels.every((label) => label.length <= 10)) return { labels };
+  const relative = scale.ticks.map((value) =>
+    formatPlotTick(value - scale.min, scale.step),
+  );
+  if (
+    relative.every((label) => label.length <= 10) &&
+    new Set(relative).size === relative.length
+  )
+    return { labels: relative, offset: scale.min };
+  return { labels };
 }
 
 export function nicePlotScale(
@@ -223,9 +242,7 @@ export function nicePlotScale(
   let step = niceStep((dataMax - dataMin) / 2);
   let first = alignedFloor(dataMin, step);
   let last = first + 2 * step;
-  const tolerance = () =>
-    Math.max(Math.abs(last) * Number.EPSILON * 4, step * 1e-9);
-  if (last + tolerance() < dataMax) {
+  if (last < dataMax) {
     step = niceStep(step * (1 + 1e-10));
     first = alignedFloor(dataMin, step);
     last = first + 2 * step;
@@ -234,7 +251,17 @@ export function nicePlotScale(
   if (
     ![first, last, step, last - first].every(Number.isFinite) ||
     step <= 0 ||
-    last <= first
+    last <= first ||
+    first > dataMin ||
+    last < dataMax ||
+    new Set(
+      plotAxisLabels({
+        min: first,
+        max: last,
+        step,
+        ticks: [first, first + step, last],
+      }).labels,
+    ).size !== 3
   )
     return undefined;
   return { min: first, max: last, step, ticks: [first, first + step, last] };
@@ -267,8 +294,8 @@ function niceStep(value: number): number {
 
 function alignedFloor(value: number, step: number): number {
   const quotient = value / step;
-  const tolerance = Math.abs(quotient) * Number.EPSILON * 4;
-  return Math.floor(quotient + tolerance) * step;
+  const aligned = Math.floor(quotient) * step;
+  return aligned > value ? aligned - step : aligned;
 }
 
 export function downsamplePlotPoints(

@@ -21,6 +21,7 @@ let client;
 let subscriptions = 0;
 const requests = [];
 const connections = [];
+const connectionPasswords = [];
 let subscriptionReply = "accept";
 let acknowledge;
 broker.on("connection", (socket) => {
@@ -31,6 +32,7 @@ broker.on("connection", (socket) => {
     if (message.cmd === "connect") {
       client = socket;
       connections.push(message.username ?? "");
+      connectionPasswords.push(message.password?.toString() ?? "");
       socket.send(packet.generate({ cmd: "connack", returnCode: 0 }));
     } else if (message.cmd === "subscribe") {
       subscriptions += 1;
@@ -280,15 +282,98 @@ try {
     await until(
       "document.querySelector('.connection-state')?.innerText.includes('Connected')",
     );
+    // Back to an empty selection must clear Value as well as the active row.
+    publish("review/value", { value: 1 });
+    await until(
+      "document.querySelectorAll('.topic-tree [role=treeitem]').length === 2",
+    );
+    await evaluate(
+      `document.querySelectorAll('.topic-tree [role=treeitem]')[1].click()`,
+    );
+    await until(
+      `document.querySelector('.message-tree [data-tree-id="$.value"]')`,
+    );
+    await evaluate("history.back()");
+    await until(
+      "!document.querySelector('.topic-tree [aria-selected=true]') && !document.querySelector('.message-tree')",
+    );
+    await evaluate(
+      `document.querySelectorAll('.topic-tree [role=treeitem]')[1].click()`,
+    );
+    await until(
+      `document.querySelector('.message-tree [data-tree-id="$.value"]')`,
+    );
+    await click('.message-tree [data-tree-id="$.value"]');
+    publish("review/value", { other: 2 });
+    await until(
+      `document.querySelector('.message-tree [data-tree-id="$.other"]')`,
+    );
+    assert(
+      await evaluate(`document.activeElement?.dataset.treeId === "$"`),
+      "Schema removal must recover tree focus",
+    );
+    await fill("#topic-search", "review");
+    await until("document.querySelector('.topic-tree .fixed-caret')");
+    assert(
+      await evaluate("!document.querySelector('.topic-tree button.caret')"),
+      "Search ancestors must not offer ineffective collapse",
+    );
+    await fill("#topic-search", "");
+    // Display truncation does not imply that the selected field is absent.
+    publish("review/value", { value: 3 });
+    await until(
+      `document.querySelector('.message-tree [data-tree-id="$.value"]')`,
+    );
+    await click('.message-tree [data-tree-id="$.value"]');
+    publish("review/value", { a: Array(10000).fill(0), value: 4 });
+    await until(
+      "document.querySelector('.message-panel').innerText.includes('additional fields omitted')",
+    );
+    assert(
+      await evaluate("!document.querySelector('.message-panel .missing')"),
+      "Omitted field exists in payload",
+    );
+    publish("review/value", 1e12);
+    await until(
+      `document.querySelector('.message-tree [data-tree-id="$"] > .plot-toggle')`,
+    );
+    await click('.message-tree [data-tree-id="$"] > .plot-toggle');
+    publish("review/value", 1e12 + 0.001);
+    await until("document.querySelector('.y-offset')");
+    assert(
+      await evaluate(`(() => {
+      const labels = [...document.querySelectorAll('.y-label')];
+      return new Set(labels.map(el => el.textContent)).size === 3 && labels.every(el => el.getBBox().x >= 0);
+    })()`),
+      "Narrow numeric ranges must have distinct, unclipped labels",
+    );
+    assert(
+      await evaluate(
+        "document.querySelector('.y-offset')?.textContent.includes('1000000000000 + tick')",
+      ),
+      "Shared offset must explain the compact tick labels",
+    );
+    await command("Page.navigate", { url: url.href });
+    await until(
+      "document.querySelector('.connection-state')?.innerText.includes('Connected')",
+    );
     // A valid MQTT path can exceed the tree budget without filling the tree.
     const beforeAdmissionConnections = connections.length;
     publish(Array(10_001).fill("a").join("/"), 1);
     await until(
-      "document.querySelector('.topics-header').innerText.includes('Some topics could not fit')",
+      "document.querySelector('.topics-header').innerText.includes('Topics omitted')",
     );
     assert(
       await evaluate("!document.querySelector('.topic-tree [role=treeitem]')"),
     );
+    assert(
+      await evaluate(`(() => {
+      const warning = document.querySelector('.topic-warning');
+      return getComputedStyle(warning).whiteSpace === 'normal' && warning.scrollWidth <= warning.clientWidth + 1;
+    })()`),
+      "Recovery warning must wrap inside the mobile pane",
+    );
+
     const resetSelector =
       'button[title="Clear collected messages and topics; keep subscriptions and plots"]';
     assert(
@@ -299,7 +384,7 @@ try {
     );
     await click(resetSelector);
     await until(
-      "!document.querySelector('.topics-header').innerText.includes('Some topics could not fit')",
+      "!document.querySelector('.topics-header').innerText.includes('Topics omitted')",
     );
     assert.equal(
       connections.length,
@@ -570,6 +655,71 @@ try {
       "Value header does not adapt to narrow sidebar",
     );
     await viewport(390, 844);
+    // Offscreen leaves must keep their height and remain reachable by keyboard,
+    // including after switching between desktop and touch row sizes.
+    for (const touch of [false, true, false]) {
+      await command("Emulation.setTouchEmulationEnabled", { enabled: touch });
+      for (const selector of [".message-tree", ".topic-tree"]) {
+        const before = await evaluate(`(() => {
+          const pane = document.querySelector('${selector}');
+          const rows = pane.querySelectorAll('[role=treeitem]');
+          rows[0].focus();
+          return { height: pane.scrollHeight, count: rows.length,
+            rowHeight: rows[0].getBoundingClientRect().height };
+        })()`);
+        assert.equal(
+          before.height,
+          Math.round(before.count * before.rowHeight),
+          "Skipped rows must reserve the current row height",
+        );
+        for (const key of ["End", "Home"]) {
+          await command("Input.dispatchKeyEvent", { type: "keyDown", key });
+          await command("Input.dispatchKeyEvent", { type: "keyUp", key });
+          await until(`(() => {
+            const pane = document.querySelector('${selector}');
+            const rows = pane.querySelectorAll('[role=treeitem]');
+            const row = rows[${key === "End" ? "rows.length - 1" : "0"}];
+            const box = row.getBoundingClientRect();
+            const bounds = pane.getBoundingClientRect();
+            return document.activeElement === row && box.top >= bounds.top - 1 &&
+              box.bottom <= bounds.bottom + 1 && box.height === ${before.rowHeight};
+          })()`);
+          assert.equal(
+            await evaluate(
+              `document.querySelector('${selector}').scrollHeight`,
+            ),
+            before.height,
+            "Revealing offscreen rows must not shift the scroll extent",
+          );
+        }
+      }
+    }
+    await command("Accessibility.enable");
+    const accessibility = await command("Accessibility.getFullAXTree");
+    assert.equal(
+      accessibility.nodes.filter((node) => node.role?.value === "treeitem")
+        .length,
+      await evaluate("document.querySelectorAll('[role=treeitem]').length"),
+      "All rows must retain their tree-item accessibility roles",
+    );
+    const { root } = await command("DOM.getDocument");
+    for (const [selector, name] of [
+      ['.message-tree [data-tree-id="$.field9"]', "field9"],
+      [".topic-tree > ul > li:last-child [role=treeitem]", "topic-9"],
+    ]) {
+      const { nodeId } = await command("DOM.querySelector", {
+        nodeId: root.nodeId,
+        selector,
+      });
+      const { nodes } = await command("Accessibility.getPartialAXTree", {
+        nodeId,
+        fetchRelatives: false,
+      });
+      assert(
+        nodes.some((node) => !node.ignored && node.name?.value.includes(name)),
+        "Offscreen rows must remain available to accessibility tools",
+      );
+    }
     await click(".connection-disclosure");
     assert(
       !(await dimensions()).overflow,
@@ -821,6 +971,7 @@ try {
 
     await click(".connection-disclosure");
     await fill("input[name=username]", "another-user");
+    await fill("input[name=password]", "reload-secret");
     await click(".connection-editor button[type=submit]");
     await until(
       "document.querySelector('.connection-state').innerText.includes('Connected') && !document.querySelector('.connection-editor')",
@@ -852,6 +1003,38 @@ try {
       connections.at(-1),
       "another-user",
       "Recovery applied an unsubmitted credential draft",
+    );
+    // Tiny binary previews must not retain the large transport frames they arrived in.
+    await command("HeapProfiler.collectGarbage");
+    const backingBefore = (await command("Runtime.getHeapUsage"))
+      .backingStorageSize;
+    for (let i = 0; i < 8; i++)
+      client.send(
+        Buffer.concat([
+          packet.generate({
+            cmd: "publish",
+            topic: "binary-preview",
+            qos: 0,
+            payload: Buffer.alloc(64, 255),
+          }),
+          packet.generate({
+            cmd: "publish",
+            topic: "oversize-preview",
+            qos: 0,
+            payload: Buffer.alloc(2 * 1024 * 1024, 120),
+          }),
+        ]),
+      );
+    publish("preview-sentinel", 1);
+    await until(
+      "[...document.querySelectorAll('.topic-tree .label')].some(el => el.textContent === 'preview-sentinel')",
+    );
+    await command("HeapProfiler.collectGarbage");
+    const backingAfter = (await command("Runtime.getHeapUsage"))
+      .backingStorageSize;
+    assert(
+      backingAfter - backingBefore < 2 * 1024 * 1024,
+      "Binary previews retained transport frames",
     );
     // Exercise the real shared budget with a small number of large current values.
     for (let index = 0; index < 19; index++)
@@ -916,6 +1099,34 @@ try {
       beforeResetRequests,
       "Reload must not replace no subscriptions with #",
     );
+    assert.equal(
+      connections.at(-1),
+      "another-user",
+      "Reload must restore the active username",
+    );
+    assert.equal(
+      connectionPasswords.at(-1),
+      "reload-secret",
+      "Reload must restore the active password",
+    );
+    assert(
+      await evaluate(
+        "!JSON.stringify(history.state).includes('reload-secret') && !location.href.includes('reload-secret')",
+      ),
+      "Credentials must stay outside routes",
+    );
+    // Losing the tab record must ask for credentials, not try anonymous access.
+    const beforeMissingCredentials = connections.length;
+    await evaluate("sessionStorage.clear()");
+    await command("Page.reload");
+    await until("document.querySelector('.connection-editor')");
+    assert.equal(connections.length, beforeMissingCredentials);
+    await fill("input[name=username]", "another-user");
+    await fill("input[name=password]", "reload-secret");
+    await click(".connection-editor button[type=submit]");
+    await until(
+      "document.querySelector('.connection-state').innerText.includes('Connected') && !document.querySelector('.connection-editor')",
+    );
     await click(".connection-disclosure");
     await fill("input[name=broker]", `ws://127.0.0.1:${port}/another-broker`);
     assert(
@@ -931,6 +1142,18 @@ try {
       await evaluate(
         "!document.querySelector('.plot-panel') && !document.querySelector('[aria-label=\"MQTT topics\"]')",
       ),
+    );
+    const beforeBrokerBack = connections.length;
+    await evaluate("history.back()");
+    await until(
+      "document.querySelector('.connection-editor') && document.querySelector('input[name=broker]').value.endsWith(':' + " +
+        port +
+        ")",
+    );
+    assert.equal(
+      connections.length,
+      beforeBrokerBack,
+      "Back must not connect anonymously to a previously authenticated broker",
     );
     console.log(
       `Checked panes, touch controls, recovery, and subscription editing: ${base}`,

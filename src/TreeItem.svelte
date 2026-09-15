@@ -99,7 +99,7 @@
   }
 </script>
 
-<li>
+<li role="none">
   <div
     aria-expanded={internal ? open : undefined}
     aria-checked={checkable ? checked : undefined}
@@ -117,7 +117,9 @@
     ondblclick={activate}
     onkeydown={keydown}
   >
-    {#if internal}
+    {#if internal && context.fixedExpanded}
+      <span aria-hidden="true" class="control-slot fixed-caret">▾</span>
+    {:else if internal}
       <button
         aria-label={open ? "Collapse" : "Expand"}
         class="caret"
@@ -183,8 +185,15 @@
 
 <style>
   li {
+    --tree-row-height: var(--line);
     list-style: none;
     min-width: 0;
+  }
+
+  /* Only leaves have a predictable height before their first layout. */
+  li:not(:has(> ul)) {
+    content-visibility: auto;
+    contain-intrinsic-block-size: var(--tree-row-height);
   }
 
   ul {
@@ -200,7 +209,7 @@
     cursor: default;
     display: flex;
     line-height: var(--line);
-    min-height: var(--line);
+    min-height: var(--tree-row-height);
     min-width: 0;
     overflow: hidden;
     padding-right: var(--space-tight);
@@ -238,6 +247,10 @@
   .control-slot {
     flex: 0 0 var(--tree-control);
     width: var(--tree-control);
+  }
+
+  .fixed-caret {
+    text-align: center;
   }
 
   .caret,
@@ -304,10 +317,13 @@
   }
 
   @media (pointer: coarse) {
+    li {
+      --tree-row-height: 40px;
+    }
+
     [role="treeitem"] {
       --tree-control: 30px;
       --tree-indent: 12px;
-      min-height: 40px;
     }
   }
 </style>
