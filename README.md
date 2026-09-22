@@ -26,6 +26,8 @@ Browsers need MQTT over WebSockets. The hosted HTTPS app requires `wss://` and a
 
 For a LAN broker offering only `ws://`, save the hosted page as **Webpage, HTML Only** and open the saved file. It is a complete offline application that connects directly to the broker.
 
+Successful CI/CD runs also provide a downloadable `index.html` artifact. Main deploys that same tested build to Pages.
+
 ## Develop
 
 ```sh
