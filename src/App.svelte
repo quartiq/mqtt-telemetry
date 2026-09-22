@@ -1,9 +1,10 @@
 <svelte:options runes={true} />
 
 <script lang="ts">
-  import { restoreAuth, rememberAuth } from "./lib/session-auth";
+  import { restoreAuth } from "./lib/session-auth";
   import { onMount } from "svelte";
-  import ConnectionFields from "./ConnectionFields.svelte";
+  import ConnectionEditor from "./ConnectionEditor.svelte";
+  import DashboardActions from "./DashboardActions.svelte";
   import DurationSelect from "./DurationSelect.svelte";
   import HistoryPolicy from "./HistoryPolicy.svelte";
   import HistoryTable from "./HistoryTable.svelte";
@@ -20,13 +21,11 @@
   } from "./lib/json";
   import { TelemetryStore } from "./lib/telemetry";
   import type { DisplayTimeZone } from "./lib/time";
-  import { MqttSession, type SessionStatus } from "./lib/mqtt-session";
+  import { Connection, type ConnectionTarget } from "./lib/connection.svelte";
+  import type { SessionAuth } from "./lib/mqtt-session";
   import { topicMatchesFilter } from "./lib/mqtt-filter";
   import { randomId } from "./lib/random-id";
   import {
-    dashboardJson,
-    dashboardShareUrl,
-    parseDashboardJson,
     readInlineDashboard,
     resolveStartupRoute,
     routeFromDashboard,
@@ -38,8 +37,6 @@
     launchUrl,
     MAX_PLOTS,
     readLaunchRoute,
-    uniqueFilters,
-    subscriptionLines,
     type AppRoute,
     type PlotRef,
   } from "./lib/routes";
@@ -81,28 +78,58 @@
     ? `https://github.com/quartiq/mqtt-telemetry/commit/${buildCommit}`
     : undefined;
   let route = $state(initialRoute);
-  let formBroker = $state(initialRoute.broker);
-  let formFilters = $state(initialRoute.filters.join("\n"));
-  let username = $state(initialAuth?.username ?? "");
-  let password = $state(initialAuth?.password ?? "");
 
-  let session = $state<MqttSession | undefined>();
+  const connection = new Connection({
+    message: ({ topic, payload, packet, segment }) => {
+      if (packet.cmd !== "publish") return;
+      const previous = segments.get(topic);
+      const historySegment =
+        previous?.transport === segment ? previous.id : ++lastSegment;
+      const added = store.add(topic, payload, {
+        receivedAt: telemetryNow(),
+        segment: historySegment,
+        retained: packet.retain,
+        duplicate: packet.dup,
+      });
+      if (!added) return;
+      segments.set(topic, { transport: segment, id: historySegment });
+      const ancestors = store.ancestorIds(added.nodeId);
+      const root = ancestors.at(-1);
+      if (root && !autoExpandedTopicRoots.has(root)) {
+        autoExpandedTopicRoots.add(root);
+        topicExpanded = new Set([...topicExpanded, root]);
+      }
+      const activity = { at: performance.now() };
+      for (const id of [added.nodeId, ...ancestors])
+        activityByTopic.set(id, activity);
+      if (route.selectedTopic === topic) selectLoadedTopic(added.nodeId, false);
+    },
+    starting: () => segments.clear(),
+    subscribed: (accepted) => {
+      for (const topic of segments.keys())
+        if (!accepted.some((filter) => topicMatchesFilter(topic, filter)))
+          segments.delete(topic);
+    },
+    ready: () => restoreView(history.state),
+    failed: () => editConnection(),
+  });
   let store = $state.raw(new TelemetryStore(initialRoute.historyLimit));
-  let revision = $state(0);
   let selectedTopicId = $state("");
   let selectedMessageId = $state<number | null>(null);
   let fieldByTopic = new Map<string, string | null>();
   let revealedFieldKey = "";
   let topicExpanded = $state(new Set<string>());
   let autoExpandedTopicRoots = new Set<string>();
-  let topicActivity = $state.raw(new Map<string, TreeActivity>());
+  let activityByTopic = new Map<string, TreeActivity>();
+  let topicActivity = $derived.by(() => {
+    topicSnapshot;
+    return new Map(activityByTopic);
+  });
   let topicSearch = $state("");
   let historyExpanded = $state(false);
   let jsonExpanded = $state(new Set<string>(["$"]));
   const jsonExpandedByTopic = new Map<string, Set<string>>();
-  let connectionState = $state<"idle" | "connecting" | SessionStatus["state"]>(
-    initialRoute.broker ? "connecting" : "idle",
-  );
+  let connectionState = $derived(connection.state);
   let status = $derived(
     {
       idle: "Not connected",
@@ -117,19 +144,12 @@
     }[connectionState],
   );
   let error = $state(startup.error);
-  let connectionError = $state("");
-  let dashboardNotice = $state("");
-  let connectionNotice = $state("");
-  let connectionInterrupted = false;
+  let connectionError = $derived(connection.error);
+  let connectionNotice = $derived(connection.notice);
   let editingConnection = $state(!initialRoute.broker);
-  let dashboardFileInput: HTMLInputElement;
-  let connectionLifetime = new AbortController();
-  let activeUsername = $state(initialAuth?.username ?? "");
-  let activePassword = $state(initialAuth?.password ?? "");
   let viewToken = randomId();
   let lastSegment = 0;
   const segments = new Map<string, { transport: number; id: number }>();
-  let renderTimer = 0;
   let plotNow = $state(telemetryNow());
 
   if (location.search || location.hash || !storedRoute)
@@ -146,9 +166,10 @@
         : launchUrl(initialRoute, location),
     );
 
-  let topicSnapshot = $derived.by(() => {
-    revision;
-    return store.snapshot();
+  let topicSnapshot = $derived($store.snapshot());
+  $effect(() => {
+    topicSnapshot;
+    plotNow = telemetryNow();
   });
   let topicFilter = $derived(
     filterTopicTree(topicSnapshot.roots, topicSnapshot.nodes, topicSearch),
@@ -162,40 +183,17 @@
       : topicExpanded,
   );
   let selectedTopic = $derived(store.topic(selectedTopicId) ?? "");
-  let transportDraftMatches = $derived(
-    formBroker.trim() === route.broker &&
-      username === activeUsername &&
-      password === activePassword,
-  );
-  let connectionDraftMatches = $derived(
-    transportDraftMatches &&
-      JSON.stringify(uniqueFilters(formFilters.split(/\r?\n/))) ===
-        JSON.stringify(route.filters),
-  );
-  let connectionBusy = $derived(
-    connectionState === "connecting" ||
-      connectionState === "restoring" ||
-      connectionState === "updating",
-  );
-  let canResubscribe = $derived(
-    Boolean(session) &&
-      connectionState === "connected" &&
-      route.filters.length > 0 &&
-      connectionDraftMatches,
-  );
   let statusProblem = $derived(
     connectionState === "offline" ||
       connectionState === "error" ||
       connectionState === "failed",
   );
-  let selectedSubtreeCount = $derived.by(() => {
-    revision;
-    return selectedTopicId ? store.subtreeMessageCount(selectedTopicId) : 0;
-  });
-  let currentHistory = $derived.by(() => {
-    revision;
-    return selectedTopicId ? store.history(selectedTopicId) : [];
-  });
+  let selectedSubtreeCount = $derived(
+    selectedTopicId ? $store.subtreeMessageCount(selectedTopicId) : 0,
+  );
+  let currentHistory = $derived(
+    selectedTopicId ? $store.history(selectedTopicId) : [],
+  );
   let currentMessage = $derived.by(() => {
     if (!currentHistory.length) return undefined;
     if (selectedMessageId === null) return currentHistory.at(-1);
@@ -238,12 +236,11 @@
   });
   let plotLimitReached = $derived(route.plots.length >= MAX_PLOTS);
   let checkedTopics = $derived.by(() => {
-    revision;
     return new Set(
       route.plots
         .filter((plot) => plot.path === "$")
         .flatMap((plot) => {
-          const id = store.nodeId(plot.topic);
+          const id = $store.nodeId(plot.topic);
           return id === undefined ? [] : [id];
         }),
     );
@@ -264,11 +261,10 @@
     ).length;
   });
   let dashboardPlots = $derived.by(() => {
-    revision;
     return route.plots.map<DashboardPlot>((plot) => {
-      const nodeId = store.nodeId(plot.topic);
+      const nodeId = $store.nodeId(plot.topic);
       const series = nodeId
-        ? store.plotSeries(nodeId, plot.path)
+        ? $store.plotSeries(nodeId, plot.path)
         : { points: [], retainedExcluded: 0 };
       const label = fieldLabel(parseJsonPath(plot.path) ?? []);
       return {
@@ -329,11 +325,8 @@
     const tick = () => {
       const now = telemetryNow();
       plotNow = now;
-      if (
-        route.historyAgeMs !== null &&
-        store.expireBefore(now - route.historyAgeMs)
-      )
-        revision += 1;
+      if (route.historyAgeMs !== null)
+        store.expireBefore(now - route.historyAgeMs);
       timer = window.setTimeout(tick, Math.max(50, 1000 - (now % 1000)));
     };
     tick();
@@ -342,61 +335,23 @@
 
   onMount(() => {
     const popstate = (event: PopStateEvent) => {
-      editingConnection = false;
-      const next = routeFromViewState(event.state) ?? defaultRoute();
-      if (next.broker !== route.broker) {
-        rememberAuth();
-        activeUsername = "";
-        activePassword = "";
-        route = next;
-        if (next.broker) {
-          formBroker = next.broker;
-          formFilters = next.filters.join("\n");
-          if (event.state?.credentialsRequired) stopConnection();
-          else void startConnection(next);
-        } else {
-          stopConnection();
-        }
-      } else {
-        const historyLimitChanged = next.historyLimit !== route.historyLimit;
-        const historyAgeChanged = next.historyAgeMs !== route.historyAgeMs;
-        const filtersChanged =
-          JSON.stringify(next.filters) !== JSON.stringify(route.filters);
-        route = next;
-        formFilters = next.filters.join("\n");
-        if (filtersChanged) void updateSubscriptions();
-        if (historyLimitChanged) {
-          store.setHistoryLimit(next.historyLimit);
-          revision += 1;
-        }
-        if (
-          historyAgeChanged &&
-          next.historyAgeMs !== null &&
-          store.expireBefore(telemetryNow() - next.historyAgeMs)
-        )
-          revision += 1;
-        restoreView(event.state);
-      }
+      applyConfiguration(routeFromViewState(event.state) ?? defaultRoute(), {
+        viewState: event.state,
+        credentialsRequired: event.state?.credentialsRequired === true,
+      });
     };
     addEventListener("popstate", popstate);
     addEventListener("keydown", browserKeydown);
-    const brokerError = route.broker
-      ? isWebSocketBroker(route.broker)
-      : undefined;
-    if (brokerError) {
-      connectionState = "error";
-      error = brokerError;
-      editingConnection = true;
-    } else if (credentialsRequired && !initialAuth) {
-      editingConnection = true;
-      connectionState = "idle";
-    } else if (route.broker) void startConnection(route);
+    applyConfiguration(route, {
+      auth: initialAuth,
+      credentialsRequired,
+      viewState: history.state,
+    });
+    if (startup.error) error = startup.error;
     return () => {
       removeEventListener("popstate", popstate);
       removeEventListener("keydown", browserKeydown);
-      if (renderTimer) clearTimeout(renderTimer);
-      connectionLifetime.abort();
-      session?.close();
+      connection.close();
     };
   });
 
@@ -410,7 +365,9 @@
     history[method](
       {
         ...browserViewState(next, viewToken, messageId),
-        credentialsRequired: Boolean(activeUsername || activePassword),
+        credentialsRequired:
+          connection.needsCredentials ||
+          Boolean(connection.auth.username || connection.auth.password),
       },
       "",
       launchUrl(next, location),
@@ -421,109 +378,68 @@
     writeRoute(next, messageId, true);
   }
 
-  function openDashboardFile() {
-    dashboardFileInput.click();
-  }
-
-  async function loadDashboardFile(event: Event) {
-    const input = event.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = "";
-    if (!file) return;
-    if (file.size > 1024 * 1024) {
-      error = "Dashboard file is too large.";
+  // Every external configuration entry point uses this transition. UI-only route
+  // edits still write history directly; they cannot replace a connection.
+  function applyConfiguration(
+    next: AppRoute,
+    options: {
+      auth?: SessionAuth;
+      credentialsRequired?: boolean;
+      viewState?: unknown;
+      pushHistory?: boolean;
+      messageId?: number | null;
+    } = {},
+  ) {
+    const brokerError = next.broker
+      ? isWebSocketBroker(next.broker)
+      : undefined;
+    if (brokerError) {
+      error = brokerError;
+      editingConnection = true;
       return;
     }
-    try {
-      applyDashboard(parseDashboardJson(await file.text()));
-      dashboardNotice = `Loaded ${file.name}`;
-    } catch (caught) {
-      error = caught instanceof Error ? caught.message : String(caught);
-    }
+    const brokerChanged = next.broker !== route.broker;
+    const limitChanged = next.historyLimit !== route.historyLimit;
+    route = next;
+    error = "";
+    editingConnection = false;
+    if (brokerChanged) resetData(next.historyLimit);
+    else if (limitChanged) store.setHistoryLimit(next.historyLimit);
+    if (next.historyAgeMs !== null)
+      store.expireBefore(telemetryNow() - next.historyAgeMs);
+    void connection.apply(next, {
+      auth: options.auth,
+      credentialsRequired: options.credentialsRequired,
+    });
+    if (connection.needsCredentials || !next.broker) editingConnection = true;
+    if (options.pushHistory)
+      writeRoute(
+        next,
+        brokerChanged
+          ? null
+          : options.messageId === undefined
+            ? selectedMessageId
+            : options.messageId,
+      );
+    restoreView(options.viewState ?? history.state);
   }
 
   function applyDashboard(dashboard: Dashboard) {
     const next = routeFromDashboard(dashboard);
     const brokerError = isWebSocketBroker(next.broker);
     if (brokerError) throw new Error(brokerError);
-    editingConnection = false;
-    error = "";
-    const sameBroker = next.broker === route.broker;
-    if (!sameBroker) {
-      rememberAuth();
-      activeUsername = "";
-      activePassword = "";
-    }
-    formBroker = next.broker;
-    formFilters = next.filters.join("\n");
-    writeRoute(next, null);
-    if (sameBroker) {
-      void updateSubscriptions();
-      store.setHistoryLimit(next.historyLimit);
-      if (next.historyAgeMs !== null)
-        store.expireBefore(telemetryNow() - next.historyAgeMs);
-      revision += 1;
-      restoreView(history.state);
-    } else {
-      void startConnection(next);
-    }
-  }
-
-  function saveDashboard() {
-    const blob = new Blob([dashboardJson(route)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "mqtt-telemetry-dashboard.json";
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url));
-    dashboardNotice = "Dashboard saved";
-  }
-
-  async function copyDashboardLink() {
-    const url = dashboardShareUrl(route, location);
-    try {
-      let copied = false;
-      if (navigator.clipboard?.writeText) {
-        try {
-          await navigator.clipboard.writeText(url);
-          copied = true;
-        } catch {
-          // The fallback also works for local files and restricted clipboards.
-        }
-      }
-      if (!copied) {
-        const textarea = document.createElement("textarea");
-        textarea.value = url;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.append(textarea);
-        try {
-          textarea.select();
-          if (!document.execCommand("copy")) throw new Error();
-        } finally {
-          textarea.remove();
-        }
-      }
-      dashboardNotice = "Share link copied";
-    } catch {
-      dashboardNotice =
-        "Clipboard unavailable; save the dashboard JSON instead.";
-    }
+    applyConfiguration(next, { pushHistory: true, messageId: null });
   }
 
   function resetData(historyLimit: number) {
-    if (renderTimer) clearTimeout(renderTimer);
-    renderTimer = 0;
     store = new TelemetryStore(historyLimit);
-    revision += 1;
     selectedTopicId = "";
     selectedMessageId = null;
     fieldByTopic = new Map();
     revealedFieldKey = "";
     topicExpanded = new Set();
     autoExpandedTopicRoots = new Set();
-    topicActivity = new Map();
+    activityByTopic = new Map();
     topicSearch = "";
     jsonExpanded = new Set(["$"]);
     jsonExpandedByTopic.clear();
@@ -533,237 +449,28 @@
     plotNow = telemetryNow();
   }
 
-  function stopConnection() {
-    rememberAuth();
-    activeUsername = username = "";
-    activePassword = password = "";
-    connectionLifetime.abort();
-    session?.close();
-    session = undefined;
-    connectionState = "idle";
-    connectionError = "";
-    error = "";
-    connectionNotice = "";
-    connectionInterrupted = false;
-    editingConnection = true;
-    resetData(route.historyLimit);
-  }
-
-  function statusChanged(next: SessionStatus) {
-    connectionState = next.state;
-    switch (next.state) {
-      case "connected":
-        connectionError = next.rejected.length
-          ? `Subscription rejected: ${next.rejected.join(", ")}`
-          : "";
-        connectionNotice = connectionInterrupted
-          ? `${next.rejected.length ? "Reconnected" : "Subscriptions restored"} · messages during the interruption may be missing.`
-          : "";
-        connectionInterrupted = false;
-        break;
-      case "offline":
-        connectionInterrupted = true;
-        connectionNotice =
-          "Connection interrupted · messages may be missed while reconnecting.";
-        break;
-      case "failed":
-        connectionNotice = "";
-        connectionError = next.error;
-        break;
-      case "error":
-        connectionError = next.error;
-        break;
-    }
-  }
-
-  function scheduleRender() {
-    if (renderTimer) return;
-    // Keep receipt/storage independent of display work, even on high-refresh screens.
-    renderTimer = window.setTimeout(() => {
-      renderTimer = 0;
-      plotNow = telemetryNow();
-      if (route.historyAgeMs !== null)
-        store.expireBefore(plotNow - route.historyAgeMs);
-      revision += 1;
-    }, 100);
-  }
-
-  async function startConnection(nextRoute: AppRoute, preserveData = false) {
-    connectionLifetime.abort();
-    connectionLifetime = new AbortController();
-    const { signal } = connectionLifetime;
-    const credentials = { username: activeUsername, password: activePassword };
-    session?.close();
-    if (!preserveData) {
-      session = undefined;
-      resetData(nextRoute.historyLimit);
-    }
-    segments.clear();
-    connectionState = "connecting";
-    connectionError = "";
-    error = "";
-    connectionInterrupted = preserveData;
-    connectionNotice = "";
-    try {
-      const nextSession = await MqttSession.connect(
-        nextRoute.broker,
-        nextRoute.filters,
-        {
-          message: ({ topic, payload, packet, segment }) => {
-            if (signal.aborted || packet.cmd !== "publish") return;
-            const receivedAt = telemetryNow();
-            const previous = segments.get(topic);
-            const historySegment =
-              previous?.transport === segment ? previous.id : ++lastSegment;
-            const added = store.add(topic, payload, {
-              receivedAt,
-              segment: historySegment,
-              retained: packet.retain,
-              duplicate: packet.dup,
-            });
-
-            scheduleRender();
-            if (!added) return;
-            segments.set(topic, { transport: segment, id: historySegment });
-            const ancestors = store.ancestorIds(added.nodeId);
-            const root = ancestors.at(-1);
-            if (root && !autoExpandedTopicRoots.has(root)) {
-              autoExpandedTopicRoots.add(root);
-              topicExpanded = new Set([...topicExpanded, root]);
-            }
-            const activity = {
-              at: performance.now(),
-            };
-            for (const id of [added.nodeId, ...ancestors])
-              topicActivity.set(id, activity);
-            if (route.selectedTopic === topic) {
-              selectLoadedTopic(added.nodeId, false);
-            }
-          },
-          status: (next) => {
-            if (signal.aborted) return;
-            if (next.state === "connected") {
-              const accepted = route.filters.filter(
-                (filter) => !next.rejected.includes(filter),
-              );
-              for (const topic of segments.keys()) {
-                if (
-                  !accepted.some((filter) => topicMatchesFilter(topic, filter))
-                )
-                  segments.delete(topic);
-              }
-            }
-            statusChanged(next);
-          },
-        },
-        { auth: credentials, signal },
-      );
-      if (signal.aborted) {
-        nextSession.close();
-        return;
-      }
-      session = nextSession;
-      if (
-        !rememberAuth(nextRoute.broker, credentials) &&
-        (credentials.username || credentials.password)
-      )
-        connectionNotice =
-          "Credentials will not survive reload: browser storage unavailable.";
-      restoreView(history.state);
-    } catch (caught) {
-      if (signal.aborted) return;
-      connectionState = "failed";
-      connectionError =
-        caught instanceof Error ? caught.message : String(caught);
-      editConnection();
-    }
-  }
-
-  function connectFromForm() {
-    const broker = formBroker.trim();
-    const brokerError = isWebSocketBroker(broker);
-    if (brokerError) {
-      error = brokerError;
-      return;
-    }
-    let filters: string[];
-    try {
-      filters = subscriptionLines(formFilters);
-    } catch (caught) {
-      error = caught instanceof Error ? caught.message : String(caught);
-      return;
-    }
-    const sameBroker = broker === route.broker;
-    const sameTransport =
-      Boolean(session) &&
-      sameBroker &&
-      transportDraftMatches &&
-      connectionState !== "failed";
-    const next: AppRoute = {
-      ...route,
-      broker,
-      filters,
-      ...(sameBroker ? {} : { selectedTopic: "", fieldPath: null, plots: [] }),
-    };
-    if (!sameBroker) rememberAuth();
-    activeUsername = username;
-    activePassword = password;
-    editingConnection = false;
-    error = "";
-    writeRoute(next, sameBroker ? selectedMessageId : null);
-    if (sameTransport) void updateSubscriptions();
-    else void startConnection(next, sameBroker);
-  }
-
-  async function updateSubscriptions() {
-    const current = session;
-    if (!current || connectionState === "failed") {
-      if (route.broker) await startConnection(route, true);
-      return;
-    }
-    try {
-      await current.setFilters(route.filters);
-    } catch (caught) {
-      if (session !== current) return;
-      connectionState = "failed";
-      connectionError =
-        caught instanceof Error ? caught.message : String(caught);
-    }
+  function applyConnection(target: ConnectionTarget, auth: SessionAuth) {
+    const sameBroker = target.broker === route.broker;
+    applyConfiguration(
+      {
+        ...route,
+        ...target,
+        ...(sameBroker
+          ? {}
+          : { selectedTopic: "", fieldPath: null, plots: [] }),
+      },
+      { auth, pushHistory: true },
+    );
   }
 
   function editConnection() {
     error = "";
-    formBroker = route.broker;
-    formFilters = route.filters.join("\n");
-    username = activeUsername;
-    password = activePassword;
     editingConnection = true;
   }
 
   function cancelConnectionEdit() {
     error = "";
     editingConnection = false;
-  }
-
-  function submitConnectionEdit(event: SubmitEvent) {
-    event.preventDefault();
-    connectFromForm();
-  }
-
-  async function resubscribeFromForm() {
-    const current = session;
-    if (!current || !canResubscribe) return;
-    editingConnection = false;
-    connectionState = "restoring";
-    error = "";
-    try {
-      await current.resubscribe();
-    } catch (caught) {
-      if (session !== current) return;
-      connectionState = "failed";
-      connectionError =
-        caught instanceof Error ? caught.message : String(caught);
-    }
   }
 
   function changeTimeZone(event: Event) {
@@ -890,7 +597,6 @@
   function changeHistoryLimit(limit: number): boolean {
     if (limit === route.historyLimit) return true;
     store.setHistoryLimit(limit);
-    revision += 1;
     const id = selectedMessageId;
     const nextMessageId = currentHistory.some((message) => message.id === id)
       ? id
@@ -903,7 +609,7 @@
   function changeHistoryAge(ageMs: number | null): boolean {
     if (ageMs === route.historyAgeMs) return true;
     plotNow = telemetryNow();
-    if (ageMs !== null && store.expireBefore(plotNow - ageMs)) revision += 1;
+    if (ageMs !== null) store.expireBefore(plotNow - ageMs);
     writeRoute({ ...route, historyAgeMs: ageMs }, selectedMessageId);
     return true;
   }
@@ -983,7 +689,6 @@
     if (!selectedTopicId) return;
     store.clearSubtree(selectedTopicId);
     selectedMessageId = null;
-    revision += 1;
     replaceRoute(route, null);
   }
 
@@ -991,7 +696,6 @@
     if (!selectedTopicId) return;
     store.clearHistory(selectedTopicId);
     selectedMessageId = null;
-    revision += 1;
     replaceRoute(route, null);
   }
 
@@ -1004,7 +708,6 @@
     if (!topicSnapshot.bufferedMessages) return;
     store.clearAllHistory();
     selectedMessageId = null;
-    revision += 1;
     replaceRoute(route, null);
   }
 
@@ -1048,14 +751,6 @@
   }
 </script>
 
-<input
-  accept="application/json,.json"
-  bind:this={dashboardFileInput}
-  class="dashboard-file"
-  type="file"
-  onchange={loadDashboardFile}
-/>
-
 <main class="browser">
   <header class="app-header panel">
     <div class="identity">
@@ -1066,7 +761,7 @@
             : "Open connection settings"}
           aria-expanded={editingConnection}
           class="connection-disclosure"
-          disabled={connectionBusy || (editingConnection && !route.broker)}
+          disabled={connection.busy || (editingConnection && !route.broker)}
           title={route.broker
             ? `Connection settings: ${route.broker}\nSubscriptions: ${route.filters.join(", ") || "No subscriptions"}`
             : "Connect to an MQTT broker"}
@@ -1094,9 +789,8 @@
       <div class="connection-state">
         <span aria-live="polite" class:problem={statusProblem}>{status}</span>
         {#if connectionState === "failed" && !editingConnection}
-          <button
-            type="button"
-            onclick={() => void startConnection(route, true)}>Reconnect</button
+          <button type="button" onclick={() => void connection.reconnect()}
+            >Reconnect</button
           >
         {/if}
         <span aria-hidden="true" class="build-separator">·</span>
@@ -1151,18 +845,7 @@
           />
         </label>
       </div>
-      <div class="dashboard-actions" aria-label="Dashboard">
-        <button disabled={!route.broker} type="button" onclick={saveDashboard}
-          >Save</button
-        >
-        <button type="button" onclick={openDashboardFile}>Load…</button>
-        <button
-          disabled={!route.broker}
-          title="Copy a self-contained link for the complete dashboard"
-          type="button"
-          onclick={copyDashboardLink}>Copy dashboard</button
-        >
-      </div>
+      <DashboardActions {route} onload={applyDashboard} />
     </div>
     {#if topicSnapshot.collectionStopped}
       <span class="header-notice problem" role="status">
@@ -1178,62 +861,15 @@
         >{connectionNotice}</span
       >
     {/if}
-    {#if dashboardNotice}
-      <span class="header-notice meta" aria-live="polite"
-        >{dashboardNotice}</span
-      >
-    {/if}
     {#if editingConnection}
-      <form
-        autocomplete="on"
-        class="connection-editor"
-        onsubmit={submitConnectionEdit}
-      >
-        <ConnectionFields
-          bind:broker={formBroker}
-          bind:filters={formFilters}
-          bind:username
-          bind:password
+      {#key JSON.stringify([route.broker, route.filters])}
+        <ConnectionEditor
+          target={route}
+          {connection}
+          onapply={applyConnection}
+          oncancel={cancelConnectionEdit}
         />
-        {#if route.broker && formBroker.trim() !== route.broker}
-          <p class="meta">
-            Changing broker clears this tab's history and plots.
-          </p>
-        {:else if route.broker && !transportDraftMatches}
-          <p class="meta">
-            Changing credentials reconnects and keeps history and plots.
-          </p>
-        {/if}
-        <div class="connection-editor-actions">
-          <button
-            disabled={connectionBusy ||
-              (Boolean(session) &&
-                connectionState !== "failed" &&
-                connectionDraftMatches)}
-            type="submit">{session ? "Apply" : "Connect"}</button
-          >
-          {#if session}
-            <button
-              disabled={connectionBusy || !connectionDraftMatches}
-              type="button"
-              title="Reconnect using the applied settings"
-              onclick={() => {
-                editingConnection = false;
-                void startConnection(route, true);
-              }}>Reconnect</button
-            >
-            <button
-              disabled={!canResubscribe}
-              title="Request retained values again and retry rejected filters"
-              type="button"
-              onclick={resubscribeFromForm}>Refresh subscriptions</button
-            >
-          {/if}
-          {#if route.broker}
-            <button type="button" onclick={cancelConnectionEdit}>Cancel</button>
-          {/if}
-        </div>
-      </form>
+      {/key}
     {/if}
   </header>
 
@@ -1296,7 +932,6 @@
           <TreeView
             roots={visibleTopics.roots}
             nodes={visibleTopics.nodes}
-            revision={topicSnapshot.revision}
             selected={selectedTopicId}
             expanded={visibleTopicExpanded}
             fixedExpanded={Boolean(topicSearch.trim())}

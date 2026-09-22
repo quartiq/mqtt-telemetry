@@ -15,7 +15,6 @@
   type Props = {
     roots: string[];
     nodes: Map<string, TreeNodeView>;
-    revision?: number;
     selected: string;
     expanded: Set<string>;
     fixedExpanded?: boolean;
@@ -32,7 +31,6 @@
   let {
     roots,
     nodes,
-    revision = 0,
     selected,
     expanded,
     fixedExpanded = false,
@@ -54,14 +52,10 @@
     move,
     check: (id) => oncheck?.(id),
   };
-  let visible = $derived.by(() => {
-    revision;
-    return visibleTreeIds(roots, nodes, expanded);
-  });
+  let visible = $derived(visibleTreeIds(roots, nodes, expanded));
   let tabStop = $derived(treeTabStopId(selected, visible, nodes));
   let context: TreeContext = $derived({
     nodes,
-    revision,
     selected,
     tabStop,
     expanded,

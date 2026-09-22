@@ -33,7 +33,6 @@ export type TreeActivity = {
 
 export type TreeContext = {
   nodes: Map<string, TreeNodeView>;
-  revision: number;
   selected: string;
   tabStop: string;
   expanded: Set<string>;

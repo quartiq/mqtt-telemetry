@@ -22,12 +22,20 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --ignore-scripts
+      - run: npx playwright install --with-deps --no-shell chromium
       - run: npm run format:check
       - run: npm test
       - run: npm run build
         env:
           MQTT_TELEMETRY_BUILD_COMMIT: ${{ github.sha }}
       - run: npm run test:browser
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: browser-failures
+          path: .codex/test-results
+          include-hidden-files: true
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v7
         with:
           archive: false

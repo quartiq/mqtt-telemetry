@@ -13,20 +13,14 @@
   };
 
   let { id, context, depth = 0, index = 1, size = 1 }: Props = $props();
-  let node = $derived.by(() => {
-    context.revision;
-    return context.nodes.get(id) as TreeNodeView;
-  });
+  let node = $derived(context.nodes.get(id) as TreeNodeView);
   let internal = $derived(node.children.length > 0);
   let open = $derived(context.expanded.has(node.id));
   let active = $derived(context.selected === node.id);
   let checkable = $derived(context.checkable.has(node.id));
   let checked = $derived(context.checked.has(node.id));
   let checkBlocked = $derived(checkable && !checked && context.checkDisabled);
-  let activity = $derived.by(() => {
-    context.revision;
-    return context.activity.get(node.id);
-  });
+  let activity = $derived(context.activity.get(node.id));
   const activityDurationMs = 1100;
 
   function indicateActivity(node: HTMLElement, initial?: typeof activity) {
@@ -190,8 +184,9 @@
     min-width: 0;
   }
 
-  /* Only leaves have a predictable height before their first layout. */
-  li:not(:has(> ul)) {
+  /* Keep the accessible row itself rendered while skipping its offscreen content.
+     Only leaves have a predictable height before their first layout. */
+  li:not(:has(> ul)) > [role="treeitem"] {
     content-visibility: auto;
     contain-intrinsic-block-size: var(--tree-row-height);
   }
