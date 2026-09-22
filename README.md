@@ -12,7 +12,7 @@ Use one MQTT subscription filter per line. Start with the topics you need: `#` o
 
 History lives in the current tab and is lost on reload. Storage is bounded: older messages are pruned, preserving each topic’s latest received value, the topic tree, and your plots. The latest value is kept even beyond the history age limit. Clearing history keeps topics and pins; resetting collected data also forgets topics. If capacity is exhausted, the app explains what stopped and how to recover.
 
-Credentials are remembered for reload using this tab’s session storage, when available.
+Credentials are remembered for the active broker using this tab’s session storage, when available. Changing the broker clears them.
 
 Subscription edits and reconnects preserve the workspace. Changing the broker URL starts fresh. Messages missed during a connection interruption cannot be recovered.
 
@@ -39,10 +39,11 @@ npm run dev
 npm run format:check
 npm test
 npm run build
+npx playwright install --no-shell chromium
 npm run test:browser
 ```
 
-The build checks Svelte and produces the self-contained `dist/index.html`. Browser checks use a local MQTT fixture and require Chrome or Chromium; set `CHROME_BIN` if needed.
+The build checks Svelte and produces the self-contained `dist/index.html`.
 
 ## License
 

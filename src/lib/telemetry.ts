@@ -54,7 +54,6 @@ type TopicNodeView = TreeNodeView & {
 export type TopicSnapshot = {
   roots: string[];
   nodes: Map<string, TopicNodeView>;
-  revision: number;
   topicCount: number;
   bufferedMessages: number;
   topicsOmitted: boolean;
@@ -237,7 +236,7 @@ const MAX_PLOT_CACHE_ENTRIES = 16;
 export class TelemetryStore {
   private readonly nodes = new Map<string, TopicNode>();
   private readonly topicIds = new Map<string, string>();
-  private readonly views = new Map<string, TopicNodeView>();
+  private views = new Map<string, TopicNodeView>();
   private readonly dirtyViews = new Set<string>();
   private roots: string[] = [];
   private readonly unsorted = new Set<string | undefined>();
@@ -256,7 +255,8 @@ export class TelemetryStore {
   >();
   private historyBytes = 0;
   private sequence = 0;
-  private revision = 0;
+  private readonly listeners = new Set<(store: TelemetryStore) => void>();
+  private notification?: ReturnType<typeof setTimeout>;
   private topicCount = 0;
   private topicBytes = 0;
   private topicsOmitted = false;
@@ -273,6 +273,31 @@ export class TelemetryStore {
     this.limits = { ...DEFAULT_STORE_LIMITS, ...limits };
   }
 
+  // Svelte's store contract: arrivals are batched, explicit edits are immediate.
+  // Storage itself is synchronous, including when there are no subscribers.
+  subscribe(listener: (store: TelemetryStore) => void): () => void {
+    this.listeners.add(listener);
+    listener(this);
+    return () => {
+      this.listeners.delete(listener);
+      if (!this.listeners.size) {
+        clearTimeout(this.notification);
+        this.notification = undefined;
+      }
+    };
+  }
+
+  private changed(batch = false): void {
+    if (!this.listeners.size) return;
+    if (batch) {
+      this.notification ??= setTimeout(() => this.changed(), 100);
+      return;
+    }
+    clearTimeout(this.notification);
+    this.notification = undefined;
+    for (const listener of this.listeners) listener(this);
+  }
+
   add(
     topic: string,
     payload: Uint8Array,
@@ -286,7 +311,7 @@ export class TelemetryStore {
     if (this.collectionStopped) return undefined;
     const nodeId = this.topicIds.get(topic) ?? this.addTopic(topic);
     if (!nodeId) {
-      if (!this.topicsOmitted) this.revision += 1;
+      if (!this.topicsOmitted) this.changed(true);
       this.topicsOmitted = true;
       return undefined;
     }
@@ -328,7 +353,7 @@ export class TelemetryStore {
         this.limits.maxHistoryMessages
     ) {
       this.collectionStopped = true;
-      this.revision += 1;
+      this.changed(true);
       return undefined;
     }
     if (!node.published) {
@@ -351,7 +376,7 @@ export class TelemetryStore {
     const excess = node.history.size - this.historyLimit;
     if (excess > 0) this.dropOldest(nodeId, excess, true);
     this.enforceGlobalBudget();
-    this.revision += 1;
+    this.changed(true);
     return { nodeId, message };
   }
 
@@ -418,7 +443,7 @@ export class TelemetryStore {
       const excess = node.history.size - limit;
       if (excess > 0) this.dropOldest(node.id, excess, true);
     }
-    this.revision += 1;
+    this.changed();
   }
 
   expireBefore(cutoff: number): number {
@@ -432,7 +457,7 @@ export class TelemetryStore {
       removed += 1;
     }
     for (const [id, count] of expired) this.dropOldest(id, count, true);
-    if (removed) this.revision += 1;
+    if (removed) this.changed();
     return removed;
   }
 
@@ -441,7 +466,7 @@ export class TelemetryStore {
     if (!node?.history.size) return;
     this.dropOldest(id, node.history.size);
     this.collectionStopped = false;
-    this.revision += 1;
+    this.changed();
   }
 
   clearSubtree(id: string): void {
@@ -454,7 +479,7 @@ export class TelemetryStore {
       if (node.history.size) this.dropOldest(node.id, node.history.size);
     }
     if (this.messages.size < before) this.collectionStopped = false;
-    this.revision += 1;
+    this.changed();
   }
 
   clearAllHistory(): void {
@@ -465,7 +490,7 @@ export class TelemetryStore {
     for (const node of this.nodes.values()) {
       if (node.history.size) this.dropOldest(node.id, node.history.size);
     }
-    this.revision += 1;
+    this.changed();
   }
 
   ancestorIds(id: string): string[] {
@@ -494,12 +519,12 @@ export class TelemetryStore {
       }
     }
     this.unsorted.clear();
+    if (this.dirtyViews.size) this.views = new Map(this.views);
     for (const id of this.dirtyViews) this.views.set(id, this.nodeView(id));
     this.dirtyViews.clear();
     return {
       roots: this.roots,
       nodes: this.views,
-      revision: this.revision,
       topicCount: this.topicCount,
       bufferedMessages: this.messages.size,
       topicsOmitted: this.topicsOmitted,

@@ -254,8 +254,7 @@ pre {
   font-size: var(--text-small);
 }
 
-.header-controls,
-.dashboard-actions {
+.header-controls {
   align-items: baseline;
   display: flex;
   flex-wrap: wrap;
@@ -274,24 +273,6 @@ pre {
 .build-separator {
   color: var(--muted);
   font-size: var(--text-small);
-}
-
-.dashboard-file {
-  display: none;
-}
-
-.connection-editor {
-  border-top: 1px solid var(--border);
-  display: grid;
-  gap: var(--space);
-  grid-column: 1 / -1;
-  padding-top: var(--space);
-}
-
-.connection-editor-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-tight);
 }
 
 .problem,
