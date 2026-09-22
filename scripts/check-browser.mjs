@@ -80,17 +80,18 @@ function publish(topic, value, retain = false) {
 mkdirSync(".codex", { recursive: true });
 const profile = mkdtempSync(resolve(".codex/browser-check-"));
 let chrome;
+let stderr = "";
 const pending = new Map();
 const errors = [];
 let sequence = 0;
 let sessionId;
-function command(method, params = {}, session = sessionId) {
+function command(method, params = {}, session = sessionId, timeout = 10_000) {
   const id = ++sequence;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id);
-      reject(new Error(`Browser command timed out: ${method}`));
-    }, 10_000);
+      reject(new Error(`Browser command timed out: ${method}\n${stderr}`));
+    }, timeout);
     pending.set(id, { resolve, reject, timer });
     chrome.stdio[3].write(
       JSON.stringify({
@@ -184,9 +185,12 @@ try {
         "--headless=new",
         "--no-sandbox",
         "--disable-dev-shm-usage",
+        // Fresh CI profiles must not run interactive first-launch setup.
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--no-startup-window",
         "--remote-debugging-pipe",
         `--user-data-dir=${profile}`,
-        "about:blank",
       ],
       { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] },
     );
@@ -202,9 +206,8 @@ try {
     chrome,
     "Set CHROME_BIN to an installed Chrome or Chromium executable.",
   );
-  let stderr = "";
   chrome.stderr.on("data", (data) => {
-    stderr += data;
+    stderr = (stderr + data).slice(-16_384);
   });
   chrome.on("exit", () => {
     for (const { reject, timer } of pending.values()) {
@@ -237,9 +240,15 @@ try {
       }
     }
   });
-  const { targetId } = await command("Target.createTarget", {
-    url: "about:blank",
-  });
+  // Cold browser startup gets its own budget; app commands keep the short one.
+  const { targetId } = await command(
+    "Target.createTarget",
+    { url: "about:blank" },
+    null,
+    30_000,
+  );
+  const version = await command("Browser.getVersion", {}, null);
+  console.log(`Browser: ${version.product} (${version.revision})`);
   ({ sessionId } = await command("Target.attachToTarget", {
     targetId,
     flatten: true,
