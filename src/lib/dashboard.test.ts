@@ -32,6 +32,23 @@ const route: AppRoute = {
 };
 
 describe("dashboard files", () => {
+  it("restores disconnected history settings without accepting brokerless dashboard files", () => {
+    const disconnected = {
+      ...defaultRoute(),
+      historyLimit: 42,
+      timeZone: "utc" as const,
+    };
+    const state = browserViewState(disconnected, "tab", null);
+    expect(routeFromViewState(state)).toEqual(disconnected);
+    expect(() => parseDashboard(state.dashboard)).toThrow("broker");
+    expect(
+      routeFromViewState({
+        ...state,
+        dashboard: { ...state.dashboard, broker: "invalid" },
+      }),
+    ).toBeUndefined();
+  });
+
   it("creates cloneable browser state and restores transient selection", () => {
     const reactiveLikeRoute = {
       ...route,

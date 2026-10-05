@@ -6,17 +6,17 @@
 
   type Props = {
     value: number;
-    onchange: (value: number) => boolean | void;
+    onchange: (value: number) => void;
     ageMs: number | null;
-    onagechange: (value: number | null) => boolean | void;
+    onagechange: (value: number | null) => void;
   };
 
   let { value, onchange, ageMs, onagechange }: Props = $props();
 
   function commit(event: Event) {
     const input = event.currentTarget as HTMLInputElement;
-    if (!input.reportValidity() || onchange(Number(input.value)) === false)
-      input.value = String(value);
+    if (input.reportValidity()) onchange(Number(input.value));
+    else input.value = String(value);
   }
 </script>
 

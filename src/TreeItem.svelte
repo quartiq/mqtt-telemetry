@@ -66,6 +66,12 @@
   }
 
   function keydown(event: KeyboardEvent) {
+    // Nested controls retain their native activation; arrows still navigate the tree.
+    if (
+      event.target !== event.currentTarget &&
+      (event.key === "Enter" || event.key === " ")
+    )
+      return;
     const directions: Record<string, TreeDirection> = {
       ArrowDown: "next",
       ArrowUp: "previous",

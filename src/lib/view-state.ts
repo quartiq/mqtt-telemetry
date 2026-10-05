@@ -1,6 +1,6 @@
 import {
   dashboardFromRoute,
-  parseDashboard,
+  parseDashboardState,
   routeFromDashboard,
   type Dashboard,
 } from "./dashboard";
@@ -34,7 +34,7 @@ export function browserViewState(
 export function routeFromViewState(state: unknown): AppRoute | undefined {
   if (!isViewState(state)) return undefined;
   try {
-    const base = routeFromDashboard(parseDashboard(state.dashboard));
+    const base = routeFromDashboard(parseDashboardState(state.dashboard));
     const parsedField =
       typeof state.fieldPath === "string"
         ? parseJsonPath(state.fieldPath)

@@ -486,7 +486,6 @@ export class TelemetryStore {
     this.plotCache.clear();
     this.collectionStopped = false;
     this.historyLimited = false;
-    if (!this.messages.size) return;
     for (const node of this.nodes.values()) {
       if (node.history.size) this.dropOldest(node.id, node.history.size);
     }

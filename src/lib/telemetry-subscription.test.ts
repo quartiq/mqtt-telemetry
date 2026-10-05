@@ -45,3 +45,18 @@ it("publishes explicit edits immediately and releases pending work on unsubscrib
   expect(listener).toHaveBeenCalledTimes(2);
   expect(vi.getTimerCount()).toBe(0);
 });
+
+it("publishes recovery when clearing a stopped store with no accepted messages", () => {
+  vi.useFakeTimers();
+  const store = new TelemetryStore(10, { maxHistoryBytes: 128 });
+  let stopped = false;
+  const unsubscribe = store.subscribe((value) => {
+    stopped = value.snapshot().collectionStopped;
+  });
+  store.add("a", new Uint8Array([49]), { receivedAt: 0, retained: false });
+  vi.runAllTimers();
+  expect(stopped).toBe(true);
+  store.clearAllHistory();
+  expect(stopped).toBe(false);
+  unsubscribe();
+});
