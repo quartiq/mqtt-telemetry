@@ -28,22 +28,15 @@ export type PlotStatistics = {
   standardDeviation: number;
 };
 
-export function plotSeries(
-  history: Iterable<TelemetryMessage>,
-  path: JsonPath,
-): PlotSeries {
-  return plotSeriesAtPath(history, path);
-}
-
 export function plotSeriesPath(
   history: Iterable<TelemetryMessage>,
   singularPath: string,
 ): PlotSeries {
   const path = parseJsonPath(singularPath);
-  return path ? plotSeriesAtPath(history, path) : emptyPlotSeries();
+  return path ? plotSeries(history, path) : { points: [], retainedExcluded: 0 };
 }
 
-function plotSeriesAtPath(
+export function plotSeries(
   history: Iterable<TelemetryMessage>,
   path: JsonPath,
 ): PlotSeries {
@@ -88,10 +81,6 @@ function plotSeriesAtPath(
   };
 }
 
-function emptyPlotSeries(): PlotSeries {
-  return { points: [], retainedExcluded: 0 };
-}
-
 export function plotStatistics(
   points: readonly PlotPoint[],
 ): PlotStatistics | undefined {
@@ -121,13 +110,10 @@ export function nearestPlotPoint(
   time: number,
 ): PlotPoint | undefined {
   if (!points.length) return undefined;
-  let low = 0;
-  let high = points.length - 1;
-  while (low < high) {
-    const middle = Math.floor((low + high) / 2);
-    if (points[middle].x < time) low = middle + 1;
-    else high = middle;
-  }
+  const low = Math.min(
+    plotPointInsertionIndex(points, time),
+    points.length - 1,
+  );
   if (!low) return points[0];
   const before = points[low - 1];
   const after = points[low];

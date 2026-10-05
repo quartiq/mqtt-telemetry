@@ -929,6 +929,10 @@ describe("plot extraction", () => {
     expect(nearestPlotPoint(points, 30)).toBe(points[1]);
     expect(nearestPlotPoint(points, 100)).toBe(points[2]);
     expect(nearestPlotPoint([], 10)).toBeUndefined();
+    const duplicate = { x: 20, y: 3, segment: 0 };
+    const coincident = [points[0], points[1], duplicate, points[2]];
+    expect(nearestPlotPoint(coincident, 20)).toBe(points[1]);
+    expect(nearestPlotPoint(coincident, 30)).toBe(duplicate);
   });
 
   it("finds an inclusive visible plot range at exact boundaries", () => {

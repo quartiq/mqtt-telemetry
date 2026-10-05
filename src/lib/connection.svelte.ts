@@ -15,6 +15,7 @@ export class Connection {
   state = $state<"idle" | "connecting" | SessionStatus["state"]>("idle");
   error = $state("");
   notice = $state("");
+  credentialsNotSaved = $state(false);
   auth = $state.raw<SessionAuth>({ username: "", password: "" });
   needsCredentials = $state(false);
   busy = $derived(
@@ -25,6 +26,7 @@ export class Connection {
   private target: ConnectionTarget = { broker: "", filters: [] };
   private lifetime = new AbortController();
   private interrupted = false;
+  private opening?: Promise<void>;
 
   constructor(
     private readonly callbacks: {
@@ -59,6 +61,7 @@ export class Connection {
     }
     this.target = { broker: target.broker, filters: [...target.filters] };
     this.auth = auth;
+    if (brokerChanged || authChanged) this.credentialsNotSaved = false;
     // Only an explicit form submission can release a pending login. Changing
     // subscriptions or loading a dashboard for this broker cannot authorize it.
     this.needsCredentials =
@@ -70,6 +73,10 @@ export class Connection {
       this.close();
       this.state = "idle";
       this.error = this.notice = "";
+      return;
+    }
+    if (this.opening && !brokerChanged && !authChanged && !filtersChanged) {
+      await this.opening;
       return;
     }
     if (
@@ -93,6 +100,16 @@ export class Connection {
 
   async reconnect(): Promise<void> {
     if (!this.target.broker || this.needsCredentials) return;
+    const pending = this.open();
+    this.opening = pending;
+    try {
+      await pending;
+    } finally {
+      if (this.opening === pending) this.opening = undefined;
+    }
+  }
+
+  private async open(): Promise<void> {
     const interrupted = this.interrupted || Boolean(this.session);
     this.close();
     this.lifetime = new AbortController();
@@ -122,9 +139,8 @@ export class Connection {
         return;
       }
       this.session = session;
-      if (!rememberAuth(broker, auth) && (auth.username || auth.password))
-        this.notice =
-          "Credentials will not survive reload: browser storage unavailable.";
+      this.credentialsNotSaved =
+        !rememberAuth(broker, auth) && Boolean(auth.username || auth.password);
       this.callbacks.ready();
     } catch (error) {
       if (signal.aborted) return;
@@ -148,6 +164,7 @@ export class Connection {
 
   close(): void {
     this.lifetime.abort();
+    this.opening = undefined;
     this.session?.close();
     this.session = undefined;
   }

@@ -2,6 +2,16 @@ import type { TelemetryMessage } from "./telemetry";
 
 export type DisplayTimeZone = "local" | "utc";
 
+// Wall time includes suspend. Clamp backwards corrections until it catches up:
+// history expiration and plot searches require nondecreasing receipt times.
+export function createTelemetryClock(): () => number {
+  let last = Date.now();
+  return () => {
+    last = Math.max(last, Date.now());
+    return last;
+  };
+}
+
 const formatters = new Map<string, Intl.DateTimeFormat>();
 
 export function formatTelemetryTime(

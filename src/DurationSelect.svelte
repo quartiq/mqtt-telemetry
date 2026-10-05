@@ -8,7 +8,7 @@
     noneLabel: string;
     ariaLabel: string;
     prefix?: string;
-    onchange: (value: number | null) => boolean | void;
+    onchange: (value: number | null) => void;
   };
 
   let { value, noneLabel, ariaLabel, prefix = "", onchange }: Props = $props();
@@ -19,7 +19,7 @@
   function commit(event: Event) {
     const select = event.currentTarget as HTMLSelectElement;
     const next = select.value ? Number(select.value) : null;
-    if (onchange(next) === false) select.value = String(value ?? "");
+    onchange(next);
   }
 </script>
 

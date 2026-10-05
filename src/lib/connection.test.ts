@@ -9,6 +9,7 @@ vi.mock("./session-auth", () => ({ rememberAuth: vi.fn(() => true) }));
 afterEach(() => vi.clearAllMocks());
 
 function fixture() {
+  vi.mocked(rememberAuth).mockReturnValue(true);
   const callbacks = {
     message: vi.fn(),
     starting: vi.fn(),
@@ -31,6 +32,44 @@ const first = { broker: "ws://one/mqtt", filters: ["a/#"] };
 const auth = { username: "alice", password: "secret" };
 
 describe("applied connection", () => {
+  it("reuses an opening attempt for the same target", async () => {
+    const { connection, callbacks, session } = fixture();
+    let finish!: (session: MqttSession) => void;
+    let signal!: AbortSignal;
+    vi.mocked(MqttSession.connect).mockImplementationOnce(
+      (_broker, _filters, _handlers, options) => {
+        signal = options!.signal!;
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      },
+    );
+    const opening = connection.apply(first, { auth });
+    const repeated = connection.apply(first);
+    expect(MqttSession.connect).toHaveBeenCalledOnce();
+    expect(signal.aborted).toBe(false);
+    finish(session as unknown as MqttSession);
+    await Promise.all([opening, repeated]);
+    expect(connection.session).toBe(session);
+    expect(callbacks.ready).toHaveBeenCalledOnce();
+  });
+
+  it("keeps credential persistence failure visible across subscription updates", async () => {
+    const { connection, session } = fixture();
+    vi.mocked(rememberAuth).mockReturnValue(false);
+    await connection.apply(first, { auth });
+    expect(connection.credentialsNotSaved).toBe(true);
+    const handlers = vi.mocked(MqttSession.connect).mock.calls[0][2];
+    session.setFilters.mockImplementation(async () => {
+      handlers.status({ state: "connected", rejected: [] });
+    });
+    await connection.apply({ ...first, filters: ["b/#"] });
+    expect(connection.credentialsNotSaved).toBe(true);
+    vi.mocked(rememberAuth).mockReturnValue(true);
+    await connection.reconnect();
+    expect(connection.credentialsNotSaved).toBe(false);
+  });
+
   it("keeps previously stored credentials when initial connection fails", async () => {
     const { connection } = fixture();
     vi.mocked(MqttSession.connect).mockRejectedValueOnce(

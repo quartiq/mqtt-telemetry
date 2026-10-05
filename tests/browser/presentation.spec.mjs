@@ -1,6 +1,58 @@
 import { expect } from "@playwright/test";
 import { test, seedDashboard, dimensions } from "./fixtures.mjs";
 
+test("receipt times, plot windows, and expiration catch up after suspend", async ({
+  page,
+  broker,
+}) => {
+  await page.getByLabel("Displayed time zone").selectOption("utc");
+  await page.getByLabel("Plot time window").selectOption("60000");
+  await page.getByLabel("Age limit for older history").selectOption("60000");
+  await seedDashboard(page, broker);
+  broker.publish("sample", { field0: 1 });
+  await page.locator(".history-disclosure").click();
+  await expect(page.locator(".history-panel .message-row")).toHaveCount(2);
+
+  // Model a sleeping elapsed-time clock: only wall time advances eight hours.
+  const resumedTime = await page.evaluate(() => {
+    const resumed =
+      Math.ceil((Date.now() + 8 * 60 * 60 * 1000) / 60_000) * 60_000;
+    Date.now = () => resumed;
+    return new Date(resumed).toISOString().slice(11, 19);
+  });
+  broker.publish("sample", { field0: 2 });
+  await expect(page.locator(".history-panel .message-row")).toHaveCount(1);
+  await expect(
+    page.locator(".history-panel .message-row td").first(),
+  ).toContainText(resumedTime);
+  await expect(page.locator(".plot-panel svg circle")).toHaveCount(1);
+  await expect(page.locator(".plot-panel .x-label").last()).toContainText(
+    resumedTime,
+  );
+});
+
+test("quiet history adds the date after midnight without plots or expiration", async ({
+  page,
+  broker,
+}) => {
+  await page.getByLabel("Displayed time zone").selectOption("utc");
+  const before = await page.evaluate(() => {
+    const time = Math.floor(Date.now() / 86_400_000) * 86_400_000 + 86_399_000;
+    Date.now = () => time;
+    return time;
+  });
+  await seedDashboard(page, broker, 0);
+  await page.locator(".history-disclosure").click();
+  const timestamp = page.locator(".history-panel .message-row td").first();
+  const date = new Date(before).toISOString().slice(0, 10);
+  await expect(timestamp).toContainText("23:59:59");
+  await expect(timestamp).not.toContainText(date);
+  await page.evaluate((time) => {
+    Date.now = () => time;
+  }, before + 2000);
+  await expect(timestamp).toContainText(date);
+});
+
 test("the standalone artifact renders compact empty panes", async ({
   page,
   baseURL,
@@ -96,6 +148,11 @@ test("touch pinning obeys the plot limit and keyboard removal still works", asyn
   await expect(
     page.locator('.message-tree [data-tree-id="$.field10"] .plot-toggle'),
   ).toBeEnabled();
+  await page
+    .locator('.message-tree [data-tree-id="$.field1"] .plot-toggle')
+    .focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".plot-panel")).toHaveCount(8);
 });
 
 test("plot rendering distinguishes narrow values and breaks missing-field runs", async ({

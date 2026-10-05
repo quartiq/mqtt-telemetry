@@ -142,10 +142,24 @@ export function parseDashboardJson(json: string): Dashboard {
 }
 
 export function parseDashboard(value: unknown): Dashboard {
+  const dashboard = parseDashboardState(value);
+  if (!dashboard.broker)
+    throw new Error(
+      "Dashboard broker must be a ws:// or wss:// URL without credentials.",
+    );
+  return dashboard;
+}
+
+// Browser history also stores the disconnected workspace. Exported dashboards
+// additionally require a broker, enforced by parseDashboard at that boundary.
+export function parseDashboardState(value: unknown): Dashboard {
   if (!isRecord(value)) throw new Error("Dashboard must be a JSON object.");
   if (value.format !== DASHBOARD_FORMAT || value.version !== DASHBOARD_VERSION)
     throw new Error("Unsupported MQTT Telemetry dashboard format or version.");
-  if (typeof value.broker !== "string" || webSocketBrokerError(value.broker))
+  if (
+    typeof value.broker !== "string" ||
+    (value.broker !== "" && webSocketBrokerError(value.broker))
+  )
     throw new Error(
       "Dashboard broker must be a ws:// or wss:// URL without credentials.",
     );

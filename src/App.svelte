@@ -20,7 +20,7 @@
     telemetryPageTitle,
   } from "./lib/json";
   import { TelemetryStore } from "./lib/telemetry";
-  import type { DisplayTimeZone } from "./lib/time";
+  import { createTelemetryClock, type DisplayTimeZone } from "./lib/time";
   import { Connection, type ConnectionTarget } from "./lib/connection.svelte";
   import type { SessionAuth } from "./lib/mqtt-session";
   import { topicMatchesFilter } from "./lib/mqtt-filter";
@@ -52,9 +52,7 @@
     type TreeActivity,
   } from "./lib/tree";
 
-  // Keep receipt times, plot windows, and expiration on the same monotonic clock.
-  const clockOrigin = Date.now() - performance.now();
-  const telemetryNow = () => clockOrigin + performance.now();
+  const telemetryNow = createTelemetryClock();
 
   const inlineDashboard = readInlineDashboard(location.hash);
   const launchRoute = readLaunchRoute(location);
@@ -319,7 +317,8 @@
   });
 
   $effect(() => {
-    const clockNeeded = route.historyAgeMs !== null || route.plots.length > 0;
+    const clockNeeded =
+      historyExpanded || route.historyAgeMs !== null || route.plots.length > 0;
     if (!clockNeeded) return;
     let timer = 0;
     const tick = () => {
@@ -594,8 +593,8 @@
     writeRoute(route, null);
   }
 
-  function changeHistoryLimit(limit: number): boolean {
-    if (limit === route.historyLimit) return true;
+  function changeHistoryLimit(limit: number): void {
+    if (limit === route.historyLimit) return;
     store.setHistoryLimit(limit);
     const id = selectedMessageId;
     const nextMessageId = currentHistory.some((message) => message.id === id)
@@ -603,22 +602,19 @@
       : null;
     selectedMessageId = nextMessageId;
     writeRoute({ ...route, historyLimit: limit }, nextMessageId);
-    return true;
   }
 
-  function changeHistoryAge(ageMs: number | null): boolean {
-    if (ageMs === route.historyAgeMs) return true;
+  function changeHistoryAge(ageMs: number | null): void {
+    if (ageMs === route.historyAgeMs) return;
     plotNow = telemetryNow();
     if (ageMs !== null) store.expireBefore(plotNow - ageMs);
     writeRoute({ ...route, historyAgeMs: ageMs }, selectedMessageId);
-    return true;
   }
 
-  function changePlotWindow(windowMs: number | null): boolean {
-    if (windowMs === route.plotWindowMs) return true;
+  function changePlotWindow(windowMs: number | null): void {
+    if (windowMs === route.plotWindowMs) return;
     plotNow = telemetryNow();
     writeRoute({ ...route, plotWindowMs: windowMs }, selectedMessageId);
-    return true;
   }
 
   function plotKey(plot: PlotRef): string {
@@ -861,6 +857,11 @@
         >{connectionNotice}</span
       >
     {/if}
+    {#if connection.credentialsNotSaved}
+      <span class="header-notice meta" role="status">
+        Credentials will not survive reload: browser storage unavailable.
+      </span>
+    {/if}
     {#if editingConnection}
       {#key JSON.stringify([route.broker, route.filters])}
         <ConnectionEditor
@@ -985,6 +986,7 @@
     />
     <HistoryTable
       expanded={historyExpanded}
+      now={plotNow}
       messages={currentHistory}
       selectedId={selectedMessageId}
       field={activeField}

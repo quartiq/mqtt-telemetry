@@ -21,6 +21,7 @@
     selectedId: number | null;
     field: JsonPath | undefined;
     timeZone: DisplayTimeZone;
+    now: number;
     canClearTopic: boolean;
     canClearSubtree: boolean;
     canClearAll: boolean;
@@ -38,6 +39,7 @@
     selectedId,
     field,
     timeZone,
+    now,
     canClearTopic,
     canClearSubtree,
     canClearAll,
@@ -85,7 +87,7 @@
     return ids;
   });
   let showDate = $derived.by(() => {
-    return historyNeedsDate(messages, Date.now(), timeZone);
+    return historyNeedsDate(messages, now, timeZone);
   });
   let hasStatistics = $derived(
     Boolean(frequency || span || retained || duplicates || gapBefore.size),
