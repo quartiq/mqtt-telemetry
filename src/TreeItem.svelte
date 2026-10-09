@@ -23,7 +23,7 @@
   let activity = $derived(context.activity.get(node.id));
   const activityDurationMs = 1100;
 
-  function indicateActivity(node: HTMLElement, initial?: typeof activity) {
+  function indicateActivity(node: SVGElement, initial?: typeof activity) {
     let timer = 0;
     const run = (next?: typeof activity) => {
       clearTimeout(timer);
@@ -118,7 +118,11 @@
     onkeydown={keydown}
   >
     {#if internal && context.fixedExpanded}
-      <span aria-hidden="true" class="control-slot fixed-caret">▾</span>
+      <span aria-hidden="true" class="control-slot fixed-caret"
+        ><svg class="caret-mark open" viewBox="0 0 10 10"
+          ><path d="M0 0 10 5 0 10Z" /></svg
+        ></span
+      >
     {:else if internal}
       <button
         aria-label={open ? "Collapse" : "Expand"}
@@ -126,16 +130,33 @@
         tabindex="-1"
         type="button"
         ondblclick={(event) => event.stopPropagation()}
-        onclick={toggle}>{open ? "▾" : "▸"}</button
+        onclick={toggle}
+        ><svg
+          aria-hidden="true"
+          class="caret-mark"
+          class:open
+          viewBox="0 0 10 10"><path d="M0 0 10 5 0 10Z" /></svg
+        ></button
       >
     {:else}
       <span aria-hidden="true" class="control-slot"></span>
+    {/if}
+    {#if context.showActivity}
+      <span aria-hidden="true" class="activity-slot">
+        <svg
+          class="activity-dot"
+          viewBox="0 0 10 10"
+          use:indicateActivity={activity}
+        >
+          <circle cx="5" cy="5" r="5" />
+        </svg>
+      </span>
     {/if}
     {#if checkable}
       <button
         aria-label={checked ? "Remove plot" : "Add plot"}
         aria-pressed={checked}
-        class="plot-toggle"
+        class="plot-toggle plot-slot"
         disabled={checkBlocked}
         tabindex="-1"
         title={checkBlocked
@@ -150,13 +171,8 @@
         ></button
       >
     {:else}
-      <span aria-hidden="true" class="control-slot"></span>
+      <span aria-hidden="true" class="control-slot plot-slot"></span>
     {/if}
-    <span aria-hidden="true" class="activity-slot">
-      {#if context.showActivity}
-        <span class="activity-dot" use:indicateActivity={activity}></span>
-      {/if}
-    </span>
     <span class="label">{node.label}</span>
     {#if node.suffix !== undefined}
       <span class="suffix">{" "}{node.suffix}</span>
@@ -230,17 +246,15 @@
     align-items: center;
     align-self: stretch;
     display: flex;
-    flex: 0 0 8px;
+    flex: 0 0 calc(var(--activity-size) + var(--space-tight));
     justify-content: center;
-    margin-right: 0.2rem;
   }
 
   .activity-dot {
-    background: currentColor;
-    border-radius: 50%;
-    height: 0.4rem;
+    fill: currentColor;
+    height: var(--activity-size);
     opacity: 0;
-    width: 0.4rem;
+    width: var(--activity-size);
   }
 
   .caret,
@@ -250,11 +264,8 @@
     width: var(--tree-control);
   }
 
-  .fixed-caret {
-    text-align: center;
-  }
-
   .caret,
+  .fixed-caret,
   .plot-toggle {
     appearance: none;
     align-items: center;
@@ -264,18 +275,40 @@
     color: inherit;
     display: flex;
     font: inherit;
-    justify-content: center;
     line-height: 1;
     margin: 0;
     min-height: 0;
     padding: 0;
   }
 
+  .fixed-caret,
+  .caret {
+    padding-right: var(--space-tight);
+    justify-content: flex-end;
+  }
+
+  .caret-mark {
+    fill: currentColor;
+    flex: none;
+    height: var(--caret-size);
+    width: var(--caret-size);
+  }
+
+  .caret-mark.open {
+    transform: rotate(90deg);
+  }
+
+  .plot-toggle {
+    justify-content: center;
+  }
+
+  .plot-slot {
+    flex-basis: calc(var(--tree-control) + 2 * var(--space-tight));
+    width: calc(var(--tree-control) + 2 * var(--space-tight));
+  }
+
   .label {
-    flex: 0 1 auto;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    flex: none;
     white-space: nowrap;
   }
 
@@ -293,7 +326,7 @@
 
   .value {
     color: var(--muted);
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
