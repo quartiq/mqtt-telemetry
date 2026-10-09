@@ -1,6 +1,54 @@
 import { expect } from "@playwright/test";
 import { test, seedDashboard, dimensions } from "./fixtures.mjs";
 
+test("tree controls stay centered and caret survives forced colors", async ({
+  page,
+  broker,
+}) => {
+  broker.publish("sample", 1);
+  broker.publish("sample/child", 2);
+  const row = page.getByText("sample", { exact: true }).locator("..");
+  await expect(row.locator(".caret")).toBeVisible();
+  for (const filter of ["", "sample"]) {
+    await page.getByLabel("Search topic paths").fill(filter);
+    const centers = await row.evaluate((node) =>
+      [".caret-mark", ".activity-dot", ".pin-mark"].map((selector) => {
+        const rect = node.querySelector(selector).getBoundingClientRect();
+        return rect.y + rect.height / 2;
+      }),
+    );
+    expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(
+      0.5,
+    );
+  }
+  await page.emulateMedia({ forcedColors: "active" });
+  const mark = row.locator(".caret-mark");
+  const clip = await mark.boundingBox();
+  const painted = await page.screenshot({ clip });
+  await mark.evaluate((node) => (node.style.visibility = "hidden"));
+  expect(await page.screenshot({ clip })).not.toEqual(painted);
+});
+
+test("long field values preserve complete labels", async ({ page, broker }) => {
+  broker.publish("sample", { field0: "x".repeat(1000) });
+  await page.getByText("sample", { exact: true }).click();
+  const row = page.locator('.message-tree [data-tree-id="$.field0"]');
+  await expect(row.locator(".label")).toHaveText("field0");
+  for (const width of [320, 1200]) {
+    await page.setViewportSize({ width, height: 850 });
+    expect(
+      await row
+        .locator(".label")
+        .evaluate((node) => node.clientWidth === node.scrollWidth),
+    ).toBe(true);
+    expect(
+      await row
+        .locator(".value")
+        .evaluate((node) => node.clientWidth < node.scrollWidth),
+    ).toBe(true);
+  }
+});
+
 test("receipt times, plot windows, and expiration catch up after suspend", async ({
   page,
   broker,

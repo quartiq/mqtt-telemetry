@@ -118,7 +118,11 @@
     onkeydown={keydown}
   >
     {#if internal && context.fixedExpanded}
-      <span aria-hidden="true" class="control-slot fixed-caret">▾</span>
+      <span aria-hidden="true" class="control-slot fixed-caret"
+        ><svg class="caret-mark open" viewBox="0 0 10 10"
+          ><path d="M0 0 10 5 0 10Z" /></svg
+        ></span
+      >
     {:else if internal}
       <button
         aria-label={open ? "Collapse" : "Expand"}
@@ -126,7 +130,13 @@
         tabindex="-1"
         type="button"
         ondblclick={(event) => event.stopPropagation()}
-        onclick={toggle}>{open ? "▾" : "▸"}</button
+        onclick={toggle}
+        ><svg
+          aria-hidden="true"
+          class="caret-mark"
+          class:open
+          viewBox="0 0 10 10"><path d="M0 0 10 5 0 10Z" /></svg
+        ></button
       >
     {:else}
       <span aria-hidden="true" class="control-slot"></span>
@@ -250,6 +260,7 @@
   }
 
   .caret,
+  .fixed-caret,
   .plot-toggle {
     appearance: none;
     align-items: center;
@@ -268,8 +279,18 @@
   .fixed-caret,
   .caret {
     padding-right: var(--space-tight);
-    text-align: right;
     justify-content: flex-end;
+  }
+
+  .caret-mark {
+    fill: currentColor;
+    flex: none;
+    height: var(--caret-size);
+    width: var(--caret-size);
+  }
+
+  .caret-mark.open {
+    transform: rotate(90deg);
   }
 
   .plot-toggle {
@@ -282,10 +303,7 @@
   }
 
   .label {
-    flex: 0 1 auto;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    flex: none;
     white-space: nowrap;
   }
 
@@ -303,7 +321,7 @@
 
   .value {
     color: var(--muted);
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
