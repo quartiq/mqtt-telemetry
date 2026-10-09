@@ -131,11 +131,16 @@
     {:else}
       <span aria-hidden="true" class="control-slot"></span>
     {/if}
+    {#if context.showActivity}
+      <span aria-hidden="true" class="activity-slot">
+        <span class="activity-dot" use:indicateActivity={activity}></span>
+      </span>
+    {/if}
     {#if checkable}
       <button
         aria-label={checked ? "Remove plot" : "Add plot"}
         aria-pressed={checked}
-        class="plot-toggle"
+        class="plot-toggle plot-slot"
         disabled={checkBlocked}
         tabindex="-1"
         title={checkBlocked
@@ -150,13 +155,8 @@
         ></button
       >
     {:else}
-      <span aria-hidden="true" class="control-slot"></span>
+      <span aria-hidden="true" class="control-slot plot-slot"></span>
     {/if}
-    <span aria-hidden="true" class="activity-slot">
-      {#if context.showActivity}
-        <span class="activity-dot" use:indicateActivity={activity}></span>
-      {/if}
-    </span>
     <span class="label">{node.label}</span>
     {#if node.suffix !== undefined}
       <span class="suffix">{" "}{node.suffix}</span>
@@ -230,17 +230,16 @@
     align-items: center;
     align-self: stretch;
     display: flex;
-    flex: 0 0 8px;
+    flex: 0 0 calc(var(--activity-size) + var(--space-tight));
     justify-content: center;
-    margin-right: 0.2rem;
   }
 
   .activity-dot {
     background: currentColor;
     border-radius: 50%;
-    height: 0.4rem;
+    height: var(--activity-size);
     opacity: 0;
-    width: 0.4rem;
+    width: var(--activity-size);
   }
 
   .caret,
@@ -248,10 +247,6 @@
   .control-slot {
     flex: 0 0 var(--tree-control);
     width: var(--tree-control);
-  }
-
-  .fixed-caret {
-    text-align: center;
   }
 
   .caret,
@@ -264,11 +259,26 @@
     color: inherit;
     display: flex;
     font: inherit;
-    justify-content: center;
     line-height: 1;
     margin: 0;
     min-height: 0;
     padding: 0;
+  }
+
+  .fixed-caret,
+  .caret {
+    padding-right: var(--space-tight);
+    text-align: right;
+    justify-content: flex-end;
+  }
+
+  .plot-toggle {
+    justify-content: center;
+  }
+
+  .plot-slot {
+    flex-basis: calc(var(--tree-control) + 2 * var(--space-tight));
+    width: calc(var(--tree-control) + 2 * var(--space-tight));
   }
 
   .label {

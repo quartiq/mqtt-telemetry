@@ -17,6 +17,7 @@ body {
   --selected: color-mix(in srgb, Highlight 10%, transparent);
   --selected-mark: Highlight;
   --focus: Highlight;
+  --activity-size: 0.4rem;
   --error: color-mix(in srgb, red 78%, CanvasText);
   --space: 0.6rem;
   --space-tight: 0.3rem;
