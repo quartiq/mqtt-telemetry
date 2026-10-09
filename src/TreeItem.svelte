@@ -23,7 +23,7 @@
   let activity = $derived(context.activity.get(node.id));
   const activityDurationMs = 1100;
 
-  function indicateActivity(node: HTMLElement, initial?: typeof activity) {
+  function indicateActivity(node: SVGElement, initial?: typeof activity) {
     let timer = 0;
     const run = (next?: typeof activity) => {
       clearTimeout(timer);
@@ -143,7 +143,13 @@
     {/if}
     {#if context.showActivity}
       <span aria-hidden="true" class="activity-slot">
-        <span class="activity-dot" use:indicateActivity={activity}></span>
+        <svg
+          class="activity-dot"
+          viewBox="0 0 10 10"
+          use:indicateActivity={activity}
+        >
+          <circle cx="5" cy="5" r="5" />
+        </svg>
       </span>
     {/if}
     {#if checkable}
@@ -245,8 +251,7 @@
   }
 
   .activity-dot {
-    background: currentColor;
-    border-radius: 50%;
+    fill: currentColor;
     height: var(--activity-size);
     opacity: 0;
     width: var(--activity-size);

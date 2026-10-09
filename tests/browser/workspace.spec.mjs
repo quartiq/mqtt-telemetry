@@ -21,6 +21,9 @@ test("selection survives pruning and schema changes; Back restores an empty sele
   ).toHaveText(["—", "—"]);
   // Focus recovery is a DOM contract, independent of which field stays selected.
   await page.locator('.message-tree [data-tree-id="$.other"]').click();
+  await page
+    .locator('.message-tree [data-tree-id="$.other"] .plot-toggle')
+    .focus();
   broker.publish("sample", { value: 4 });
   await expect(page.locator('.message-tree [data-tree-id="$"]')).toBeFocused();
 });
