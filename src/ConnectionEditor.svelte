@@ -173,8 +173,8 @@
   .connection-editor {
     border-top: 1px solid var(--border);
     display: grid;
+    flex-basis: 100%;
     gap: var(--space);
-    grid-column: 1 / -1;
     padding-top: var(--space);
   }
 
