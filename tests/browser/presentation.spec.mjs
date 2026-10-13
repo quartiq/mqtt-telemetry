@@ -1,6 +1,46 @@
 import { expect } from "@playwright/test";
 import { test, seedDashboard, dimensions } from "./fixtures.mjs";
 
+test("header wraps without squeezing the connection or crowding out panes", async ({
+  page,
+  broker,
+}) => {
+  await seedDashboard(page, broker);
+  for (const fontSize of [13, 20]) {
+    await page.evaluate((size) => {
+      document.documentElement.style.fontSize = `${size}px`;
+    }, fontSize);
+    for (const width of [320, 390, 800, 801, 900, 1024, 1200, 1455, 1920]) {
+      await page.setViewportSize({ width, height: 900 });
+      const layout = await page.evaluate(() => {
+        const rect = (selector) =>
+          document.querySelector(selector).getBoundingClientRect();
+        const identity = rect(".identity");
+        const controls = rect(".header-controls");
+        return {
+          brokerHeight: rect(".broker-label").height,
+          headerHeight: rect(".app-header").height,
+          treeHeight: rect(".topic-tree").height,
+          overlap:
+            identity.left < controls.right &&
+            identity.right > controls.left &&
+            identity.top < controls.bottom &&
+            identity.bottom > controls.top,
+          overflow: document.documentElement.scrollWidth > innerWidth,
+        };
+      });
+      const context = `${width}px viewport, ${fontSize}px font`;
+      expect(layout.brokerHeight, context).toBeLessThan(fontSize * 3);
+      expect(layout.overlap, context).toBe(false);
+      expect(layout.overflow, context).toBe(false);
+      if (width > 800) {
+        expect(layout.headerHeight, context).toBeLessThan(300);
+        expect(layout.treeHeight, context).toBeGreaterThan(100);
+      }
+    }
+  }
+});
+
 for (const hasTouch of [false, true]) {
   test.describe(hasTouch ? "touch controls" : "mouse controls", () => {
     test.use({ hasTouch });
